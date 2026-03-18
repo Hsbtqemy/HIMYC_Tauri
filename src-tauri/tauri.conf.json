@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HIMYC",
+  "version": "0.1.0",
+  "identifier": "com.himyc.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1421"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "HIMYC",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 560,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [],
+    "shortDescription": "HIMYC — constitution et inspection de corpus transcript + SRT",
+    "longDescription": "HIMYC desktop app : constitution de corpus multi-langues, inspection source-centric et alignement. Backend Python HIMYC requis (port 8765).",
+    "copyright": "2024-2026 HIMYC",
+    "category": "DeveloperTool",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  }
+}
