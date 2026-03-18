@@ -71,7 +71,9 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return JSON.parse(res.body) as T;
 }
 
-// ── Endpoints typés ────────────────────────────────────────────────────────────
+// ── Endpoints typés (MX-003) ──────────────────────────────────────────────────
+
+// /health
 
 export interface HealthResponse {
   status: "ok";
@@ -80,4 +82,72 @@ export interface HealthResponse {
 
 export async function fetchHealth(): Promise<HealthResponse> {
   return apiGet<HealthResponse>("/health");
+}
+
+// /config
+
+export interface ConfigResponse {
+  project_name: string;
+  project_path: string;
+  languages: string[];
+  normalize_profile: string;
+}
+
+export async function fetchConfig(): Promise<ConfigResponse> {
+  return apiGet<ConfigResponse>("/config");
+}
+
+// /episodes
+
+export interface EpisodeSource {
+  source_key: string;   // "transcript" | "srt_<lang>"
+  available: boolean;
+  has_clean?: boolean;
+  state: string;        // "unknown" | "raw" | "normalized" | "segmented" | "ready_for_alignment"
+  language?: string;
+  nb_cues?: number;
+  format?: string;
+}
+
+export interface Episode {
+  episode_id: string;
+  season: number;
+  episode: number;
+  title: string;
+  sources: EpisodeSource[];
+}
+
+export interface EpisodesResponse {
+  series_title: string | null;
+  episodes: Episode[];
+}
+
+export async function fetchEpisodes(): Promise<EpisodesResponse> {
+  return apiGet<EpisodesResponse>("/episodes");
+}
+
+// /episodes/{id}/sources/{source_key}
+
+export interface TranscriptSourceContent {
+  episode_id: string;
+  source_key: "transcript";
+  raw: string;
+  clean: string;
+}
+
+export interface SrtSourceContent {
+  episode_id: string;
+  source_key: string;
+  language: string;
+  format: "srt" | "vtt";
+  content: string;
+}
+
+export type SourceContent = TranscriptSourceContent | SrtSourceContent;
+
+export async function fetchEpisodeSource(
+  episodeId: string,
+  sourceKey: string,
+): Promise<SourceContent> {
+  return apiGet<SourceContent>(`/episodes/${episodeId}/sources/${sourceKey}`);
 }
