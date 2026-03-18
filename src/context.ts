@@ -1,9 +1,9 @@
 /**
  * context.ts — ShellContext interface HIMYC
  *
- * Contrat minimal passe du shell vers chaque module.
- * Les modules acces au backend exclusivement via ce contrat,
- * restes decouples des internals du shell.
+ * Contrat minimal passé du shell vers chaque module.
+ * Les modules accèdent au backend exclusivement via ce contrat,
+ * restés découplés des internals du shell.
  */
 
 export interface BackendStatus {
@@ -11,16 +11,50 @@ export interface BackendStatus {
   version?: string;
 }
 
+/**
+ * Données de contexte transmises de l'Inspecter vers l'Aligner (MX-009).
+ *
+ * Cas transcript-first : pivot_key = "transcript", target_keys = ["srt_en", ...]
+ * Cas srt-only         : pivot_key = "srt_en",     target_keys = ["srt_fr", ...]
+ */
+export interface AlignerHandoff {
+  episode_id: string;
+  episode_title: string;
+  /** source_key du pivot : "transcript" ou premier SRT disponible */
+  pivot_key: string;
+  /** source_keys des cibles SRT */
+  target_keys: string[];
+  /** "transcript_first" | "srt_only" */
+  mode: "transcript_first" | "srt_only";
+  /** segment_kind pour AlignEpisodeStep */
+  segment_kind: "sentence" | "utterance";
+}
+
 export interface ShellContext {
-  /** URL de base de l API backend HIMYC (ex: "http://localhost:8765"). */
+  /** URL de base de l'API backend HIMYC (ex: "http://localhost:8765"). */
   getApiBase(): string;
 
   /** Statut courant du backend (online/offline). */
   getBackendStatus(): BackendStatus;
 
   /**
-   * S abonner aux changements de statut backend.
-   * Retourne une fonction de desabonnement a appeler dans dispose().
+   * S'abonner aux changements de statut backend.
+   * Retourne une fonction de désabonnement à appeler dans dispose().
    */
   onStatusChange(cb: (status: BackendStatus) => void): () => void;
+
+  /**
+   * Naviguer programmatiquement vers un mode (MX-009).
+   * Utilisé par l'Inspecter pour faire le handoff vers l'Aligner.
+   */
+  navigateTo(mode: "constituer" | "inspecter" | "aligner"): void;
+
+  /**
+   * Stocker les données de handoff Inspecter → Aligner (MX-009).
+   * L'Aligner lit ces données à son montage.
+   */
+  setHandoff(data: AlignerHandoff | null): void;
+
+  /** Lire les données de handoff (null si navigation directe). */
+  getHandoff(): AlignerHandoff | null;
 }

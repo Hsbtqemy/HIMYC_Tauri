@@ -151,3 +151,130 @@ export async function fetchEpisodeSource(
 ): Promise<SourceContent> {
   return apiGet<SourceContent>(`/episodes/${episodeId}/sources/${sourceKey}`);
 }
+
+// /episodes/{id}/sources/transcript  POST (MX-005)
+// /episodes/{id}/sources/srt_{lang}  POST (MX-005)
+
+export interface ImportResult {
+  episode_id: string;
+  source_key: string;
+  state: string;
+  language?: string;
+}
+
+export async function importTranscript(
+  episodeId: string,
+  content: string,
+): Promise<ImportResult> {
+  return apiPost<ImportResult>(`/episodes/${episodeId}/sources/transcript`, {
+    content,
+  });
+}
+
+export async function importSrt(
+  episodeId: string,
+  lang: string,
+  content: string,
+  fmt: "srt" | "vtt" = "srt",
+): Promise<ImportResult> {
+  return apiPost<ImportResult>(`/episodes/${episodeId}/sources/srt_${lang}`, {
+    content,
+    fmt,
+  });
+}
+
+// /jobs  (MX-006)
+
+export type JobStatus = "pending" | "running" | "done" | "error" | "cancelled";
+export type JobType =
+  | "normalize_transcript"
+  | "normalize_srt"
+  | "segment_transcript"
+  | "align";
+
+export interface JobRecord {
+  job_id: string;
+  job_type: JobType;
+  episode_id: string;
+  source_key: string;
+  status: JobStatus;
+  created_at: string;
+  updated_at: string;
+  error_msg: string | null;
+  result: Record<string, unknown>;
+  params: Record<string, unknown>;
+}
+
+export interface JobsResponse {
+  jobs: JobRecord[];
+}
+
+export async function fetchJobs(): Promise<JobsResponse> {
+  return apiGet<JobsResponse>("/jobs");
+}
+
+export async function createJob(
+  jobType: JobType,
+  episodeId: string,
+  sourceKey = "",
+  params: Record<string, unknown> = {},
+): Promise<JobRecord> {
+  return apiPost<JobRecord>("/jobs", {
+    job_type: jobType,
+    episode_id: episodeId,
+    source_key: sourceKey,
+    params,
+  });
+}
+
+export async function fetchJob(jobId: string): Promise<JobRecord> {
+  return apiGet<JobRecord>(`/jobs/${jobId}`);
+}
+
+// /episodes/{id}/alignment_runs  (MX-009)
+
+export interface AlignmentRun {
+  run_id: string;
+  episode_id: string;
+  pivot_lang: string;
+  target_langs: string[];
+  segment_kind: string;
+  created_at: string;
+}
+
+export interface AlignmentRunsResponse {
+  episode_id: string;
+  runs: AlignmentRun[];
+}
+
+export async function fetchAlignmentRuns(
+  episodeId: string,
+): Promise<AlignmentRunsResponse> {
+  return apiGet<AlignmentRunsResponse>(`/episodes/${episodeId}/alignment_runs`);
+}
+
+export async function cancelJob(jobId: string): Promise<{ job_id: string; status: string }> {
+  // DELETE via loopback — réutilise _loopbackFetch directement
+  const res = await (async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<{ status: number; ok: boolean; body: string }>(
+      "sidecar_fetch_loopback",
+      {
+        url: `${API_BASE}/jobs/${jobId}`,
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  })();
+  if (!res.ok) {
+    let errorCode = "UNKNOWN";
+    let message = res.body;
+    try {
+      const p = JSON.parse(res.body);
+      errorCode = p.error ?? errorCode;
+      message = p.message ?? message;
+    } catch { /* not JSON */ }
+    throw new ApiError(res.status, errorCode, message);
+  }
+  return JSON.parse(res.body);
+}

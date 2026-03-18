@@ -15,7 +15,7 @@
  *   #app           padding-top:44px — point de montage des modules
  */
 
-import type { ShellContext, BackendStatus } from "./context.ts";
+import type { ShellContext, BackendStatus, AlignerHandoff } from "./context.ts";
 import { fetchHealth, API_BASE } from "./api.ts";
 import { mountConstituer, disposeConstituer } from "./modules/constituerModule.ts";
 import { mountInspecter, disposeInspecter } from "./modules/inspecterModule.ts";
@@ -196,6 +196,8 @@ let _currentMode: Mode = DEFAULT_MODE;
 let _backendStatus: BackendStatus = { online: false };
 const _statusListeners: Array<(s: BackendStatus) => void> = [];
 let _pollInterval: ReturnType<typeof setInterval> | null = null;
+/** Données de handoff Inspecter → Aligner (MX-009). Effacées après lecture. */
+let _handoff: AlignerHandoff | null = null;
 
 // ─── ShellContext ─────────────────────────────────────────────────────────────
 
@@ -208,6 +210,17 @@ const shellContext: ShellContext = {
       const i = _statusListeners.indexOf(cb);
       if (i !== -1) _statusListeners.splice(i, 1);
     };
+  },
+  navigateTo(mode) {
+    _navigateTo(mode as Mode);
+  },
+  setHandoff(data) {
+    _handoff = data;
+  },
+  getHandoff() {
+    const h = _handoff;
+    _handoff = null; // consommé une seule fois
+    return h;
   },
 };
 
