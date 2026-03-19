@@ -32,6 +32,7 @@ import {
   fetchAuditLinks,
   fetchAlignCollisions,
   setAlignLinkStatus,
+  bulkSetAlignLinkStatus,
   fetchConcordance,
   fetchEpisodeSegments,
   fetchQaReport,
@@ -1091,6 +1092,7 @@ const CSS = `
 .audit-table tr:hover td { background: var(--surface2); }
 .audit-table tr.accepted td { background: #f0fdf4; }
 .audit-table tr.rejected td { background: #fef2f2; opacity: .7; }
+.audit-table tr.ignored  td { background: #f1f5f9; opacity: .6; }
 .audit-status-badge {
   display: inline-flex; align-items: center;
   padding: 1px 6px; border-radius: 3px;
@@ -1100,6 +1102,7 @@ const CSS = `
 .audit-status-badge.auto     { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
 .audit-status-badge.accepted { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
 .audit-status-badge.rejected { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+.audit-status-badge.ignored  { background: #e2e8f0; color: #64748b; border: 1px solid #cbd5e1; }
 .audit-action-btn {
   padding: 1px 6px; font-size: 0.7rem;
   border: 1px solid var(--border); border-radius: 3px;
@@ -1109,7 +1112,45 @@ const CSS = `
 .audit-action-btn:hover { background: var(--surface2); }
 .audit-action-btn.accept { color: #15803d; border-color: #86efac; }
 .audit-action-btn.reject { color: #b91c1c; border-color: #fca5a5; }
+.audit-action-btn.ignore { color: #64748b; border-color: #94a3b8; }
 .audit-action-btn.undo   { color: var(--text-muted); }
+/* Barre d'actions bulk (MX-039) */
+.audit-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.audit-bulk-bar-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+  margin-right: 2px;
+}
+.audit-bulk-sep {
+  width: 1px; height: 14px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.audit-bulk-conf-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.audit-bulk-conf-wrap input[type="number"] {
+  width: 44px; padding: 1px 4px;
+  font-size: 0.7rem;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: var(--surface2); color: var(--text);
+  text-align: center;
+}
 .audit-conf-bar {
   display: inline-block; height: 5px; border-radius: 2px;
   background: linear-gradient(90deg, #0f766e, #5eead4);
@@ -1137,6 +1178,7 @@ const CSS = `
 .audit-quality-seg.accepted { background: #16a34a; }
 .audit-quality-seg.auto     { background: #ca8a04; }
 .audit-quality-seg.rejected { background: #dc2626; }
+.audit-quality-seg.ignored  { background: #94a3b8; }
 .audit-quality-label {
   font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
 }
@@ -3078,12 +3120,32 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
           <option value="auto">Auto</option>
           <option value="accepted">Acceptés</option>
           <option value="rejected">Rejetés</option>
+          <option value="ignored">Ignorés</option>
         </select>
         <input id="audit-search" type="search" placeholder="Rechercher texte…" />
         <span id="audit-count" style="font-size:0.72rem;color:var(--text-muted);margin-left:auto"></span>
       </div>
       <div class="audit-body">
         <div class="audit-pane active" data-tab="links">
+          <div class="audit-bulk-bar" id="audit-bulk-bar">
+            <span class="audit-bulk-bar-label">Groupé :</span>
+            <button class="audit-action-btn accept" id="audit-bulk-accept-auto"
+              title="Accepter tous les liens en statut auto">✓ Auto → Acceptés</button>
+            <button class="audit-action-btn ignore" id="audit-bulk-ignore-auto"
+              title="Marquer tous les liens auto comme ignorés (pas de traduction attendue)">◌ Auto → Ignorés</button>
+            <div class="audit-bulk-sep"></div>
+            <div class="audit-bulk-conf-wrap">
+              <button class="audit-action-btn ignore" id="audit-bulk-ignore-low"
+                title="Ignorer tous les liens auto dont la confidence est inférieure au seuil">◌ Ignorer conf. &lt;</button>
+              <input type="number" id="audit-bulk-conf-threshold"
+                min="5" max="95" step="5" value="30"
+                title="Seuil de confiance (en %) — les liens auto inférieurs à ce seuil seront ignorés" />
+              <span>%</span>
+            </div>
+            <div class="audit-bulk-sep"></div>
+            <button class="audit-action-btn undo" id="audit-bulk-reset-all"
+              title="Remettre tous les liens (acceptés / rejetés / ignorés) en statut auto">↺ Reset tout en auto</button>
+          </div>
           <div class="audit-table-wrap" id="audit-table-wrap">
             <div style="padding:12px;font-size:0.78rem;color:var(--text-muted)">Chargement liens…</div>
           </div>
@@ -3158,6 +3220,68 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
     }, 280);
   });
 
+  // ── Bulk actions (MX-039) ─────────────────────────────────────────────────
+
+  /**
+   * Exécute une action bulk, puis rafraîchit stats + liens courants.
+   * Désactive les boutons de la barre pendant l'opération.
+   */
+  async function doBulkAction(
+    params: Parameters<typeof bulkSetAlignLinkStatus>[2],
+    confirmMsg?: string,
+  ) {
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    const bar = panel.querySelector<HTMLElement>("#audit-bulk-bar");
+    const btns = bar?.querySelectorAll<HTMLButtonElement>("button") ?? [];
+    btns.forEach((b) => (b.disabled = true));
+    try {
+      await bulkSetAlignLinkStatus(epId, runId, params);
+      // Refresh stats + current page of links in parallel
+      await Promise.all([
+        loadAuditStats(panel, epId, runId),
+        loadAuditLinks(panel, epId, runId),
+      ]);
+    } catch (e) {
+      alert(`Action groupée échouée : ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      btns.forEach((b) => (b.disabled = false));
+    }
+  }
+
+  // ✓ Auto → Acceptés : accepte tous les liens en statut "auto"
+  panel.querySelector<HTMLButtonElement>("#audit-bulk-accept-auto")!
+    .addEventListener("click", () =>
+      doBulkAction({ new_status: "accepted", filter_status: "auto" }),
+    );
+
+  // ◌ Auto → Ignorés : ignore tous les liens en statut "auto"
+  panel.querySelector<HTMLButtonElement>("#audit-bulk-ignore-auto")!
+    .addEventListener("click", () =>
+      doBulkAction({ new_status: "ignored", filter_status: "auto" }),
+    );
+
+  // ◌ Ignorer conf. < X% : ignore les liens auto dont la confidence < seuil
+  panel.querySelector<HTMLButtonElement>("#audit-bulk-ignore-low")!
+    .addEventListener("click", () => {
+      const rawVal = panel.querySelector<HTMLInputElement>("#audit-bulk-conf-threshold")?.value ?? "30";
+      const pct    = parseFloat(rawVal);
+      const confLt = isNaN(pct) ? 0.3 : Math.min(1, Math.max(0, pct / 100));
+      doBulkAction({
+        new_status:    "ignored",
+        filter_status: "auto",
+        conf_lt:       confLt,
+      });
+    });
+
+  // ↺ Reset tout en auto : remet tous les liens (acceptés/rejetés/ignorés) en auto
+  panel.querySelector<HTMLButtonElement>("#audit-bulk-reset-all")!
+    .addEventListener("click", () =>
+      doBulkAction(
+        { new_status: "auto" },
+        "Remettre TOUS les liens en auto ? Les décisions manuelles seront perdues.",
+      ),
+    );
+
   // Load stats + links + collisions in parallel
   loadAuditStats(panel, epId, runId);
   loadAuditLinks(panel, epId, runId);
@@ -3173,6 +3297,7 @@ async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
     const nAuto     = byStatus.auto     ?? 0;
     const nAccepted = byStatus.accepted ?? 0;
     const nRejected = byStatus.rejected ?? 0;
+    const nIgnored  = byStatus.ignored  ?? 0;
     const coverageStr = s.coverage_pct != null ? `${s.coverage_pct}%` : "—";
     const confStr = s.avg_confidence != null ? `${Math.round(s.avg_confidence * 100)}%` : "—";
     const collisionClass = s.n_collisions > 0 ? "blocking" : "ok";
@@ -3185,6 +3310,7 @@ async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
       <div class="audit-stat"><span class="audit-stat-val ok">${nAccepted}</span><span class="audit-stat-label">Acceptés</span></div>
       <div class="audit-stat"><span class="audit-stat-val warn">${nAuto}</span><span class="audit-stat-label">Auto</span></div>
       <div class="audit-stat"><span class="audit-stat-val blocking">${nRejected}</span><span class="audit-stat-label">Rejetés</span></div>
+      ${nIgnored > 0 ? `<div class="audit-stat"><span class="audit-stat-val" style="color:#64748b">${nIgnored}</span><span class="audit-stat-label">Ignorés</span></div>` : ""}
       <div class="audit-stat-sep"></div>
       <div class="audit-stat"><span class="audit-stat-val">${coverageStr}</span><span class="audit-stat-label">Couverture</span></div>
       <div class="audit-stat"><span class="audit-stat-val">${confStr}</span><span class="audit-stat-label">Conf. moy.</span></div>
@@ -3198,8 +3324,8 @@ async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
       badge.style.display = s.n_collisions > 0 ? "inline-flex" : "none";
     }
 
-    // Quality bar
-    const total = nAccepted + nAuto + nRejected;
+    // Quality bar (accepted=vert, auto=jaune, rejected=rouge, ignored=slate)
+    const total = nAccepted + nAuto + nRejected + nIgnored;
     const qualRow = panel.querySelector<HTMLElement>("#audit-quality-bar-row");
     const qualBar = panel.querySelector<HTMLElement>("#audit-quality-bar");
     const qualLabel = panel.querySelector<HTMLElement>("#audit-quality-label");
@@ -3207,8 +3333,11 @@ async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
       qualBar.innerHTML = `
         <div class="audit-quality-seg accepted" style="flex:${nAccepted}"></div>
         <div class="audit-quality-seg auto"     style="flex:${nAuto}"></div>
-        <div class="audit-quality-seg rejected" style="flex:${nRejected}"></div>`;
-      qualLabel.textContent = `${nAccepted} acceptés · ${nAuto} auto · ${nRejected} rejetés`;
+        <div class="audit-quality-seg rejected" style="flex:${nRejected}"></div>
+        ${nIgnored > 0 ? `<div class="audit-quality-seg ignored" style="flex:${nIgnored}"></div>` : ""}`;
+      const parts = [`${nAccepted} acceptés`, `${nAuto} auto`, `${nRejected} rejetés`];
+      if (nIgnored > 0) parts.push(`${nIgnored} ignorés`);
+      qualLabel.textContent = parts.join(" · ");
       qualRow.style.display = "flex";
     }
   } catch (e) {
@@ -3256,7 +3385,7 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
     wrap.querySelectorAll<HTMLButtonElement>(".audit-action-btn[data-link-id]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const linkId = btn.dataset.linkId!;
-        const action = btn.dataset.action as "accepted" | "rejected" | "auto";
+        const action = btn.dataset.action as "accepted" | "rejected" | "auto" | "ignored";
         btn.disabled = true;
         try {
           await setAlignLinkStatus(linkId, action);
@@ -3267,7 +3396,7 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
             const statusCell = row.querySelector(".audit-status-badge");
             if (statusCell) {
               statusCell.className = `audit-status-badge ${action}`;
-              statusCell.textContent = action === "accepted" ? "✓ accepté" : action === "rejected" ? "✗ rejeté" : "auto";
+              statusCell.textContent = _statusLabel(action);
             }
             // Swap buttons: if accepted → show reject+undo, if rejected → show accept+undo
             const actionsCell = row.querySelector(".audit-row-actions");
@@ -3307,22 +3436,40 @@ function renderAuditLinkRow(lnk: AuditLink): string {
       <td style="max-width:140px">${targetText || '<span style="color:var(--text-muted)">—</span>'}</td>
       <td><span class="align-run-lang-badge">${escapeHtml(lnk.lang || "—")}</span></td>
       <td style="text-align:center;white-space:nowrap">${confBar}</td>
-      <td><span class="audit-status-badge ${lnk.status}">${lnk.status === "accepted" ? "✓ accepté" : lnk.status === "rejected" ? "✗ rejeté" : "auto"}</span></td>
+      <td><span class="audit-status-badge ${lnk.status}">${_statusLabel(lnk.status)}</span></td>
       <td class="audit-row-actions">${renderAuditActions(lnk.link_id, lnk.status)}</td>
     </tr>`;
 }
 
+/** Libellé court pour un statut de lien. */
+function _statusLabel(status: string): string {
+  if (status === "accepted") return "✓ accepté";
+  if (status === "rejected") return "✗ rejeté";
+  if (status === "ignored")  return "◌ ignoré";
+  return "auto";
+}
+
 function renderAuditActions(linkId: string, currentStatus: string): string {
+  const id = escapeHtml(linkId);
   if (currentStatus === "accepted") {
-    return `<button class="audit-action-btn reject" data-link-id="${escapeHtml(linkId)}" data-action="rejected" title="Rejeter">✗</button>
-            <button class="audit-action-btn undo"   data-link-id="${escapeHtml(linkId)}" data-action="auto"     title="Réinitialiser">↺</button>`;
+    return `<button class="audit-action-btn reject" data-link-id="${id}" data-action="rejected" title="Rejeter">✗</button>
+            <button class="audit-action-btn ignore" data-link-id="${id}" data-action="ignored"  title="Ignorer (pas de traduction attendue)">◌</button>
+            <button class="audit-action-btn undo"   data-link-id="${id}" data-action="auto"     title="Réinitialiser">↺</button>`;
   }
   if (currentStatus === "rejected") {
-    return `<button class="audit-action-btn accept" data-link-id="${escapeHtml(linkId)}" data-action="accepted" title="Accepter">✓</button>
-            <button class="audit-action-btn undo"   data-link-id="${escapeHtml(linkId)}" data-action="auto"     title="Réinitialiser">↺</button>`;
+    return `<button class="audit-action-btn accept" data-link-id="${id}" data-action="accepted" title="Accepter">✓</button>
+            <button class="audit-action-btn ignore" data-link-id="${id}" data-action="ignored"  title="Ignorer (pas de traduction attendue)">◌</button>
+            <button class="audit-action-btn undo"   data-link-id="${id}" data-action="auto"     title="Réinitialiser">↺</button>`;
   }
-  return `<button class="audit-action-btn accept" data-link-id="${escapeHtml(linkId)}" data-action="accepted" title="Accepter">✓</button>
-          <button class="audit-action-btn reject" data-link-id="${escapeHtml(linkId)}" data-action="rejected" title="Rejeter">✗</button>`;
+  if (currentStatus === "ignored") {
+    return `<button class="audit-action-btn accept" data-link-id="${id}" data-action="accepted" title="Accepter">✓</button>
+            <button class="audit-action-btn reject" data-link-id="${id}" data-action="rejected" title="Rejeter">✗</button>
+            <button class="audit-action-btn undo"   data-link-id="${id}" data-action="auto"     title="Réinitialiser">↺</button>`;
+  }
+  // auto : affiche les 3 actions
+  return `<button class="audit-action-btn accept" data-link-id="${id}" data-action="accepted" title="Accepter">✓</button>
+          <button class="audit-action-btn reject" data-link-id="${id}" data-action="rejected" title="Rejeter">✗</button>
+          <button class="audit-action-btn ignore" data-link-id="${id}" data-action="ignored"  title="Ignorer (pas de traduction attendue)">◌</button>`;
 }
 
 function rewireAuditButtons(wrap: HTMLElement) {

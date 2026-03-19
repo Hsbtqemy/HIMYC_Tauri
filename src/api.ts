@@ -290,7 +290,7 @@ export interface AlignRunStats {
   nb_links: number;
   nb_pivot: number;
   nb_target: number;
-  by_status: { auto?: number; accepted?: number; rejected?: number };
+  by_status: { auto?: number; accepted?: number; rejected?: number; ignored?: number };
   avg_confidence: number | null;
   n_collisions: number;
   coverage_pct: number | null;
@@ -301,7 +301,7 @@ export interface AuditLink {
   role: "pivot" | "target";
   lang: string;
   confidence: number | null;
-  status: "auto" | "accepted" | "rejected";
+  status: "auto" | "accepted" | "rejected" | "ignored";
   segment_id: string | null;
   cue_id: string | null;
   cue_id_target: string | null;
@@ -379,9 +379,31 @@ export async function fetchAlignCollisions(
 
 export async function setAlignLinkStatus(
   linkId: string,
-  status: "accepted" | "rejected" | "auto",
+  status: "accepted" | "rejected" | "auto" | "ignored",
 ): Promise<{ link_id: string; status: string }> {
   return apiPost(`/alignment_links/${linkId}`, { status }, "PATCH");
+}
+
+export interface BulkAlignStatusParams {
+  new_status: "accepted" | "rejected" | "auto" | "ignored";
+  /** Mode liste : liste explicite de link_ids à mettre à jour. */
+  link_ids?: string[];
+  /** Mode filtre : ne met à jour que les liens ayant ce statut courant. */
+  filter_status?: "accepted" | "rejected" | "auto" | "ignored";
+  /** Mode filtre : ne met à jour que les liens avec confidence < cette valeur (0–1). */
+  conf_lt?: number;
+}
+
+export async function bulkSetAlignLinkStatus(
+  episodeId: string,
+  runId: string,
+  params: BulkAlignStatusParams,
+): Promise<{ updated: number; new_status: string }> {
+  return apiPost(
+    `/episodes/${episodeId}/alignment_runs/${runId}/links/bulk`,
+    params,
+    "PATCH",
+  );
 }
 
 // ── Concordancier parallèle + Segments longtext (MX-029) ─────────────────────
