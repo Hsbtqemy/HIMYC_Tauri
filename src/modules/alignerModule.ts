@@ -98,6 +98,26 @@ const CSS = `
   font-weight: 600;
   flex-shrink: 0;
 }
+.align-targets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.align-target-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--text);
+  font-weight: 400;
+}
+.align-target-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
 .align-select {
   font-size: 0.8rem;
   padding: 4px 8px;
@@ -334,7 +354,22 @@ function renderForm(
 
   const modeLabel = mode === "transcript_first" ? "Transcript-first" : "SRT-only";
   const pivotDisplay = pivotKeyDefault === "transcript" ? "transcript" : pivotKeyDefault.replace("srt_", "SRT ");
-  const targetDisplay = targetKeysDefault.map((k) => k.replace("srt_", "SRT ")).join(", ") || "—";
+
+  // Toutes les SRT éligibles comme cibles (tout sauf le pivot)
+  const eligibleTargets = srts.filter((s) => s.source_key !== pivotKeyDefault);
+
+  const targetsHtml = eligibleTargets.length === 0
+    ? `<span style="font-size:0.82rem;color:var(--text-muted);font-style:italic">Aucune SRT disponible comme cible.</span>`
+    : `<div class="align-targets-list">
+        ${eligibleTargets.map((s) => {
+          const checked = targetKeysDefault.includes(s.source_key) ? "checked" : "";
+          const langLabel = s.source_key.replace("srt_", "SRT ").toUpperCase();
+          return `<label class="align-target-item">
+            <input type="checkbox" data-target-key="${escapeHtml(s.source_key)}" ${checked}>
+            ${escapeHtml(langLabel)}
+          </label>`;
+        }).join("")}
+      </div>`;
 
   // Sélecteur segment_kind
   const kindOptions = ["sentence", "utterance"]
@@ -351,9 +386,9 @@ function renderForm(
       <label>Pivot</label>
       <span style="font-size:0.82rem;font-family:ui-monospace,monospace">${escapeHtml(pivotDisplay)}</span>
     </div>
-    <div class="align-field">
-      <label>Cible(s)</label>
-      <span style="font-size:0.82rem;font-family:ui-monospace,monospace">${escapeHtml(targetDisplay)}</span>
+    <div class="align-field" style="align-items:flex-start">
+      <label style="padding-top:3px">Cible(s)</label>
+      ${targetsHtml}
     </div>
     <div class="align-field">
       <label>Segmentation</label>
@@ -384,7 +419,17 @@ function renderForm(
       try {
         const segmentKind = (container.querySelector<HTMLSelectElement>("#align-segment-kind")?.value ?? "sentence") as "sentence" | "utterance";
         const pivotLang = pivotLangFromKey(pivotKeyDefault);
-        const targetLangs = targetLangsFromKeys(targetKeysDefault);
+        // Lire les cibles cochées au moment du clic
+        const checkedTargetKeys = Array.from(
+          card.querySelectorAll<HTMLInputElement>("input[data-target-key]:checked"),
+        ).map((inp) => inp.dataset.targetKey!);
+        const targetLangs = targetLangsFromKeys(checkedTargetKeys);
+        if (targetLangs.length === 0) {
+          fb.textContent = "Sélectionnez au moins une cible SRT.";
+          fb.style.color = "var(--danger)";
+          btn.disabled = false;
+          return;
+        }
         const runId = `${episode.episode_id}-${Date.now()}`;
 
         const job = await createJob("align", episode.episode_id, "", {
