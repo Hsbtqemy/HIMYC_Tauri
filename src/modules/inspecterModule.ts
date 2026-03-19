@@ -189,8 +189,19 @@ let _selectedEpId   = "";
 let _selectedSrcKey = "";
 /** Onglet actif : "raw" | "clean" */
 let _activeTab: "raw" | "clean" = "raw";
+/** Référence au bouton Aligner pour mise à jour hors mountInspecter */
+let _alignBtn: HTMLButtonElement | null = null;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+function updateAlignBtn() {
+  if (!_alignBtn) return;
+  const ep = _episodes.find((e) => e.episode_id === _selectedEpId);
+  if (!ep) { _alignBtn.disabled = true; _alignBtn.title = "Sélectionnez un épisode"; return; }
+  const g = guardAlignEpisode(ep);
+  _alignBtn.disabled = !g.allowed;
+  _alignBtn.title = g.allowed ? "Passer en mode Aligner" : (g.reason ?? "");
+}
 
 function availableSources(ep: Episode): EpisodeSource[] {
   return ep.sources.filter((s) => s.available);
@@ -451,6 +462,7 @@ async function loadEpisodes(container: HTMLElement) {
     }
 
     populateSourceSelect(container);
+    updateAlignBtn();
 
     if (_selectedEpId && _selectedSrcKey) {
       loadContent(container);
@@ -534,13 +546,7 @@ export function mountInspecter(container: HTMLElement, ctx: ShellContext) {
     if (_selectedSrcKey) loadContent(container);
   });
 
-  function updateAlignBtn() {
-    const ep = _episodes.find((e) => e.episode_id === _selectedEpId);
-    if (!ep) { alignBtn.disabled = true; alignBtn.title = "Sélectionnez un épisode"; return; }
-    const g = guardAlignEpisode(ep);
-    alignBtn.disabled = !g.allowed;
-    alignBtn.title = g.allowed ? "Passer en mode Aligner" : (g.reason ?? "");
-  }
+  _alignBtn = alignBtn;
 
   alignBtn.addEventListener("click", () => {
     const ep = _episodes.find((e) => e.episode_id === _selectedEpId);
@@ -596,4 +602,5 @@ export function mountInspecter(container: HTMLElement, ctx: ShellContext) {
 
 export function disposeInspecter() {
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+  _alignBtn = null;
 }
