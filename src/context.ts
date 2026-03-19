@@ -28,6 +28,14 @@ export interface AlignerHandoff {
   mode: "transcript_first" | "srt_only";
   /** segment_kind pour AlignEpisodeStep */
   segment_kind: "sentence" | "utterance";
+  /** Langue du pivot (ex: "fr", "en") — MX-037 */
+  pivot_lang?: string;
+  /** Langues cibles (ex: ["en", "it"]) — MX-037 */
+  target_langs?: string[];
+  /** Seuil de confiance minimum (0.1–0.95) — MX-037 */
+  min_confidence?: number;
+  /** Utiliser la similarité textuelle pour les cues — MX-037 */
+  use_similarity_for_cues?: boolean;
 }
 
 /** Cible de pré-sélection pour l'Inspecter (depuis Documents — MX-021). */

@@ -1365,6 +1365,10 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
   font-style: italic;
 }
 .acts-params-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+.acts-params-range { width: 80px; accent-color: var(--accent); vertical-align: middle; }
+.acts-params-range-val { font-family: ui-monospace, monospace; font-size: 0.72rem; color: var(--accent); font-weight: 700; min-width: 28px; }
+.acts-params-check { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 0.78rem; color: var(--text); }
+.acts-params-check input[type=checkbox] { accent-color: var(--accent); cursor: pointer; width: 14px; height: 14px; }
 
 /* Config form */
 .cfg-form { display: flex; flex-direction: column; gap: 8px; }
@@ -2910,15 +2914,25 @@ function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
       const epId       = btn.dataset.ep!;
       const epTitle    = btn.dataset.title!;
       const srtKeys    = (btn.dataset.srts || "").split(",").filter(Boolean);
-      // Read segment_kind from the params panel selector
-      const segKind    = (wrap.closest(".cons-actions-pane")?.querySelector<HTMLSelectElement>("#align-segment-kind-pre")?.value ?? "utterance") as "utterance" | "sentence";
+      const pane       = wrap.closest(".cons-actions-pane");
+      const segKind    = (pane?.querySelector<HTMLSelectElement>("#align-segment-kind-pre")?.value ?? "utterance") as "utterance" | "sentence";
+      const pivotLang  = (pane?.querySelector<HTMLInputElement>("#align-pivot-lang-pre")?.value.trim() ?? "fr") || "fr";
+      const minConf    = parseFloat(pane?.querySelector<HTMLInputElement>("#align-min-conf-pre")?.value ?? "0.3");
+      const useSim     = pane?.querySelector<HTMLInputElement>("#align-use-sim-pre")?.checked ?? false;
+      const targetLangs = srtKeys.map((k) => k.replace("srt_", ""));
       const handoff = {
-        episode_id:    epId,
-        episode_title: epTitle,
-        pivot_key:     "transcript",
-        target_keys:   srtKeys,
-        mode:          "transcript_first" as const,
-        segment_kind:  segKind,
+        episode_id:              epId,
+        episode_title:           epTitle,
+        // Legacy fields (alignerModule.ts)
+        pivot_key:               "transcript",
+        target_keys:             srtKeys,
+        mode:                    "transcript_first" as const,
+        segment_kind:            segKind,
+        // Extended config fields (MX-037)
+        pivot_lang:              pivotLang,
+        target_langs:            targetLangs,
+        min_confidence:          isNaN(minConf) ? 0.3 : minConf,
+        use_similarity_for_cues: useSim,
       };
       _ctx?.setHandoff(handoff);
       _ctx?.navigateTo("aligner");
@@ -4347,18 +4361,35 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <button class="btn btn-secondary btn-sm" id="cons-batch-align">⚡ Aligner tout</button>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-align">↺ Actualiser</button>
             </div>
-            <!-- Params panel -->
+            <!-- Params panel (MX-037) -->
             <div class="acts-params">
+              <div class="acts-params-group">
+                <span class="acts-params-label">Pivot lang</span>
+                <input class="acts-params-select" id="align-pivot-lang-pre" type="text" value="fr"
+                  style="width:44px;padding:3px 6px;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"
+                  title="Code langue du transcript pivot (fr, en, de…)">
+              </div>
+              <div class="acts-params-sep"></div>
               <div class="acts-params-group">
                 <span class="acts-params-label">Segments</span>
                 <select class="acts-params-select" id="align-segment-kind-pre">
-                  <option value="utterance">Utterance (locuteur)</option>
+                  <option value="utterance">Utterance</option>
                   <option value="sentence">Phrase</option>
                 </select>
               </div>
               <div class="acts-params-sep"></div>
-              <div class="acts-params-group" style="font-size:0.76rem;color:var(--text-muted)">
-                Sélectionnez un épisode segmenté + SRT pour lancer l'alignement.
+              <div class="acts-params-group">
+                <span class="acts-params-label">Confiance min.</span>
+                <input type="range" class="acts-params-range" id="align-min-conf-pre"
+                  min="0.1" max="0.95" step="0.05" value="0.3">
+                <span class="acts-params-range-val" id="align-min-conf-val">0.30</span>
+              </div>
+              <div class="acts-params-sep"></div>
+              <div class="acts-params-group">
+                <label class="acts-params-check">
+                  <input type="checkbox" id="align-use-sim-pre">
+                  Similarité textuelle
+                </label>
               </div>
             </div>
             <div class="acts-split">
@@ -4592,13 +4623,26 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
     });
 
   // ── Alignement pane wiring ─────────────────────────────────────────────────
+
+  // Confidence slider live display
+  container.querySelector<HTMLInputElement>("#align-min-conf-pre")
+    ?.addEventListener("input", (e) => {
+      const val = (e.target as HTMLInputElement).value;
+      const display = container.querySelector<HTMLElement>("#align-min-conf-val");
+      if (display) display.textContent = parseFloat(val).toFixed(2);
+    });
+
   container.querySelector<HTMLButtonElement>("#cons-refresh-align")
     ?.addEventListener("click", () => loadAndRenderAlignement(container));
 
   container.querySelector<HTMLButtonElement>("#cons-batch-align")
     ?.addEventListener("click", async () => {
-      const episodes = _cachedEpisodes?.episodes ?? [];
-      const segKind = (container.querySelector<HTMLSelectElement>("#align-segment-kind-pre")?.value ?? "utterance") as "utterance" | "sentence";
+      const episodes   = _cachedEpisodes?.episodes ?? [];
+      const segKind    = (container.querySelector<HTMLSelectElement>("#align-segment-kind-pre")?.value ?? "utterance") as "utterance" | "sentence";
+      const pivotLang  = (container.querySelector<HTMLInputElement>("#align-pivot-lang-pre")?.value.trim() ?? "fr") || "fr";
+      const minConf    = parseFloat(container.querySelector<HTMLInputElement>("#align-min-conf-pre")?.value ?? "0.3");
+      const useSim     = container.querySelector<HTMLInputElement>("#align-use-sim-pre")?.checked ?? false;
+
       const toAlign = episodes.filter((ep) => {
         const t = ep.sources.find((s) => s.source_key === "transcript");
         const srts = ep.sources.filter((s) => s.source_key.startsWith("srt_") && s.available);
@@ -4608,13 +4652,16 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       const btn = container.querySelector<HTMLButtonElement>("#cons-batch-align")!;
       btn.disabled = true; btn.textContent = "…";
       for (const ep of toAlign) {
-        const srts = ep.sources.filter((s) => s.source_key.startsWith("srt_") && s.available).map((s) => s.source_key);
+        const targetLangs = ep.sources
+          .filter((s) => s.source_key.startsWith("srt_") && s.available)
+          .map((s) => s.source_key.replace("srt_", ""));
         try {
           await createJob("align", ep.episode_id, "", {
-            pivot_key: "transcript",
-            target_keys: srts,
-            mode: "transcript_first",
-            segment_kind: segKind,
+            pivot_lang:              pivotLang,
+            target_langs:            targetLangs,
+            segment_kind:            segKind,
+            min_confidence:          isNaN(minConf) ? 0.3 : minConf,
+            use_similarity_for_cues: useSim,
           });
         } catch { /* skip */ }
       }
