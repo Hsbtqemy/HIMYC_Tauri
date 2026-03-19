@@ -13,10 +13,12 @@ import {
   fetchQaReport,
   fetchAllAlignmentRuns,
   exportAlignments,
+  propagateCharacters,
   ApiError,
   type ExportResult,
   type QaReport,
   type AlignmentRunFlat,
+  type PropagateResult,
 } from "../api";
 
 const CSS = `
@@ -198,6 +200,20 @@ const CSS = `
 .exp-align-mono { font-family: ui-monospace, monospace; font-size: 0.72rem; color: var(--text-muted); }
 .exp-align-badge { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
 .exp-align-actions { display: flex; gap: 4px; }
+/* SRT Enrichi tab */
+.exp-srt-info {
+  font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;
+  padding: 10px 14px; background: var(--surface2); border-radius: var(--radius);
+  border: 1px solid var(--border); margin-bottom: 0;
+}
+.exp-srt-info code { font-family: ui-monospace, monospace; font-size: 0.75rem; background: var(--surface); padding: 1px 4px; border-radius: 3px; }
+.exp-srt-result-strip {
+  display: flex; align-items: center; gap: 10px; padding: 5px 10px;
+  font-size: 0.77rem; border-radius: var(--radius); margin-top: 4px;
+  background: var(--surface2);
+}
+.exp-srt-result-strip.ok  { background: #f0fdf4; color: #166534; }
+.exp-srt-result-strip.err { background: #fef2f2; color: #7f1d1d; }
 `;
 
 let _styleInjected = false;
@@ -206,6 +222,7 @@ let _qaPolicy: "lenient" | "strict" = "lenient";
 let _qaData: QaReport | null = null;
 let _alignRuns: AlignmentRunFlat[] | null = null;
 let _alignTabLoaded = false;
+let _srtTabLoaded = false;
 
 export function mountExporter(container: HTMLElement, ctx: ShellContext) {
   injectGlobalCss();
@@ -241,6 +258,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
           <button class="exp-tab active" data-stage="corpus">Corpus</button>
           <button class="exp-tab" data-stage="segments">Segments</button>
           <button class="exp-tab" data-stage="alignements">Alignements</button>
+          <button class="exp-tab" data-stage="srt">SRT Enrichi</button>
           <button class="exp-tab" data-stage="qa">QA</button>
           <button class="exp-tab" data-stage="jobs">Jobs</button>
         </div>
@@ -290,6 +308,13 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
         <!-- ── Alignements ────────────────────── -->
         <div class="exp-pane" data-stage="alignements">
           <div id="exp-align-body">
+            <div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Chargement…</div>
+          </div>
+        </div>
+
+        <!-- ── SRT Enrichi ────────────────────── -->
+        <div class="exp-pane" data-stage="srt">
+          <div id="exp-srt-body">
             <div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Chargement…</div>
           </div>
         </div>
@@ -353,6 +378,11 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
       if (tab.dataset.stage === "alignements" && !_alignTabLoaded) {
         _alignTabLoaded = true;
         loadAlignmentsTab(container);
+      }
+      // Lazy-load SRT enrichi tab
+      if (tab.dataset.stage === "srt" && !_srtTabLoaded) {
+        _srtTabLoaded = true;
+        loadSrtTab(container);
       }
     });
   });
@@ -489,6 +519,7 @@ export function disposeExporter() {
   _qaData = null;
   _alignRuns = null;
   _alignTabLoaded = false;
+  _srtTabLoaded = false;
 }
 
 // ── Alignements tab ──────────────────────────────────────────────────────────
@@ -572,6 +603,95 @@ function renderAlignmentsTab(body: HTMLElement) {
           btn.disabled = false;
         }
       });
+    });
+  });
+}
+
+// ── SRT Enrichi tab ──────────────────────────────────────────────────────────
+
+async function loadSrtTab(container: HTMLElement) {
+  const body = container.querySelector<HTMLElement>("#exp-srt-body");
+  if (!body) return;
+  body.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Chargement des runs…</div>`;
+  try {
+    const { runs } = _alignRuns !== null
+      ? { runs: _alignRuns }
+      : await fetchAllAlignmentRuns();
+    if (_alignRuns === null) _alignRuns = runs;
+    renderSrtTab(body, runs);
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e)}</div>`;
+  }
+}
+
+function renderSrtTab(body: HTMLElement, runs: AlignmentRunFlat[]) {
+  if (runs.length === 0) {
+    body.innerHTML = `<div class="exp-card" style="max-width:520px">
+      <div class="exp-card-title">Aucun run d'alignement</div>
+      <div class="exp-card-desc">Définissez des personnages, créez des assignations, puis lancez un alignement pour utiliser cette fonctionnalité.</div>
+    </div>`;
+    return;
+  }
+
+  const info = `<div class="exp-srt-info">
+    <strong>Propagation §8</strong> — Pour chaque run sélectionné, les noms de personnages sont
+    injectés dans les cues SRT via les assignations et les liens d'alignement, puis les fichiers
+    <code>.srt</code> du projet sont réécrits. Cette opération est <strong>non-destructive</strong> :
+    seul le champ <code>text_clean</code> est modifié ; <code>text_raw</code> est conservé.
+  </div>`;
+
+  const rows = runs.map((r) => {
+    const created = r.created_at
+      ? new Date(r.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })
+      : "—";
+    const langs = [r.pivot_lang, ...r.target_langs].filter(Boolean).join(" → ");
+    return `
+      <tr data-run-id="${escapeHtml(r.run_id)}" data-ep-id="${escapeHtml(r.episode_id)}">
+        <td class="exp-align-mono">${escapeHtml(r.episode_id)}</td>
+        <td class="exp-align-mono" style="font-size:0.7rem;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.run_id)}">${escapeHtml(r.run_id.slice(0, 12))}…</td>
+        <td><span class="exp-align-badge">${escapeHtml(langs)}</span></td>
+        <td style="white-space:nowrap;font-size:0.75rem;color:var(--text-muted)">${created}</td>
+        <td>
+          <button class="btn btn-primary btn-sm srt-propagate-btn">✦ Propager</button>
+          <div class="exp-srt-result-strip srt-propagate-result" style="display:none"></div>
+        </td>
+      </tr>`;
+  }).join("");
+
+  body.innerHTML = `
+    ${info}
+    <div style="overflow-x:auto;margin-top:12px">
+      <table class="exp-align-table">
+        <thead><tr>
+          <th>Épisode</th><th>Run ID</th><th>Langues</th><th>Date</th><th>Action</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  body.querySelectorAll<HTMLTableRowElement>("tr[data-run-id]").forEach((row) => {
+    const epId  = row.dataset.epId!;
+    const runId = row.dataset.runId!;
+    const btn    = row.querySelector<HTMLButtonElement>(".srt-propagate-btn")!;
+    const result = row.querySelector<HTMLElement>(".srt-propagate-result")!;
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "…";
+      result.style.display = "none";
+      try {
+        const res: PropagateResult = await propagateCharacters(epId, runId);
+        result.textContent = `✓ ${res.nb_segments_updated} segments · ${res.nb_cues_updated} cues mis à jour`;
+        result.className = "exp-srt-result-strip srt-propagate-result ok";
+        result.style.display = "flex";
+        btn.textContent = "✓ Propagé";
+      } catch (e) {
+        result.textContent = e instanceof ApiError ? e.message : String(e);
+        result.className = "exp-srt-result-strip srt-propagate-result err";
+        result.style.display = "flex";
+        btn.disabled = false;
+        btn.textContent = "✦ Propager";
+      }
     });
   });
 }

@@ -595,6 +595,25 @@ export async function fetchQaReport(policy: "lenient" | "strict" = "lenient"): P
   return apiGet<QaReport>(`/export/qa?policy=${policy}`);
 }
 
+// ── /episodes/{id}/propagate_characters (MX-031) ─────────────────────────────
+
+export interface PropagateResult {
+  episode_id: string;
+  run_id: string;
+  nb_segments_updated: number;
+  nb_cues_updated: number;
+}
+
+export async function propagateCharacters(
+  episodeId: string,
+  runId: string,
+): Promise<PropagateResult> {
+  return apiPost<PropagateResult>(
+    `/episodes/${episodeId}/propagate_characters`,
+    { run_id: runId },
+  );
+}
+
 // ── /alignment_runs (MX-030) ──────────────────────────────────────────────────
 
 export interface AlignmentRunFlat extends AlignmentRun {
