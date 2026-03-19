@@ -51,6 +51,7 @@ import {
   type EpisodesResponse,
   type ConfigResponse,
   type TranscriptSourceContent,
+  type SrtSourceContent,
   type JobRecord,
   type JobType,
   type Character,
@@ -1231,6 +1232,33 @@ const CSS = `
 .seg-lt-search-nav button { padding: 1px 7px; font-size: 0.72rem; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); cursor: pointer; font-family: inherit; color: var(--text-muted); }
 .seg-lt-search-nav button:hover { background: var(--surface2); }
 
+/* ── Mode traduction (MX-036) ────────────────────────────────── */
+.seg-trad-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+}
+.seg-trad-label { font-size: 0.72rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+.seg-trad-columns { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.seg-trad-col { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; border-right: 1px solid var(--border); }
+.seg-trad-col:last-child { border-right: none; }
+.seg-trad-col-header {
+  font-size: 0.7rem; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: .05em;
+  padding: 5px 12px; background: var(--surface2);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.seg-trad-content { flex: 1; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; }
+.seg-trad-row {
+  font-size: 0.79rem; line-height: 1.5; padding: 4px 6px;
+  border-radius: 3px; border-left: 2px solid transparent;
+}
+.seg-trad-row:hover { background: var(--surface2); border-left-color: var(--accent); }
+.seg-trad-n { font-size: 0.65rem; color: var(--text-muted); font-family: ui-monospace, monospace; margin-right: 5px; }
+.seg-trad-speaker { font-size: 0.65rem; font-weight: 700; color: var(--accent); display: block; margin-bottom: 1px; }
+.seg-trad-time { font-size: 0.62rem; color: var(--text-muted); font-family: ui-monospace, monospace; display: block; margin-bottom: 1px; }
+.seg-trad-empty { padding: 24px 12px; text-align: center; font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; }
+
 /* ── Presets nav button + modal ─────────────────────────────── */
 .cons-nav-presets-btn {
   display: flex;
@@ -2406,7 +2434,7 @@ function wireImporterButtons(pane: HTMLElement) {
       if (!epId) { setFeedback("Sélectionnez un épisode.", false); return; }
       await handleImportTranscript(
         epId,
-        () => { setFeedback(`Transcript importé pour ${epId}.`); _cachedEpisodes = null; },
+        () => { setFeedback(`Transcript importé pour ${epId}.`); _cachedEpisodes = null; _tradViewMounted = false; },
         (msg) => setFeedback(msg, false),
       );
     });
@@ -2419,7 +2447,7 @@ function wireImporterButtons(pane: HTMLElement) {
       if (!lang?.trim()) return;
       await handleImportSrt(
         epId, lang.trim(),
-        () => { setFeedback(`SRT ${lang} importé pour ${epId}.`); _cachedEpisodes = null; },
+        () => { setFeedback(`SRT ${lang} importé pour ${epId}.`); _cachedEpisodes = null; _tradViewMounted = false; },
         (msg) => setFeedback(msg, false),
       );
     });
@@ -2568,6 +2596,151 @@ async function loadAndRenderSegmentation(container: HTMLElement) {
     renderSegmentationPane(container, data.episodes);
   } catch (e) {
     if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
+  }
+}
+
+// ── Segmentation Traduction view (MX-036) ───────────────────────────────────
+
+function parseSrtContent(raw: string): { n: number; time: string; text: string }[] {
+  return raw
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .split(/\n{2,}/)
+    .flatMap((block) => {
+      const lines = block.trim().split("\n");
+      if (lines.length < 2) return [];
+      const n = parseInt(lines[0]);
+      if (isNaN(n)) return [];
+      const timeLineIdx = lines.findIndex((l) => l.includes("-->"));
+      if (timeLineIdx < 0) return [];
+      const time = lines[timeLineIdx];
+      const text = lines
+        .slice(timeLineIdx + 1)
+        .join(" ")
+        .replace(/<[^>]+>/g, "") // strip HTML tags (e.g. <i>)
+        .trim();
+      return text ? [{ n, time, text }] : [];
+    });
+}
+
+let _tradViewMounted = false;
+
+async function loadTradView(container: HTMLElement, episodes: Episode[]) {
+  // Only rebuild the UI if it hasn't been mounted yet (episode/lang state persists)
+  if (!_tradViewMounted) {
+    _tradViewMounted = true;
+
+    const segmented = episodes.filter((ep) =>
+      ep.sources.some((s) => s.source_key === "transcript" && s.state !== "unknown"),
+    );
+
+    const epOpts = [
+      `<option value="">— choisir un épisode —</option>`,
+      ...segmented.map((ep) =>
+        `<option value="${escapeHtml(ep.episode_id)}">${escapeHtml(ep.episode_id)} — ${escapeHtml(ep.title)}</option>`
+      ),
+    ].join("");
+
+    container.innerHTML = `
+      <div class="seg-trad-toolbar">
+        <span class="seg-trad-label">Épisode</span>
+        <select class="acts-params-select" id="seg-trad-ep" style="min-width:150px">
+          ${epOpts}
+        </select>
+        <span class="seg-trad-label" style="margin-left:8px">Langue SRT</span>
+        <select class="acts-params-select" id="seg-trad-lang" style="min-width:110px" disabled>
+          <option value="">— sélectionnez un épisode —</option>
+        </select>
+        <span id="seg-trad-status" style="font-size:0.72rem;color:var(--text-muted);margin-left:8px"></span>
+      </div>
+      <div class="seg-trad-columns">
+        <div class="seg-trad-col">
+          <div class="seg-trad-col-header">Segments — transcript</div>
+          <div class="seg-trad-content" id="seg-trad-left">
+            <div class="seg-trad-empty">Sélectionnez un épisode pour afficher ses segments.</div>
+          </div>
+        </div>
+        <div class="seg-trad-col">
+          <div class="seg-trad-col-header">Sous-titres SRT</div>
+          <div class="seg-trad-content" id="seg-trad-right">
+            <div class="seg-trad-empty">Sélectionnez un épisode et une langue SRT.</div>
+          </div>
+        </div>
+      </div>`;
+
+    const epSel    = container.querySelector<HTMLSelectElement>("#seg-trad-ep")!;
+    const langSel  = container.querySelector<HTMLSelectElement>("#seg-trad-lang")!;
+    const leftEl   = container.querySelector<HTMLElement>("#seg-trad-left")!;
+    const rightEl  = container.querySelector<HTMLElement>("#seg-trad-right")!;
+    const statusEl = container.querySelector<HTMLElement>("#seg-trad-status")!;
+
+    async function loadLeft(epId: string) {
+      leftEl.innerHTML = `<div class="seg-trad-empty">Chargement…</div>`;
+      try {
+        const res = await fetchEpisodeSegments(epId);
+        if (res.segments.length === 0) {
+          leftEl.innerHTML = `<div class="seg-trad-empty">Aucun segment — lancez la segmentation d'abord.</div>`;
+        } else {
+          leftEl.innerHTML = res.segments.map((s) =>
+            `<div class="seg-trad-row">
+              ${s.speaker_explicit ? `<span class="seg-trad-speaker">${escapeHtml(s.speaker_explicit)}</span>` : ""}
+              <span class="seg-trad-n">#${s.n}</span>${escapeHtml(s.text ?? "")}
+            </div>`
+          ).join("");
+          statusEl.textContent = `${res.segments.length} segments`;
+        }
+      } catch (e) {
+        leftEl.innerHTML = `<div class="seg-trad-empty" style="color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
+      }
+    }
+
+    async function loadRight(epId: string, srtKey: string) {
+      rightEl.innerHTML = `<div class="seg-trad-empty">Chargement…</div>`;
+      try {
+        const src = (await fetchEpisodeSource(epId, srtKey)) as SrtSourceContent;
+        const cues = parseSrtContent(src.content ?? "");
+        if (cues.length === 0) {
+          rightEl.innerHTML = `<div class="seg-trad-empty">Aucune cue dans ce fichier SRT.</div>`;
+        } else {
+          rightEl.innerHTML = cues.map((c) =>
+            `<div class="seg-trad-row">
+              <span class="seg-trad-time">${escapeHtml(c.time)}</span>
+              <span class="seg-trad-n">#${c.n}</span>${escapeHtml(c.text)}
+            </div>`
+          ).join("");
+        }
+      } catch (e) {
+        rightEl.innerHTML = `<div class="seg-trad-empty" style="color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
+      }
+    }
+
+    epSel.addEventListener("change", () => {
+      const epId = epSel.value;
+      const ep   = segmented.find((e) => e.episode_id === epId);
+      const srts = ep?.sources.filter((s) => s.source_key.startsWith("srt_")) ?? [];
+
+      // Rebuild lang selector
+      if (srts.length > 0) {
+        langSel.innerHTML = srts.map((s) =>
+          `<option value="${escapeHtml(s.source_key)}">${escapeHtml(s.language ?? s.source_key.replace("srt_", "").toUpperCase())}</option>`
+        ).join("");
+        langSel.disabled = false;
+      } else {
+        langSel.innerHTML = `<option value="">— aucun SRT disponible —</option>`;
+        langSel.disabled = true;
+      }
+
+      if (!epId) return;
+      loadLeft(epId);
+      if (!langSel.disabled && langSel.value) loadRight(epId, langSel.value);
+      else rightEl.innerHTML = `<div class="seg-trad-empty">Sélectionnez une langue SRT.</div>`;
+    });
+
+    langSel.addEventListener("change", () => {
+      const epId   = epSel.value;
+      const srtKey = langSel.value;
+      if (epId && srtKey) loadRight(epId, srtKey);
+    });
   }
 }
 
@@ -4147,6 +4320,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <div class="seg-mode-toggle">
                 <button class="seg-mode-btn active" data-seg-mode="table" id="seg-mode-table">Table</button>
                 <button class="seg-mode-btn" data-seg-mode="longtext" id="seg-mode-lt">Texte</button>
+                <button class="seg-mode-btn" data-seg-mode="traduction" id="seg-mode-trad">Traduction</button>
               </div>
             </div>
             <div class="cons-error seg-error" style="display:none"></div>
@@ -4161,6 +4335,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             </div>
             <!-- Vue Longtext (lazy) -->
             <div id="seg-view-lt" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden"></div>
+            <!-- Vue Traduction (lazy, MX-036) -->
+            <div id="seg-view-trad" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden"></div>
           </div>
 
           <!-- Alignement sub-pane -->
@@ -4370,21 +4546,25 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   // ── Seg mode toggle (Table / Texte) ─────────────────────────────────────────
   container.querySelector<HTMLButtonElement>("#seg-mode-table")
     ?.addEventListener("click", () => {
+      container.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
       container.querySelector("#seg-mode-table")?.classList.add("active");
-      container.querySelector("#seg-mode-lt")?.classList.remove("active");
-      const tv = container.querySelector<HTMLElement>("#seg-view-table");
-      const lv = container.querySelector<HTMLElement>("#seg-view-lt");
-      if (tv) tv.style.display = "";
-      if (lv) lv.style.display = "none";
+      const tv   = container.querySelector<HTMLElement>("#seg-view-table");
+      const lv   = container.querySelector<HTMLElement>("#seg-view-lt");
+      const trdv = container.querySelector<HTMLElement>("#seg-view-trad");
+      if (tv)   tv.style.display   = "";
+      if (lv)   lv.style.display   = "none";
+      if (trdv) trdv.style.display = "none";
     });
 
   container.querySelector<HTMLButtonElement>("#seg-mode-lt")
     ?.addEventListener("click", () => {
+      container.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
       container.querySelector("#seg-mode-lt")?.classList.add("active");
-      container.querySelector("#seg-mode-table")?.classList.remove("active");
-      const tv = container.querySelector<HTMLElement>("#seg-view-table");
-      const lv = container.querySelector<HTMLElement>("#seg-view-lt");
-      if (tv) tv.style.display = "none";
+      const tv   = container.querySelector<HTMLElement>("#seg-view-table");
+      const lv   = container.querySelector<HTMLElement>("#seg-view-lt");
+      const trdv = container.querySelector<HTMLElement>("#seg-view-trad");
+      if (tv)   tv.style.display   = "none";
+      if (trdv) trdv.style.display = "none";
       if (lv) {
         lv.style.display = "flex";
         const activeRow = tv?.querySelector<HTMLTableRowElement>("tr.active-row");
@@ -4392,6 +4572,22 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         const epTitle = activeRow?.dataset.epTitle ?? epId ?? "";
         const kind    = (container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "utterance") as "utterance" | "sentence";
         loadLongtextView(lv, epId, epTitle, kind);
+      }
+    });
+
+  container.querySelector<HTMLButtonElement>("#seg-mode-trad")
+    ?.addEventListener("click", () => {
+      container.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
+      container.querySelector("#seg-mode-trad")?.classList.add("active");
+      const tv   = container.querySelector<HTMLElement>("#seg-view-table");
+      const lv   = container.querySelector<HTMLElement>("#seg-view-lt");
+      const trdv = container.querySelector<HTMLElement>("#seg-view-trad");
+      if (tv)   tv.style.display   = "none";
+      if (lv)   lv.style.display   = "none";
+      if (trdv) {
+        trdv.style.display = "flex";
+        const episodes = _cachedEpisodes?.episodes ?? [];
+        loadTradView(trdv, episodes);
       }
     });
 
