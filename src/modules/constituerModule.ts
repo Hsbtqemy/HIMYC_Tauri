@@ -13,6 +13,7 @@ import type { ShellContext } from "../context";
 import {
   fetchEpisodes,
   fetchConfig,
+  fetchEpisodeSource,
   importTranscript,
   importSrt,
   fetchJobs,
@@ -33,6 +34,7 @@ import {
   type EpisodeSource,
   type EpisodesResponse,
   type ConfigResponse,
+  type TranscriptSourceContent,
   type JobRecord,
   type JobType,
   type Character,
@@ -59,6 +61,7 @@ const CSS = `
 .cons-shell {
   display: grid;
   grid-template-columns: var(--cons-nav-w) 1fr;
+  grid-template-rows: 1fr;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -573,6 +576,313 @@ const CSS = `
   font-size: 0.85rem;
 }
 
+/* ── Split layout (liste + viewer texte) ────────────────────── */
+.acts-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.acts-ep-list {
+  width: 360px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.acts-text-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface2);
+}
+.acts-text-header {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.acts-text-ep-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acts-text-tabs { display: flex; gap: 3px; }
+.acts-text-tab {
+  padding: 2px 10px;
+  font-size: 0.74rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .1s;
+}
+.acts-text-tab.active {
+  background: var(--accent, #0f766e);
+  color: #fff;
+  border-color: var(--accent, #0f766e);
+}
+.acts-text-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.75;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.acts-text-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-style: italic;
+  gap: 6px;
+}
+.acts-text-loading {
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+/* highlight active row in split list */
+.acts-ep-list tr.active-row td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.acts-ep-list tr[data-ep-id] { cursor: pointer; }
+.acts-ep-list tr[data-ep-id]:hover td { background: var(--surface2); }
+
+/* ── Curation 3-col layout ──────────────────────────────────── */
+.cur-3col {
+  display: grid;
+  grid-template-columns: 250px 1fr 220px;
+  grid-template-rows: 1fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.cur-params-col {
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+.cur-preview-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.cur-diag-col {
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+}
+.cur-col-head {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cur-param-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.cur-param-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.cur-ep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.cur-ep-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  transition: background .1s;
+  border: 1px solid transparent;
+}
+.cur-ep-item:hover { background: var(--surface2); }
+.cur-ep-item.active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cur-ep-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.cur-ep-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 0.78rem; }
+.cur-rule-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.cur-rule-chip {
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+/* Preview */
+.cur-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.cur-preview-tab {
+  padding: 2px 10px;
+  font-size: 0.74rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .1s;
+}
+.cur-preview-tab.active {
+  background: var(--accent, #0f766e);
+  color: #fff;
+  border-color: var(--accent, #0f766e);
+}
+.cur-preview-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-family: ui-monospace, monospace;
+  color: var(--text-muted);
+}
+.cur-preview-panes {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+.cur-pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.74rem;
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: flex;
+  flex-direction: column;
+}
+.cur-pane + .cur-pane { border-left: 1px solid var(--border); background: var(--surface2); }
+.cur-pane-head {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cur-pane-text { flex: 1; }
+/* Diagnostics */
+.cur-diag-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.cur-diag-section { padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.cur-diag-title { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 6px; }
+.cur-stat-row { display: flex; justify-content: space-between; font-size: 0.77rem; padding: 2px 0; color: var(--text); }
+.cur-stat-val { font-weight: 700; font-family: ui-monospace, monospace; }
+.cur-diag-jobs { flex: 1; overflow-y: auto; min-height: 0; }
+
+/* ── Actions params panel ───────────────────────────────────── */
+.acts-params {
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+}
+.acts-params-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.acts-params-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.acts-params-select {
+  padding: 3px 22px 3px 7px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+.acts-params-select:focus { outline: none; border-color: var(--accent); }
+.acts-params-radios { display: flex; gap: 10px; }
+.acts-params-radio { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.acts-params-radio input { cursor: pointer; }
+.acts-params-feedback {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  min-width: 80px;
+  font-style: italic;
+}
+.acts-params-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+
 /* Config form */
 .cfg-form { display: flex; flex-direction: column; gap: 8px; }
 .cfg-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -795,13 +1105,15 @@ async function queueBatchNormalize(
   episodes: Episode[],
   container: HTMLElement,
 ) {
+  const scopeAll = (container.querySelector<HTMLInputElement>("input[name='cur-scope'][value='all']")?.checked) ?? false;
   // Garde côté handler — rejetée même si bouton appelé programmatiquement (MX-008)
   await guardedAction(
     guardBatchNormalize(episodes),
     async () => {
       const toNormalize = episodes.filter((ep) => {
         const t = ep.sources.find((s) => s.source_key === "transcript");
-        return t?.available && (t.state === "raw" || t.state === "unknown");
+        if (!t?.available) return false;
+        return scopeAll ? true : (t.state === "raw" || t.state === "unknown");
       });
       for (const ep of toNormalize) {
         await createJob("normalize_transcript", ep.episode_id);
@@ -884,7 +1196,8 @@ function renderTable(
   srtLangs: string[],
   onRefresh: () => void,
 ) {
-  const tableWrap = container.querySelector<HTMLElement>(".cons-table-wrap");
+  const tableWrap = container.querySelector<HTMLElement>("#cur-table-wrap")
+                 ?? container.querySelector<HTMLElement>(".cons-table-wrap");
   if (!tableWrap) return;
 
   if (data.episodes.length === 0) {
@@ -923,9 +1236,9 @@ function renderTable(
       const importSrtBtn = `<button class="btn btn-secondary btn-sm" data-action="import-srt" data-ep="${escapeHtml(ep.episode_id)}">+ SRT</button>`;
 
       return `
-        <tr>
+        <tr data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}">
           <td style="font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title)}</td>
+          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title)}</td>
           <td>${transcriptCell}</td>
           ${srtCells}
           <td><div class="cons-actions">${importTrBtn}${importSrtBtn}</div></td>
@@ -1010,35 +1323,217 @@ function renderTable(
   });
 }
 
-async function loadAndRender(container: HTMLElement) {
-  const tableWrap = container.querySelector<HTMLElement>(".cons-table-wrap");
-  if (!tableWrap) return;
+// ── Text viewer ──────────────────────────────────────────────────────────────
 
-  tableWrap.innerHTML = `<div class="cons-loading">Chargement des épisodes…</div>`;
+async function loadTextPanel(
+  panel: HTMLElement,
+  epId: string,
+  epTitle: string,
+  tabs: { key: string; label: string }[],
+) {
+  panel.innerHTML = `
+    <div class="acts-text-header">
+      <span class="acts-text-ep-title">${escapeHtml(epTitle)}</span>
+      <div class="acts-text-tabs">
+        ${tabs.map((t, i) => `<button class="acts-text-tab${i === 0 ? " active" : ""}" data-tab="${escapeHtml(t.key)}">${escapeHtml(t.label)}</button>`).join("")}
+      </div>
+    </div>
+    <div class="acts-text-body acts-text-loading">Chargement…</div>`;
+
+  try {
+    const src = await fetchEpisodeSource(epId, "transcript") as TranscriptSourceContent;
+    const contentMap: Record<string, string> = {
+      raw:   src.raw  ?? "",
+      clean: src.clean ?? src.raw ?? "",
+    };
+    const bodyEl = panel.querySelector<HTMLElement>(".acts-text-body")!;
+
+    function showTab(key: string) {
+      panel.querySelectorAll<HTMLElement>(".acts-text-tab").forEach((b) =>
+        b.classList.toggle("active", b.dataset.tab === key),
+      );
+      bodyEl.className = "acts-text-body";
+      bodyEl.textContent = contentMap[key] ?? contentMap["raw"] ?? "";
+    }
+
+    showTab(tabs[0].key);
+    panel.querySelectorAll<HTMLButtonElement>(".acts-text-tab").forEach((btn) => {
+      btn.addEventListener("click", () => showTab(btn.dataset.tab!));
+    });
+  } catch (e) {
+    const body = panel.querySelector<HTMLElement>(".acts-text-body");
+    if (body) {
+      body.className = "acts-text-body acts-text-loading";
+      body.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+    }
+  }
+}
+
+function wireTextPanelRows(tableScope: HTMLElement, panel: HTMLElement, tabs: { key: string; label: string }[]) {
+  tableScope.querySelectorAll<HTMLTableRowElement>("tr[data-ep-id]").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("button")) return;
+      tableScope.querySelectorAll("tr.active-row").forEach((r) => r.classList.remove("active-row"));
+      row.classList.add("active-row");
+      loadTextPanel(panel, row.dataset.epId!, row.dataset.epTitle!, tabs);
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PROFILE_RULES: Record<string, string[]> = {
+  default_en_v1:   ["Espaces", "Guillemets", "Ponctuation", "Invisibles"],
+  default_fr_v1:   ["Espaces", "Guillemets typo.", "Ponctuation fine", "Invisibles", "Numérotation"],
+  conservative_v1: ["Espaces", "Invisibles"],
+  aggressive_v1:   ["Espaces", "Guillemets", "Ponctuation", "Invisibles", "Numérotation", "Casse forte"],
+};
+
+function renderCurationRuleChips(container: HTMLElement, profileId: string) {
+  const el = container.querySelector<HTMLElement>("#cur-rule-chips");
+  if (!el) return;
+  const rules = PROFILE_RULES[profileId] ?? [];
+  el.innerHTML = rules.length > 0
+    ? rules.map((r) => `<span class="cur-rule-chip">${escapeHtml(r)}</span>`).join("")
+    : `<span style="font-size:0.75rem;color:var(--text-muted);font-style:italic">—</span>`;
+}
+
+function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
+  const listEl = container.querySelector<HTMLElement>("#cur-ep-list");
+  if (!listEl) return;
+  if (episodes.length === 0) {
+    listEl.innerHTML = `<div style="padding:6px 0;font-size:0.78rem;color:var(--text-muted)">Aucun épisode.</div>`;
+    return;
+  }
+  listEl.innerHTML = episodes.map((ep) => {
+    const t = ep.sources.find((s) => s.source_key === "transcript");
+    const state = t?.state ?? "unknown";
+    const badge =
+      state === "segmented"  ? `<span class="cons-badge segmented" style="font-size:0.65rem">seg.</span>` :
+      state === "normalized" ? `<span class="cons-badge normalized" style="font-size:0.65rem">norm.</span>` :
+      state === "raw"        ? `<span class="cons-badge raw" style="font-size:0.65rem">brut</span>` :
+                               `<span class="cons-badge absent" style="font-size:0.65rem">—</span>`;
+    return `<div class="cur-ep-item" data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}" data-ep-state="${escapeHtml(state)}">
+      <span class="cur-ep-id">${escapeHtml(ep.episode_id)}</span>
+      <span class="cur-ep-name" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title)}</span>
+      ${badge}
+    </div>`;
+  }).join("");
+
+  // Wire clicks
+  const previewPanes = container.querySelector<HTMLElement>("#cur-preview-panes")!;
+  const previewBadge = container.querySelector<HTMLElement>("#cur-preview-badge");
+  const diagEp       = container.querySelector<HTMLElement>("#cur-diag-ep");
+  const activeMode   = () =>
+    (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
+
+  listEl.querySelectorAll<HTMLElement>(".cur-ep-item").forEach((item) => {
+    item.addEventListener("click", async () => {
+      listEl.querySelectorAll(".cur-ep-item").forEach((i) => i.classList.remove("active"));
+      item.classList.add("active");
+
+      const epId    = item.dataset.epId!;
+      const epTitle = item.dataset.epTitle!;
+      const epState = item.dataset.epState!;
+
+      if (previewBadge) previewBadge.textContent = epId;
+
+      // Diagnostics
+      if (diagEp) {
+        const stateLabel = epState === "normalized" ? "normalisé" : epState === "segmented" ? "segmenté" : epState === "raw" ? "brut" : "—";
+        diagEp.innerHTML = `
+          <div class="cur-diag-title">Épisode</div>
+          <div class="cur-stat-row"><span>${escapeHtml(epTitle)}</span></div>
+          <div class="cur-stat-row"><span style="color:var(--text-muted)">ID</span><span class="cur-stat-val">${escapeHtml(epId)}</span></div>
+          <div class="cur-stat-row"><span style="color:var(--text-muted)">État</span><span class="cur-stat-val">${escapeHtml(stateLabel)}</span></div>`;
+      }
+
+      await loadCurationPreview(previewPanes, epId, epTitle, activeMode());
+    });
+  });
+}
+
+let _curPreviewEpId: string | null = null;
+let _curPreviewData: { raw: string; clean: string } | null = null;
+
+async function loadCurationPreview(
+  panes: HTMLElement,
+  epId: string,
+  epTitle: string,
+  mode: string,
+) {
+  _curPreviewEpId = epId;
+
+  if (!_curPreviewData || _curPreviewEpId !== epId) {
+    panes.innerHTML = `<div class="acts-text-empty" style="width:100%">Chargement…</div>`;
+    try {
+      const src = await fetchEpisodeSource(epId, "transcript") as TranscriptSourceContent;
+      _curPreviewData = { raw: src.raw ?? "", clean: src.clean ?? src.raw ?? "" };
+    } catch (e) {
+      panes.innerHTML = `<div class="acts-text-empty" style="width:100%">${escapeHtml(e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e))}</div>`;
+      return;
+    }
+  }
+
+  renderCurationPreviewMode(panes, _curPreviewData, mode, epTitle);
+}
+
+function renderCurationPreviewMode(
+  panes: HTMLElement,
+  data: { raw: string; clean: string },
+  mode: string,
+  epTitle: string,
+) {
+  if (mode === "side") {
+    panes.innerHTML = `
+      <div class="cur-pane">
+        <div class="cur-pane-head">Texte brut (source)</div>
+        <div class="cur-pane-text">${escapeHtml(data.raw)}</div>
+      </div>
+      <div class="cur-pane">
+        <div class="cur-pane-head">Texte normalisé</div>
+        <div class="cur-pane-text">${escapeHtml(data.clean || "(non normalisé)")}</div>
+      </div>`;
+  } else if (mode === "raw") {
+    panes.innerHTML = `
+      <div class="cur-pane">
+        <div class="cur-pane-head">Texte brut (source) — ${escapeHtml(epTitle)}</div>
+        <div class="cur-pane-text">${escapeHtml(data.raw)}</div>
+      </div>`;
+  } else {
+    panes.innerHTML = `
+      <div class="cur-pane">
+        <div class="cur-pane-head">Texte normalisé — ${escapeHtml(epTitle)}</div>
+        <div class="cur-pane-text">${escapeHtml(data.clean || data.raw)}</div>
+      </div>`;
+  }
+}
+
+async function loadAndRender(container: HTMLElement) {
+  const epListEl = container.querySelector<HTMLElement>("#cur-ep-list");
+  if (epListEl) {
+    epListEl.innerHTML = `<div style="padding:6px 0;font-size:0.78rem;color:var(--text-muted)">Chargement…</div>`;
+  }
   const errEl = container.querySelector<HTMLElement>(".cons-error");
   if (errEl) errEl.style.display = "none";
   _page = 0;
 
   try {
     const data = await measureAsync("constituer:load_episodes", fetchEpisodes);
+    _cachedEpisodes = data;
 
-    // Mettre à jour le titre série
     const seriesEl = container.querySelector<HTMLElement>(".cons-toolbar-series");
     if (seriesEl) seriesEl.textContent = data.series_title ?? "";
 
-    const srtLangs = collectSrtLangs(data.episodes);
-    renderTable(container, data, srtLangs, () => loadAndRender(container));
+    renderCurationEpList(container, data.episodes);
+
+    const profileSel = container.querySelector<HTMLSelectElement>("#cur-profile");
+    if (profileSel) renderCurationRuleChips(container, profileSel.value);
   } catch (e) {
-    const msg =
-      e instanceof ApiError
-        ? `${e.errorCode} — ${e.message}`
-        : String(e);
-    tableWrap.innerHTML = "";
+    const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+    if (epListEl) epListEl.innerHTML = `<div style="color:var(--danger);font-size:0.78rem">${escapeHtml(msg)}</div>`;
     const errEl2 = container.querySelector<HTMLElement>(".cons-error");
-    if (errEl2) {
-      errEl2.textContent = `Impossible de charger les épisodes : ${msg}`;
-      errEl2.style.display = "block";
-    }
+    if (errEl2) { errEl2.textContent = `Impossible de charger les épisodes : ${msg}`; errEl2.style.display = "block"; }
   }
 }
 
@@ -1235,9 +1730,6 @@ async function loadImporterConfig(pane: HTMLElement) {
 }
 
 function renderConfigForm(body: HTMLElement, cfg: ConfigResponse, pane: HTMLElement) {
-  const profileOpts = NORMALIZE_PROFILES.map((p) =>
-    `<option value="${p.id}" ${cfg.normalize_profile === p.id ? "selected" : ""}>${escapeHtml(p.label)}</option>`
-  ).join("");
   const sourceOpts = SOURCE_IDS.map((s) =>
     `<option value="${s.id}" ${cfg.source_id === s.id ? "selected" : ""}>${escapeHtml(s.label)}</option>`
   ).join("");
@@ -1257,10 +1749,6 @@ function renderConfigForm(body: HTMLElement, cfg: ConfigResponse, pane: HTMLElem
         <input class="cfg-input" id="cfg-series-url" type="text" value="${escapeHtml(cfg.series_url)}" placeholder="https://subslikescript.com/series/…" />
       </div>
       <div class="cfg-row">
-        <span class="cfg-label">Profil normalisation</span>
-        <select class="cfg-input cfg-select" id="cfg-profile">${profileOpts}</select>
-      </div>
-      <div class="cfg-row">
         <span class="cfg-label">Langues</span>
         <input class="cfg-input" id="cfg-languages" type="text" value="${escapeHtml(cfg.languages.join(", "))}" placeholder="en, fr, it…" />
       </div>
@@ -1277,12 +1765,11 @@ function renderConfigForm(body: HTMLElement, cfg: ConfigResponse, pane: HTMLElem
       feedback.textContent = "Enregistrement…";
       feedback.style.color = "var(--text-muted)";
       const update: ConfigUpdate = {
-        project_name:      (body.querySelector<HTMLInputElement>("#cfg-project-name")!.value),
-        source_id:         (body.querySelector<HTMLSelectElement>("#cfg-source-id")!.value),
-        series_url:        (body.querySelector<HTMLInputElement>("#cfg-series-url")!.value),
-        normalize_profile: (body.querySelector<HTMLSelectElement>("#cfg-profile")!.value),
-        languages:         (body.querySelector<HTMLInputElement>("#cfg-languages")!.value)
-                             .split(",").map((l) => l.trim()).filter(Boolean),
+        project_name: (body.querySelector<HTMLInputElement>("#cfg-project-name")!.value),
+        source_id:    (body.querySelector<HTMLSelectElement>("#cfg-source-id")!.value),
+        series_url:   (body.querySelector<HTMLInputElement>("#cfg-series-url")!.value),
+        languages:    (body.querySelector<HTMLInputElement>("#cfg-languages")!.value)
+                        .split(",").map((l) => l.trim()).filter(Boolean),
       };
       try {
         _cachedConfig = await saveConfig(update);
@@ -1485,9 +1972,9 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
       : state === "segmented"
         ? `<span style="color:var(--success,#16a34a);font-size:0.78rem">✓</span>`
         : `<span style="color:var(--text-muted);font-size:0.78rem">—</span>`;
-    return `<tr>
+    return `<tr data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}">
       <td style="white-space:nowrap;font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
-      <td>${escapeHtml(ep.title)}</td>
+      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(ep.title)}</td>
       <td>${stateLabel}</td>
       <td>${action}</td>
     </tr>`;
@@ -1499,10 +1986,11 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
     </table>`;
   wrap.querySelectorAll<HTMLButtonElement>(".seg-ep-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const epId = btn.dataset.ep!;
+      const epId   = btn.dataset.ep!;
+      const segKind = container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "utterance";
       btn.disabled = true; btn.textContent = "…";
       try {
-        await createJob("segment_transcript", epId);
+        await createJob("segment_transcript", epId, "transcript", { segment_kind: segKind });
         startJobPoll(container);
         btn.textContent = "✓ en queue";
       } catch (e) {
@@ -1512,6 +2000,15 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
       }
     });
   });
+
+  // Wire text viewer
+  const segTextPanel = container.querySelector<HTMLElement>("#seg-text-panel");
+  if (segTextPanel) {
+    wireTextPanelRows(wrap, segTextPanel, [
+      { key: "raw",   label: "Brut" },
+      { key: "clean", label: "Normalisé" },
+    ]);
+  }
 }
 
 async function loadAndRenderSegmentation(container: HTMLElement) {
@@ -1546,9 +2043,9 @@ function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
     const action = canAlign
       ? `<button class="btn btn-primary btn-sm align-ep-btn" data-ep="${escapeHtml(ep.episode_id)}" data-title="${escapeHtml(ep.title)}" data-srts="${escapeHtml(srts.map((s) => s.source_key).join(","))}">→ Aligner</button>`
       : `<span style="color:var(--text-muted);font-size:0.78rem" title="${!isSegmented ? "Segmenter d'abord" : "Importer un SRT"}">${!isSegmented ? "seg. manquante" : "SRT manquant"}</span>`;
-    return `<tr>
+    return `<tr data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}">
       <td style="white-space:nowrap;font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
-      <td>${escapeHtml(ep.title)}</td>
+      <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(ep.title)}</td>
       <td>${isSegmented ? `<span class="cons-badge segmented">✓</span>` : `<span class="cons-badge raw">—</span>`}</td>
       <td>${srtList}</td>
       <td>${action}</td>
@@ -1561,21 +2058,32 @@ function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
     </table>`;
   wrap.querySelectorAll<HTMLButtonElement>(".align-ep-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const epId    = btn.dataset.ep!;
-      const epTitle = btn.dataset.title!;
-      const srtKeys = (btn.dataset.srts || "").split(",").filter(Boolean);
+      const epId       = btn.dataset.ep!;
+      const epTitle    = btn.dataset.title!;
+      const srtKeys    = (btn.dataset.srts || "").split(",").filter(Boolean);
+      // Read segment_kind from the params panel selector
+      const segKind    = (wrap.closest(".cons-actions-pane")?.querySelector<HTMLSelectElement>("#align-segment-kind-pre")?.value ?? "utterance") as "utterance" | "sentence";
       const handoff = {
         episode_id:    epId,
         episode_title: epTitle,
         pivot_key:     "transcript",
         target_keys:   srtKeys,
         mode:          "transcript_first" as const,
-        segment_kind:  "utterance" as const,
+        segment_kind:  segKind,
       };
       _ctx?.setHandoff(handoff);
       _ctx?.navigateTo("aligner");
     });
   });
+
+  // Wire text viewer
+  const alignTextPanel = container.querySelector<HTMLElement>("#align-text-panel");
+  if (alignTextPanel) {
+    wireTextPanelRows(wrap, alignTextPanel, [
+      { key: "raw",   label: "Brut" },
+      { key: "clean", label: "Normalisé" },
+    ]);
+  }
 }
 
 async function loadAndRenderAlignement(container: HTMLElement) {
@@ -1950,7 +2458,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   if (_savedSection) _activeSection = _savedSection;
 
   container.innerHTML = `
-    <div class="cons-root cons-shell${_navCollapsed ? " nav-hidden" : ""}" id="cons-shell">
+    <div class="cons-root">
+    <div class="cons-shell${_navCollapsed ? " nav-hidden" : ""}" id="cons-shell">
 
       <!-- Sidebar -->
       <nav class="cons-nav" id="cons-nav">
@@ -2047,23 +2556,82 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <button class="acts-back-btn" id="cons-back-curation">← Actions</button>
               <span class="cons-toolbar-title">Curation</span>
               <span class="cons-toolbar-series"></span>
-              <button class="btn btn-secondary btn-sm" id="cons-batch-normalize">⚡ Normaliser tout</button>
-              <button class="btn btn-ghost btn-sm" id="cons-refresh">↺ Actualiser</button>
               <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
             </div>
             <div class="cons-error" style="display:none"></div>
-            <div class="cons-table-wrap"></div>
-            <div class="cons-jobs">
-              <div class="cons-jobs-header" id="cons-jobs-toggle">
-                ▾ File de jobs
-                <span class="cons-jobs-count">0 total</span>
-              </div>
-              <div id="cons-jobs-body" style="display:block">
-                <div class="cons-jobs-actions">
-                  <button class="btn btn-ghost btn-sm" id="cons-refresh-jobs">↺ Rafraîchir</button>
+            <div class="cur-3col">
+
+              <!-- Params (gauche) -->
+              <div class="cur-params-col">
+                <div class="cur-col-head">Paramètres curation</div>
+
+                <div class="cur-param-section">
+                  <div class="cur-param-label">Épisodes</div>
+                  <div class="cur-ep-list" id="cur-ep-list">
+                    <div style="padding:6px 0;font-size:0.78rem;color:var(--text-muted)">Chargement…</div>
+                  </div>
                 </div>
-                <div class="cons-jobs-list"></div>
+
+                <div class="cur-param-section">
+                  <div class="cur-param-label">Profil normalisation</div>
+                  <select class="acts-params-select" id="cur-profile" style="width:100%">
+                    ${NORMALIZE_PROFILES.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`).join("")}
+                  </select>
+                  <span class="acts-params-feedback" id="cur-profile-fb"></span>
+                </div>
+
+                <div class="cur-param-section">
+                  <div class="cur-param-label">Portée</div>
+                  <label class="acts-params-radio"><input type="radio" name="cur-scope" value="pending" checked> Non normalisés</label>
+                  <label class="acts-params-radio"><input type="radio" name="cur-scope" value="all"> Tous</label>
+                </div>
+
+                <div class="cur-param-section">
+                  <div class="cur-param-label">Règles actives</div>
+                  <div class="cur-rule-chips" id="cur-rule-chips"></div>
+                </div>
+
+                <div class="cur-param-section">
+                  <button class="btn btn-primary btn-sm" id="cons-batch-normalize" style="width:100%">⚡ Normaliser tout</button>
+                  <button class="btn btn-ghost btn-sm" id="cons-refresh" style="width:100%;margin-top:4px">↺ Actualiser</button>
+                </div>
               </div>
+
+              <!-- Preview (centre) -->
+              <div class="cur-preview-col">
+                <div class="cur-preview-bar">
+                  <button class="cur-preview-tab active" data-mode="side">Côte à côte</button>
+                  <button class="cur-preview-tab" data-mode="raw">Brut seul</button>
+                  <button class="cur-preview-tab" data-mode="clean">Normalisé seul</button>
+                  <span class="cur-preview-badge" id="cur-preview-badge"></span>
+                </div>
+                <div class="cur-preview-panes" id="cur-preview-panes">
+                  <div class="acts-text-empty" style="width:100%">← Sélectionnez un épisode</div>
+                </div>
+              </div>
+
+              <!-- Diagnostics (droite) -->
+              <div class="cur-diag-col">
+                <div class="cur-col-head">Diagnostics</div>
+                <div class="cur-diag-scroll">
+                  <div class="cur-diag-section" id="cur-diag-ep">
+                    <div class="cur-diag-title">Épisode</div>
+                    <div style="font-size:0.77rem;color:var(--text-muted);font-style:italic">Aucun sélectionné</div>
+                  </div>
+                  <div class="cur-diag-section">
+                    <div class="cur-diag-title">File de jobs</div>
+                    <div style="padding:2px 0">
+                      <button class="btn btn-ghost btn-sm" id="cons-refresh-jobs" style="width:100%">↺ Rafraîchir</button>
+                    </div>
+                  </div>
+                  <div class="cur-diag-jobs">
+                    <div class="cons-jobs" id="cur-jobs-inline">
+                      <div class="cons-jobs-list"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -2075,8 +2643,31 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <button class="btn btn-secondary btn-sm" id="cons-batch-segment">🔤 Segmenter tout</button>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-seg">↺ Actualiser</button>
             </div>
+            <!-- Params panel -->
+            <div class="acts-params">
+              <div class="acts-params-group">
+                <span class="acts-params-label">Portée</span>
+                <label class="acts-params-radio"><input type="radio" name="seg-scope" value="normalized" checked> Normalisés seulement</label>
+                <label class="acts-params-radio"><input type="radio" name="seg-scope" value="all"> Tous</label>
+              </div>
+              <div class="acts-params-sep"></div>
+              <div class="acts-params-group">
+                <span class="acts-params-label">Type</span>
+                <select class="acts-params-select" id="seg-kind">
+                  <option value="utterance">Utterance (locuteur)</option>
+                  <option value="sentence">Phrase</option>
+                </select>
+              </div>
+            </div>
             <div class="cons-error seg-error" style="display:none"></div>
-            <div class="seg-table-wrap cons-loading">Chargement…</div>
+            <div class="acts-split">
+              <div class="acts-ep-list">
+                <div class="seg-table-wrap cons-loading">Chargement…</div>
+              </div>
+              <div class="acts-text-panel" id="seg-text-panel">
+                <div class="acts-text-empty">← Sélectionnez un épisode</div>
+              </div>
+            </div>
           </div>
 
           <!-- Alignement sub-pane -->
@@ -2086,7 +2677,28 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <span class="cons-toolbar-title">Alignement</span>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-align">↺ Actualiser</button>
             </div>
-            <div class="align-ep-wrap cons-loading">Chargement…</div>
+            <!-- Params panel -->
+            <div class="acts-params">
+              <div class="acts-params-group">
+                <span class="acts-params-label">Segments</span>
+                <select class="acts-params-select" id="align-segment-kind-pre">
+                  <option value="utterance">Utterance (locuteur)</option>
+                  <option value="sentence">Phrase</option>
+                </select>
+              </div>
+              <div class="acts-params-sep"></div>
+              <div class="acts-params-group" style="font-size:0.76rem;color:var(--text-muted)">
+                Sélectionnez un épisode segmenté + SRT pour lancer l'alignement.
+              </div>
+            </div>
+            <div class="acts-split">
+              <div class="acts-ep-list">
+                <div class="align-ep-wrap cons-loading">Chargement…</div>
+              </div>
+              <div class="acts-text-panel" id="align-text-panel">
+                <div class="acts-text-empty">← Sélectionnez un épisode</div>
+              </div>
+            </div>
           </div>
 
         </div><!-- /section actions -->
@@ -2119,7 +2731,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         </div>
 
       </div><!-- /cons-main -->
-    </div>`;
+    </div><!-- /cons-shell -->
+    </div><!-- /cons-root -->`;
 
   // ── Helper: switch section ────────────────────────────────────────────────
   function activateSection(sec: string) {
@@ -2154,6 +2767,54 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       const wrap = container.querySelector(".align-ep-wrap");
       if (wrap?.classList.contains("cons-loading")) loadAndRenderAlignement(container);
     }
+    // Init Curation params panel on first show
+    if (subview === "curation") initCurationParams(container);
+  }
+
+  // ── Curation params : profil de normalisation ─────────────────────────────
+  async function initCurationParams(cnt: HTMLElement) {
+    const sel = cnt.querySelector<HTMLSelectElement>("#cur-profile");
+    if (!sel || sel.dataset.wired) return;
+    sel.dataset.wired = "1";
+    // Populate from cached config (or fetch if missing)
+    if (!_cachedConfig) {
+      try { _cachedConfig = await fetchConfig(); } catch { return; }
+    }
+    sel.value = _cachedConfig.normalize_profile;
+    renderCurationRuleChips(cnt, sel.value);
+    sel.addEventListener("change", async () => {
+      const fb = cnt.querySelector<HTMLElement>("#cur-profile-fb")!;
+      fb.textContent = "Enregistrement…";
+      fb.style.color = "var(--text-muted)";
+      try {
+        _cachedConfig = await saveConfig({ normalize_profile: sel.value });
+        renderCurationRuleChips(cnt, sel.value);
+        fb.textContent = "✓";
+        fb.style.color = "var(--success, #16a34a)";
+        setTimeout(() => { fb.textContent = ""; }, 1500);
+      } catch (e) {
+        fb.textContent = e instanceof ApiError ? e.message : "Erreur";
+        fb.style.color = "var(--danger, #dc2626)";
+      }
+    });
+
+    // Wire preview mode tabs
+    cnt.querySelectorAll<HTMLButtonElement>(".cur-preview-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        cnt.querySelectorAll(".cur-preview-tab").forEach((t) => t.classList.remove("active"));
+        tab.classList.add("active");
+        if (_curPreviewData && _curPreviewEpId) {
+          const activeItem = cnt.querySelector<HTMLElement>(".cur-ep-item.active");
+          const epTitle = activeItem?.dataset.epTitle ?? _curPreviewEpId;
+          renderCurationPreviewMode(
+            cnt.querySelector<HTMLElement>("#cur-preview-panes")!,
+            _curPreviewData,
+            tab.dataset.mode!,
+            epTitle,
+          );
+        }
+      });
+    });
   }
 
   // ── Sidebar nav tab clicks ────────────────────────────────────────────────
@@ -2186,13 +2847,16 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   container.querySelector<HTMLButtonElement>("#cons-batch-segment")
     ?.addEventListener("click", async () => {
       const episodes = _cachedEpisodes?.episodes ?? [];
+      const scopeAll = (container.querySelector<HTMLInputElement>("input[name='seg-scope'][value='all']")?.checked) ?? false;
+      const segKind  = (container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "utterance");
       const toSegment = episodes.filter((ep) => {
         const t = ep.sources.find((s) => s.source_key === "transcript");
-        return t?.state === "normalized";
+        if (!t?.available) return false;
+        return scopeAll ? (t.state !== "segmented") : (t.state === "normalized");
       });
       if (toSegment.length === 0) return;
       for (const ep of toSegment) {
-        try { await createJob("segment_transcript", ep.episode_id); } catch { /* skip */ }
+        try { await createJob("segment_transcript", ep.episode_id, "transcript", { segment_kind: segKind }); } catch { /* skip */ }
       }
       startJobPoll(container);
       await loadAndRenderSegmentation(container);
@@ -2252,23 +2916,6 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       }
     });
 
-  // ── Jobs toggle ───────────────────────────────────────────────────────────
-  container
-    .querySelector<HTMLElement>("#cons-jobs-toggle")!
-    .addEventListener("click", () => {
-      _jobsExpanded = !_jobsExpanded;
-      const body = container.querySelector<HTMLElement>("#cons-jobs-body");
-      const hdr  = container.querySelector<HTMLElement>("#cons-jobs-toggle");
-      if (body) body.style.display = _jobsExpanded ? "block" : "none";
-      if (hdr) hdr.textContent = (_jobsExpanded ? "▾" : "▸") + " File de jobs";
-      if (hdr) {
-        const span = document.createElement("span");
-        span.className = "cons-jobs-count";
-        span.textContent = "…";
-        hdr.appendChild(span);
-      }
-    });
-
   // ── Refresh jobs button ───────────────────────────────────────────────────
   container
     .querySelector<HTMLButtonElement>("#cons-refresh-jobs")!
@@ -2285,8 +2932,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
     loadAndRender(container);
     refreshJobs(container).then(() => startJobPoll(container));
   } else {
-    const tableWrap = container.querySelector<HTMLElement>(".cons-table-wrap")!;
-    tableWrap.innerHTML = `<div class="cons-empty">Backend HIMYC hors ligne.<br>Lancez : <code>uvicorn howimetyourcorpus.api.server:app --port 8765</code></div>`;
+    const epListEl = container.querySelector<HTMLElement>("#cur-ep-list");
+    if (epListEl) epListEl.innerHTML = `<div style="color:var(--danger);font-size:0.78rem">Backend HIMYC hors ligne.<br>Lancez : <code>uvicorn howimetyourcorpus.api.server:app --port 8765</code></div>`;
     const unsub2 = ctx.onStatusChange((s) => {
       if (s.online) {
         loadAndRender(container);
