@@ -11,7 +11,7 @@
  * - Healthcheck + polling 30s
  */
 
-import type { ShellContext, BackendStatus, AlignerHandoff } from "./context.ts";
+import type { ShellContext, BackendStatus, AlignerHandoff, InspecterTarget } from "./context.ts";
 import { fetchHealth, API_BASE } from "./api.ts";
 import { mountHub,           disposeHub }           from "./modules/hubModule.ts";
 import { mountConcordancier, disposeConcordancier } from "./modules/concordancierModule.ts";
@@ -230,6 +230,7 @@ let _backendStatus: BackendStatus = { online: false };
 const _statusListeners: Array<(s: BackendStatus) => void> = [];
 let _pollInterval: ReturnType<typeof setInterval> | null = null;
 let _handoff: AlignerHandoff | null = null;
+let _inspecterTarget: InspecterTarget | null = null;
 
 // ─── ShellContext ─────────────────────────────────────────────────────────────
 
@@ -246,6 +247,8 @@ const shellContext: ShellContext = {
   navigateTo(mode) { _navigateTo(mode as Mode); },
   setHandoff(data)  { _handoff = data; },
   getHandoff()      { const h = _handoff; _handoff = null; return h; },
+  setInspecterTarget(t) { _inspecterTarget = t; },
+  getInspecterTarget()  { const t = _inspecterTarget; _inspecterTarget = null; return t; },
 };
 
 function _setBackendStatus(status: BackendStatus) {

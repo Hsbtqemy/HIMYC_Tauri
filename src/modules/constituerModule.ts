@@ -12,6 +12,7 @@
 import type { ShellContext } from "../context";
 import {
   fetchEpisodes,
+  fetchConfig,
   importTranscript,
   importSrt,
   fetchJobs,
@@ -20,6 +21,7 @@ import {
   type Episode,
   type EpisodeSource,
   type EpisodesResponse,
+  type ConfigResponse,
   type JobRecord,
   type JobType,
   ApiError,
@@ -90,6 +92,27 @@ const CSS = `
 .cons-placeholder-icon { font-size: 2rem; }
 .cons-placeholder-title { font-size: 0.95rem; font-weight: 600; color: var(--text); }
 .cons-placeholder-desc { font-size: 0.8rem; line-height: 1.5; max-width: 320px; }
+
+/* ── Cards (Importer) ───────────────────────────────────────── */
+.cons-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.5);
+  padding: 1rem 1.25rem;
+}
+.cons-card-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.6rem;
+}
+.cons-card-body { font-size: 0.85rem; }
+
+/* ── Search ─────────────────────────────────────────────────── */
+.cons-search { outline: none; }
+.cons-search:focus { border-color: var(--accent) !important; }
 
 /* ── Jobs panel ────────────────────────────────────────────── */
 .cons-jobs {
@@ -276,6 +299,12 @@ let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _jobsExpanded = true;
 let _activeSection = "actions";
 let _page = 0;
+/** Données épisodes en cache pour Documents (rechargées à chaque mount section) */
+let _cachedEpisodes: EpisodesResponse | null = null;
+/** Config projet en cache */
+let _cachedConfig: ConfigResponse | null = null;
+/** Référence ShellContext (nécessaire pour navigateTo depuis Documents) */
+let _ctx: ShellContext | null = null;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -650,6 +679,224 @@ async function loadAndRender(container: HTMLElement) {
   }
 }
 
+// ── Section Documents ───────────────────────────────────────────────────────
+
+function renderDocumentsSection(pane: HTMLElement) {
+  pane.innerHTML = `
+    <div class="cons-toolbar">
+      <span class="cons-toolbar-title">Documents</span>
+      <input class="cons-search" id="docs-search" type="search" placeholder="Filtrer…" style="font-size:0.8rem;padding:3px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);width:180px">
+      <button class="btn btn-ghost" id="docs-refresh" style="font-size:12px;padding:4px 10px">↺ Actualiser</button>
+    </div>
+    <div class="cons-error" id="docs-error" style="display:none"></div>
+    <div class="cons-table-wrap" id="docs-table-wrap">
+      <div class="cons-empty">Chargement…</div>
+    </div>`;
+
+  pane.querySelector<HTMLButtonElement>("#docs-refresh")!
+    .addEventListener("click", () => loadDocuments(pane));
+
+  pane.querySelector<HTMLInputElement>("#docs-search")!
+    .addEventListener("input", (e) => {
+      const q = (e.target as HTMLInputElement).value.toLowerCase();
+      renderDocumentsTable(pane, q);
+    });
+
+  loadDocuments(pane);
+}
+
+async function loadDocuments(pane: HTMLElement) {
+  try {
+    _cachedEpisodes = await fetchEpisodes();
+    renderDocumentsTable(pane, "");
+  } catch (e) {
+    const errEl = pane.querySelector<HTMLElement>("#docs-error");
+    if (errEl) {
+      errEl.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+      errEl.style.display = "block";
+    }
+  }
+}
+
+function renderDocumentsTable(pane: HTMLElement, filter: string) {
+  const wrap = pane.querySelector<HTMLElement>("#docs-table-wrap");
+  if (!wrap || !_cachedEpisodes) return;
+
+  const episodes = filter
+    ? _cachedEpisodes.episodes.filter(
+        (ep) =>
+          ep.episode_id.toLowerCase().includes(filter) ||
+          ep.title.toLowerCase().includes(filter),
+      )
+    : _cachedEpisodes.episodes;
+
+  if (episodes.length === 0) {
+    wrap.innerHTML = `<div class="cons-empty">${filter ? "Aucun résultat pour « " + escapeHtml(filter) + " »." : "Aucun épisode dans ce projet."}</div>`;
+    return;
+  }
+
+  const srtLangs = collectSrtLangs(episodes);
+  const srtHeaders = srtLangs.map((l) => `<th>SRT ${escapeHtml(l.toUpperCase())}</th>`).join("");
+
+  const rows = episodes.map((ep) => {
+    const transcript = sourceForKey(ep, "transcript");
+    const transcriptCell = transcript
+      ? stateBadge(transcript)
+      : `<span class="cons-badge absent">—</span>`;
+
+    const srtCells = srtLangs.map((lang) => {
+      const src = sourceForKey(ep, `srt_${lang}`);
+      return `<td>${src ? stateBadge(src) : `<span class="cons-badge absent">—</span>`}</td>`;
+    }).join("");
+
+    return `
+      <tr>
+        <td style="font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
+        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title)}</td>
+        <td>${transcriptCell}</td>
+        ${srtCells}
+        <td>
+          <button class="btn btn-secondary btn-xs" data-inspecter="${escapeHtml(ep.episode_id)}" style="font-size:11px;padding:3px 8px" title="Ouvrir dans l'Inspecter">→ Inspecter</button>
+        </td>
+      </tr>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <div style="padding:4px 16px;font-size:0.75rem;color:var(--text-muted)">${episodes.length} épisode${episodes.length > 1 ? "s" : ""}</div>
+    <table class="cons-table">
+      <thead>
+        <tr>
+          <th>Épisode</th><th>Titre</th><th>Transcript</th>
+          ${srtHeaders}
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  wrap.querySelectorAll<HTMLButtonElement>("[data-inspecter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!_ctx) return;
+      _ctx.setInspecterTarget({ episode_id: btn.dataset.inspecter! });
+      _ctx.navigateTo("inspecter");
+    });
+  });
+}
+
+// ── Section Importer ────────────────────────────────────────────────────────
+
+function renderImporterSection(pane: HTMLElement) {
+  pane.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:1rem;padding:1.25rem;overflow-y:auto;height:100%">
+      <!-- Config projet -->
+      <div class="cons-card">
+        <div class="cons-card-title">Projet</div>
+        <div id="imp-config-body" class="cons-card-body">Chargement…</div>
+        <button class="btn btn-ghost" id="imp-config-refresh" style="font-size:11px;padding:2px 8px;margin-top:6px">↺ Rafraîchir</button>
+      </div>
+      <!-- Import fichiers -->
+      <div class="cons-card">
+        <div class="cons-card-title">Importer des fichiers locaux</div>
+        <div class="cons-card-body" style="display:flex;flex-direction:column;gap:0.6rem">
+          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+            <label style="font-size:0.8rem;color:var(--text-muted);min-width:90px">Épisode</label>
+            <select id="imp-ep-select" class="insp-select" style="max-width:280px">
+              <option value="">— chargement… —</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+            <button class="btn btn-primary" id="imp-transcript-btn" style="font-size:0.8rem">📄 Importer transcript</button>
+            <button class="btn btn-secondary" id="imp-srt-btn" style="font-size:0.8rem">🔤 Importer SRT</button>
+          </div>
+          <div id="imp-feedback" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em"></div>
+        </div>
+      </div>
+      <!-- Sources web (placeholder) -->
+      <div class="cons-card">
+        <div class="cons-card-title">Sources web</div>
+        <div class="cons-card-body" style="color:var(--text-muted);font-size:0.82rem;line-height:1.6">
+          Import depuis subslikescript · TVMaze · OpenSubtitles API.<br>
+          <em style="opacity:0.6">En développement — MX-021b.</em>
+        </div>
+      </div>
+    </div>`;
+
+  loadImporterConfig(pane);
+
+  pane.querySelector<HTMLButtonElement>("#imp-config-refresh")!
+    .addEventListener("click", () => loadImporterConfig(pane));
+
+  wireImporterButtons(pane);
+}
+
+async function loadImporterConfig(pane: HTMLElement) {
+  const body = pane.querySelector<HTMLElement>("#imp-config-body");
+  if (!body) return;
+  try {
+    _cachedConfig = await fetchConfig();
+    const cfg = _cachedConfig;
+    body.innerHTML = `
+      <table style="font-size:0.8rem;border-collapse:collapse;width:100%">
+        <tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap">Projet</td><td><strong>${escapeHtml(cfg.project_name)}</strong></td></tr>
+        <tr><td style="color:var(--text-muted);padding:2px 8px 2px 0">Chemin</td><td style="font-family:ui-monospace,monospace;font-size:0.75rem;word-break:break-all">${escapeHtml(cfg.project_path)}</td></tr>
+        <tr><td style="color:var(--text-muted);padding:2px 8px 2px 0">Profil</td><td><code>${escapeHtml(cfg.normalize_profile)}</code></td></tr>
+        <tr><td style="color:var(--text-muted);padding:2px 8px 2px 0">Langues</td><td>${cfg.languages.map((l) => `<span class="cons-badge normalized" style="margin-right:3px">${escapeHtml(l)}</span>`).join("")}</td></tr>
+      </table>`;
+
+    // Peupler le sélecteur d'épisodes
+    const epSel = pane.querySelector<HTMLSelectElement>("#imp-ep-select");
+    if (epSel && _cachedEpisodes) {
+      populateEpSelect(epSel, _cachedEpisodes.episodes);
+    } else if (epSel) {
+      fetchEpisodes().then((data) => {
+        _cachedEpisodes = data;
+        populateEpSelect(epSel, data.episodes);
+      }).catch(() => {});
+    }
+  } catch (e) {
+    body.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+  }
+}
+
+function populateEpSelect(sel: HTMLSelectElement, episodes: Episode[]) {
+  sel.innerHTML = episodes.length === 0
+    ? `<option value="">— aucun épisode —</option>`
+    : episodes.map((ep) => `<option value="${escapeHtml(ep.episode_id)}">${escapeHtml(ep.episode_id)} — ${escapeHtml(ep.title)}</option>`).join("");
+}
+
+function wireImporterButtons(pane: HTMLElement) {
+  const feedback = pane.querySelector<HTMLElement>("#imp-feedback")!;
+
+  const setFeedback = (msg: string, ok = true) => {
+    feedback.textContent = msg;
+    feedback.style.color = ok ? "var(--success, #16a34a)" : "var(--danger, #dc2626)";
+  };
+
+  pane.querySelector<HTMLButtonElement>("#imp-transcript-btn")!
+    .addEventListener("click", async () => {
+      const epId = pane.querySelector<HTMLSelectElement>("#imp-ep-select")!.value;
+      if (!epId) { setFeedback("Sélectionnez un épisode.", false); return; }
+      await handleImportTranscript(
+        epId,
+        () => { setFeedback(`Transcript importé pour ${epId}.`); _cachedEpisodes = null; },
+        (msg) => setFeedback(msg, false),
+      );
+    });
+
+  pane.querySelector<HTMLButtonElement>("#imp-srt-btn")!
+    .addEventListener("click", async () => {
+      const epId = pane.querySelector<HTMLSelectElement>("#imp-ep-select")!.value;
+      if (!epId) { setFeedback("Sélectionnez un épisode.", false); return; }
+      const lang = window.prompt("Langue de la piste SRT (ex: en, fr, it) :");
+      if (!lang?.trim()) return;
+      await handleImportSrt(
+        epId, lang.trim(),
+        () => { setFeedback(`SRT ${lang} importé pour ${epId}.`); _cachedEpisodes = null; },
+        (msg) => setFeedback(msg, false),
+      );
+    });
+}
+
 // ── Mount / Dispose ─────────────────────────────────────────────────────────
 
 export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
@@ -663,6 +910,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   }
 
   _container = container;
+  _ctx = ctx;
 
   const sections: Array<{ id: string; label: string; badge: string }> = [
     { id: "importer",    label: "Importer",    badge: "sources" },
@@ -770,8 +1018,24 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         .forEach((b) => b.classList.toggle("active", b.dataset.section === sec));
       container.querySelectorAll<HTMLElement>(".cons-section-pane")
         .forEach((p) => p.classList.toggle("active", p.dataset.section === sec));
+      // Monter les sections dynamiques à la première activation
+      const pane = container.querySelector<HTMLElement>(`.cons-section-pane[data-section="${sec}"]`)!;
+      if (sec === "documents" && pane.querySelector(".cons-placeholder")) {
+        renderDocumentsSection(pane);
+      } else if (sec === "importer" && pane.querySelector(".cons-placeholder")) {
+        renderImporterSection(pane);
+      }
     });
   });
+
+  // Si la section active par défaut est Documents ou Importer, la monter immédiatement
+  if (_activeSection === "documents") {
+    const pane = container.querySelector<HTMLElement>(".cons-section-pane[data-section='documents']")!;
+    renderDocumentsSection(pane);
+  } else if (_activeSection === "importer") {
+    const pane = container.querySelector<HTMLElement>(".cons-section-pane[data-section='importer']")!;
+    renderImporterSection(pane);
+  }
 
   // Refresh episodes button
   container
@@ -841,4 +1105,5 @@ export function disposeConstituer() {
   stopJobPoll();
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   _container = null;
+  _ctx = null;
 }

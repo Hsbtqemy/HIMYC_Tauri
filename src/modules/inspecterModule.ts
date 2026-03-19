@@ -489,8 +489,9 @@ export function mountInspecter(container: HTMLElement, ctx: ShellContext) {
   }
 
   // Réinitialiser l'état à chaque montage
-  _selectedEpId   = "";
-  _selectedSrcKey = "";
+  const target = ctx.getInspecterTarget();
+  _selectedEpId   = target?.episode_id  ?? "";
+  _selectedSrcKey = target?.source_key  ?? "";
   _activeTab      = "raw";
   _episodes       = [];
 

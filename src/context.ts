@@ -30,6 +30,12 @@ export interface AlignerHandoff {
   segment_kind: "sentence" | "utterance";
 }
 
+/** Cible de pré-sélection pour l'Inspecter (depuis Documents — MX-021). */
+export interface InspecterTarget {
+  episode_id: string;
+  source_key?: string;
+}
+
 export interface ShellContext {
   /** URL de base de l'API backend HIMYC (ex: "http://localhost:8765"). */
   getApiBase(): string;
@@ -58,4 +64,9 @@ export interface ShellContext {
 
   /** Lire les données de handoff (null si navigation directe). */
   getHandoff(): AlignerHandoff | null;
+
+  /** Définir l'épisode/source à pré-sélectionner à l'ouverture de l'Inspecter. */
+  setInspecterTarget(t: InspecterTarget | null): void;
+  /** Lire et consommer la cible Inspecter (null si navigation directe). */
+  getInspecterTarget(): InspecterTarget | null;
 }
