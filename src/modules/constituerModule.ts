@@ -3329,7 +3329,7 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
         <button class="audit-back-btn" id="audit-back">← Runs</button>
         <span style="font-size:0.8rem;font-weight:600;color:var(--text);flex:1">${escapeHtml(epTitle)}</span>
         <span style="font-size:0.72rem;color:var(--text-muted);font-family:ui-monospace,monospace">${escapeHtml(runId.slice(0, 14))}…</span>
-        <button id="audit-export-btn" style="
+        <button id="audit-export-html-btn" style="
           margin-left:auto;
           padding:3px 10px;
           font-size:0.72rem;
@@ -3342,7 +3342,20 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
           align-items:center;
           gap:4px;
           white-space:nowrap;
-        ">⬇ Export JSON</button>
+        ">⬇ HTML</button>
+        <button id="audit-export-btn" style="
+          padding:3px 10px;
+          font-size:0.72rem;
+          background:var(--surface);
+          border:1px solid var(--border);
+          border-radius:4px;
+          cursor:pointer;
+          color:var(--text);
+          display:flex;
+          align-items:center;
+          gap:4px;
+          white-space:nowrap;
+        ">⬇ JSON</button>
       </div>
       <div id="audit-kpi-strip" class="audit-stats-strip" style="padding-top:4px;padding-bottom:4px">
         <span style="font-size:0.76rem;color:var(--text-muted)">Chargement stats…</span>
@@ -3414,7 +3427,7 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
   // Export rapport JSON (MX-038)
   panel.querySelector<HTMLButtonElement>("#audit-export-btn")!.addEventListener("click", async () => {
     const btn = panel.querySelector<HTMLButtonElement>("#audit-export-btn")!;
-    const origText = btn.textContent ?? "⬇ Export JSON";
+    const origText = btn.textContent ?? "⬇ JSON";
     btn.disabled = true;
     btn.textContent = "Chargement…";
     try {
@@ -3424,6 +3437,21 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
     } finally {
       btn.disabled = false;
       btn.textContent = origText;
+    }
+  });
+
+  // Export rapport HTML (G-009 / MX-046)
+  panel.querySelector<HTMLButtonElement>("#audit-export-html-btn")!.addEventListener("click", async () => {
+    const btn = panel.querySelector<HTMLButtonElement>("#audit-export-html-btn")!;
+    btn.disabled = true;
+    btn.textContent = "Chargement…";
+    try {
+      await exportAuditReportHtml(epId, epTitle, runId);
+    } catch (e) {
+      alert(`Export HTML échoué : ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "⬇ HTML";
     }
   });
 
@@ -4220,6 +4248,104 @@ async function exportAuditReport(
   if (!filePath) return;  // utilisateur a annulé
 
   await writeTextFile(filePath, json);
+}
+
+/**
+ * Génère un rapport HTML de l'audit et déclenche un téléchargement (blob URL).
+ * G-009 / MX-046 — pas de dialog Tauri, download standard navigateur.
+ */
+async function exportAuditReportHtml(
+  epId: string,
+  epTitle: string,
+  runId: string,
+): Promise<void> {
+  const [stats, linksRes] = await Promise.all([
+    fetchAlignRunStats(epId, runId),
+    fetchAuditLinks(epId, runId, { limit: 9999, offset: 0 }),
+  ]);
+
+  const byStatus = stats.by_status ?? {};
+  const nAccepted = byStatus.accepted ?? 0;
+  const nRejected = byStatus.rejected ?? 0;
+  const nIgnored  = byStatus.ignored  ?? 0;
+  const nAuto     = byStatus.auto     ?? 0;
+  const pct       = stats.coverage_pct != null ? `${Math.round(stats.coverage_pct)}%` : "—";
+  const avgConf   = stats.avg_confidence != null ? `${Math.round(stats.avg_confidence * 100)}%` : "—";
+  const now       = new Date().toLocaleString("fr-FR");
+
+  const statusBadge = (s: string) => {
+    const colors: Record<string, string> = {
+      accepted: "#16a34a", rejected: "#dc2626", ignored: "#64748b", auto: "#0ea5e9",
+    };
+    return `<span style="background:${colors[s] ?? "#888"};color:#fff;border-radius:3px;padding:1px 5px;font-size:0.72em;font-weight:700">${s}</span>`;
+  };
+
+  const rowsHtml = linksRes.links.map((lnk) => {
+    const conf = lnk.confidence != null ? `${Math.round(lnk.confidence * 100)}%` : "—";
+    return `<tr>
+      <td style="font-family:monospace;font-size:.7em;color:#888">${lnk.segment_n ?? "—"}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(lnk.text_segment ?? "")}">${escapeHtml((lnk.text_segment ?? "").slice(0, 80))}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(lnk.text_pivot ?? "")}">${escapeHtml((lnk.text_pivot ?? "").slice(0, 60))}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(lnk.text_target ?? "")}">${escapeHtml((lnk.text_target ?? "").slice(0, 60))}</td>
+      <td style="text-align:center;white-space:nowrap">${lnk.lang ?? "—"}</td>
+      <td style="text-align:center;white-space:nowrap">${conf}</td>
+      <td style="text-align:center">${statusBadge(lnk.status)}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Rapport audit — ${escapeHtml(epTitle)}</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 0 auto; padding: 1.5rem; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.3rem; font-weight: 700; margin-bottom: .25rem; }
+  .meta { font-size: .8rem; color: #888; margin-bottom: 1.5rem; font-family: monospace; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .75rem; margin-bottom: 1.5rem; }
+  .kpi { background: #f8f9fa; border: 1px solid #e5e7eb; border-radius: 6px; padding: .75rem; text-align: center; }
+  .kpi-val { font-size: 1.4rem; font-weight: 700; color: #1a1a1a; }
+  .kpi-lbl { font-size: .72rem; color: #6b7280; margin-top: .15rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: .5rem; }
+  th { background: #f3f4f6; border-bottom: 2px solid #d1d5db; padding: 5px 8px; text-align: left; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
+  td { padding: 4px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .footer { font-size: .72rem; color: #9ca3af; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<h1>Rapport d'audit — ${escapeHtml(epTitle)}</h1>
+<div class="meta">Run : ${escapeHtml(runId)} · Généré le ${escapeHtml(now)}</div>
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-val">${stats.nb_links}</div><div class="kpi-lbl">Liens total</div></div>
+  <div class="kpi"><div class="kpi-val">${nAccepted}</div><div class="kpi-lbl">Acceptés</div></div>
+  <div class="kpi"><div class="kpi-val">${nRejected}</div><div class="kpi-lbl">Rejetés</div></div>
+  <div class="kpi"><div class="kpi-val">${nIgnored}</div><div class="kpi-lbl">Ignorés</div></div>
+  <div class="kpi"><div class="kpi-val">${nAuto}</div><div class="kpi-lbl">Auto</div></div>
+  <div class="kpi"><div class="kpi-val">${pct}</div><div class="kpi-lbl">Couverture</div></div>
+  <div class="kpi"><div class="kpi-val">${avgConf}</div><div class="kpi-lbl">Conf. moy.</div></div>
+  <div class="kpi"><div class="kpi-val">${stats.n_collisions ?? 0}</div><div class="kpi-lbl">Collisions</div></div>
+</div>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Transcript</th><th>Pivot</th><th>Cible</th><th>Lang</th><th>Conf.</th><th>Statut</th></tr>
+  </thead>
+  <tbody>${rowsHtml}</tbody>
+</table>
+<div class="footer">HIMYC · ${escapeHtml(runId)}</div>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  const safeEp  = epId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
+  a.href     = url;
+  a.download = `himyc_audit_${safeEp}_${runId.slice(0, 8)}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Concordancier parallèle ───────────────────────────────────────────────────
