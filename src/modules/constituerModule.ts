@@ -1374,6 +1374,134 @@ function wireImporterButtons(pane: HTMLElement) {
   });
 }
 
+// ── Sous-vue Segmentation ────────────────────────────────────────────────────
+
+function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
+  const wrap = container.querySelector<HTMLElement>(".seg-table-wrap");
+  if (!wrap) return;
+  if (episodes.length === 0) {
+    wrap.innerHTML = `<div class="cons-loading">Aucun épisode dans le projet.</div>`;
+    return;
+  }
+  const rows = episodes.map((ep) => {
+    const t = ep.sources.find((s) => s.source_key === "transcript");
+    const state = t?.state ?? "unknown";
+    const stateLabel =
+      state === "segmented"   ? `<span class="cons-badge segmented">segmenté</span>` :
+      state === "normalized"  ? `<span class="cons-badge normalized">normalisé</span>` :
+      state === "raw"         ? `<span class="cons-badge raw">brut</span>` :
+                                `<span class="cons-badge">—</span>`;
+    const canSegment = state === "normalized";
+    const action = canSegment
+      ? `<button class="btn btn-primary btn-sm seg-ep-btn" data-ep="${escapeHtml(ep.episode_id)}">Segmenter</button>`
+      : state === "segmented"
+        ? `<span style="color:var(--success,#16a34a);font-size:0.78rem">✓</span>`
+        : `<span style="color:var(--text-muted);font-size:0.78rem">—</span>`;
+    return `<tr>
+      <td style="white-space:nowrap;font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
+      <td>${escapeHtml(ep.title)}</td>
+      <td>${stateLabel}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join("");
+  wrap.innerHTML = `
+    <table class="cons-table">
+      <thead><tr><th>ID</th><th>Titre</th><th>État</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  wrap.querySelectorAll<HTMLButtonElement>(".seg-ep-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const epId = btn.dataset.ep!;
+      btn.disabled = true; btn.textContent = "…";
+      try {
+        await createJob("segment_transcript", epId);
+        startJobPoll(container);
+        btn.textContent = "✓ en queue";
+      } catch (e) {
+        btn.disabled = false; btn.textContent = "Segmenter";
+        const errEl = container.querySelector<HTMLElement>(".seg-error");
+        if (errEl) { errEl.textContent = e instanceof ApiError ? e.message : String(e); errEl.style.display = "block"; }
+      }
+    });
+  });
+}
+
+async function loadAndRenderSegmentation(container: HTMLElement) {
+  const wrap = container.querySelector<HTMLElement>(".seg-table-wrap");
+  if (wrap) wrap.innerHTML = `<div class="cons-loading">Chargement…</div>`;
+  try {
+    const data = await fetchEpisodes();
+    _cachedEpisodes = data;
+    renderSegmentationPane(container, data.episodes);
+  } catch (e) {
+    if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
+  }
+}
+
+// ── Sous-vue Alignement ──────────────────────────────────────────────────────
+
+function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
+  const wrap = container.querySelector<HTMLElement>(".align-ep-wrap");
+  if (!wrap) return;
+  if (episodes.length === 0) {
+    wrap.innerHTML = `<div class="cons-loading">Aucun épisode dans le projet.</div>`;
+    return;
+  }
+  const rows = episodes.map((ep) => {
+    const t = ep.sources.find((s) => s.source_key === "transcript");
+    const srts = ep.sources.filter((s) => s.source_key.startsWith("srt_"));
+    const isSegmented = t?.state === "segmented";
+    const srtList = srts.length > 0
+      ? srts.map((s) => `<span class="cons-badge">${escapeHtml(s.source_key.replace("srt_", ""))}</span>`).join(" ")
+      : `<span style="color:var(--text-muted);font-size:0.78rem">—</span>`;
+    const canAlign = isSegmented && srts.length > 0;
+    const action = canAlign
+      ? `<button class="btn btn-primary btn-sm align-ep-btn" data-ep="${escapeHtml(ep.episode_id)}" data-title="${escapeHtml(ep.title)}" data-srts="${escapeHtml(srts.map((s) => s.source_key).join(","))}">→ Aligner</button>`
+      : `<span style="color:var(--text-muted);font-size:0.78rem" title="${!isSegmented ? "Segmenter d'abord" : "Importer un SRT"}">${!isSegmented ? "seg. manquante" : "SRT manquant"}</span>`;
+    return `<tr>
+      <td style="white-space:nowrap;font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
+      <td>${escapeHtml(ep.title)}</td>
+      <td>${isSegmented ? `<span class="cons-badge segmented">✓</span>` : `<span class="cons-badge raw">—</span>`}</td>
+      <td>${srtList}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join("");
+  wrap.innerHTML = `
+    <table class="cons-table">
+      <thead><tr><th>ID</th><th>Titre</th><th>Segments</th><th>SRTs</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  wrap.querySelectorAll<HTMLButtonElement>(".align-ep-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const epId    = btn.dataset.ep!;
+      const epTitle = btn.dataset.title!;
+      const srtKeys = (btn.dataset.srts || "").split(",").filter(Boolean);
+      const handoff = {
+        episode_id:    epId,
+        episode_title: epTitle,
+        pivot_key:     "transcript",
+        target_keys:   srtKeys,
+        mode:          "transcript_first" as const,
+        segment_kind:  "utterance" as const,
+      };
+      _ctx?.setHandoff(handoff);
+      _ctx?.navigateTo("aligner");
+    });
+  });
+}
+
+async function loadAndRenderAlignement(container: HTMLElement) {
+  const wrap = container.querySelector<HTMLElement>(".align-ep-wrap");
+  if (wrap) wrap.innerHTML = `<div class="cons-loading">Chargement…</div>`;
+  try {
+    const data = await fetchEpisodes();
+    _cachedEpisodes = data;
+    renderAlignementPane(container, data.episodes);
+  } catch (e) {
+    if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
+  }
+}
+
 // ── Section Exporter ─────────────────────────────────────────────────────────
 
 function renderExporterSection(pane: HTMLElement) {
@@ -1856,15 +1984,11 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             <div class="cons-toolbar">
               <button class="acts-back-btn" id="cons-back-segmentation">← Actions</button>
               <span class="cons-toolbar-title">Segmentation</span>
+              <button class="btn btn-secondary btn-sm" id="cons-batch-segment">🔤 Segmenter tout</button>
+              <button class="btn btn-ghost btn-sm" id="cons-refresh-seg">↺ Actualiser</button>
             </div>
-            <div class="cons-placeholder">
-              <div class="cons-placeholder-icon">🔤</div>
-              <div class="cons-placeholder-title">Segmentation</div>
-              <div class="cons-placeholder-desc">
-                Découper les transcripts normalisés en segments.<br>
-                <em style="opacity:0.6">En développement.</em>
-              </div>
-            </div>
+            <div class="cons-error seg-error" style="display:none"></div>
+            <div class="seg-table-wrap cons-loading">Chargement…</div>
           </div>
 
           <!-- Alignement sub-pane -->
@@ -1872,15 +1996,9 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             <div class="cons-toolbar">
               <button class="acts-back-btn" id="cons-back-alignement">← Actions</button>
               <span class="cons-toolbar-title">Alignement</span>
+              <button class="btn btn-ghost btn-sm" id="cons-refresh-align">↺ Actualiser</button>
             </div>
-            <div class="cons-placeholder">
-              <div class="cons-placeholder-icon">⚡</div>
-              <div class="cons-placeholder-title">Alignement</div>
-              <div class="cons-placeholder-desc">
-                Lancer et consulter les runs d'alignement par épisode.<br>
-                <em style="opacity:0.6">En développement.</em>
-              </div>
-            </div>
+            <div class="align-ep-wrap cons-loading">Chargement…</div>
           </div>
 
         </div><!-- /section actions -->
@@ -1939,6 +2057,15 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       .forEach((p) => p.classList.toggle("active", p.dataset.subview === subview));
     container.querySelectorAll<HTMLButtonElement>(".cons-nav-tree-link")
       .forEach((b) => b.classList.toggle("active", b.dataset.subview === subview));
+    // Lazy-load episode data for dynamic sub-views
+    if (subview === "segmentation") {
+      const wrap = container.querySelector(".seg-table-wrap");
+      if (wrap?.classList.contains("cons-loading")) loadAndRenderSegmentation(container);
+    }
+    if (subview === "alignement") {
+      const wrap = container.querySelector(".align-ep-wrap");
+      if (wrap?.classList.contains("cons-loading")) loadAndRenderAlignement(container);
+    }
   }
 
   // ── Sidebar nav tab clicks ────────────────────────────────────────────────
@@ -1967,6 +2094,29 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
     if (btn) btn.addEventListener("click", () => activateSubView("hub"));
   });
 
+  // ── Segmentation pane wiring ───────────────────────────────────────────────
+  container.querySelector<HTMLButtonElement>("#cons-batch-segment")
+    ?.addEventListener("click", async () => {
+      const episodes = _cachedEpisodes?.episodes ?? [];
+      const toSegment = episodes.filter((ep) => {
+        const t = ep.sources.find((s) => s.source_key === "transcript");
+        return t?.state === "normalized";
+      });
+      if (toSegment.length === 0) return;
+      for (const ep of toSegment) {
+        try { await createJob("segment_transcript", ep.episode_id); } catch { /* skip */ }
+      }
+      startJobPoll(container);
+      await loadAndRenderSegmentation(container);
+    });
+
+  container.querySelector<HTMLButtonElement>("#cons-refresh-seg")
+    ?.addEventListener("click", () => loadAndRenderSegmentation(container));
+
+  // ── Alignement pane wiring ─────────────────────────────────────────────────
+  container.querySelector<HTMLButtonElement>("#cons-refresh-align")
+    ?.addEventListener("click", () => loadAndRenderAlignement(container));
+
   // ── Collapse / expand ─────────────────────────────────────────────────────
   function setNavCollapsed(collapsed: boolean) {
     _navCollapsed = collapsed;
@@ -1987,6 +2137,12 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       if (_activeSection === "documents")   renderDocumentsSection(pane);
       if (_activeSection === "importer")    renderImporterSection(pane);
       if (_activeSection === "personnages") renderPersonnagesSection(pane);
+      if (_activeSection === "exporter")    renderExporterSection(pane);
+    }
+    // Lazy-load active Actions sub-view
+    if (_activeSection === "actions") {
+      if (_activeActionsSubView === "segmentation") loadAndRenderSegmentation(container);
+      if (_activeActionsSubView === "alignement")   loadAndRenderAlignement(container);
     }
   }
 
