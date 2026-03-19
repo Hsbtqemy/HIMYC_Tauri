@@ -333,10 +333,10 @@ function renderResults(container: HTMLElement) {
   } else {
     pag.style.display = "flex";
     pag.innerHTML = `
-      <button class="btn btn-ghost" id="kwic-prev" style="font-size:11px;padding:2px 8px" ${_page === 0 ? "disabled" : ""}>‹ Préc.</button>
+      <button class="btn btn-ghost btn-sm" id="kwic-prev" ${_page === 0 ? "disabled" : ""}>‹ Préc.</button>
       <span>Page ${_page + 1} / ${pageCount} (${_page * PAGE_SIZE + 1}–${Math.min((_page + 1) * PAGE_SIZE, _hits.length)})</span>
       <span class="kwic-pag-gap"></span>
-      <button class="btn btn-ghost" id="kwic-next" style="font-size:11px;padding:2px 8px" ${_page >= pageCount - 1 ? "disabled" : ""}>Suiv. ›</button>`;
+      <button class="btn btn-ghost btn-sm" id="kwic-next" ${_page >= pageCount - 1 ? "disabled" : ""}>Suiv. ›</button>`;
     pag.querySelector("#kwic-prev")?.addEventListener("click", () => { _page--; renderResults(container); });
     pag.querySelector("#kwic-next")?.addEventListener("click", () => { _page++; renderResults(container); });
   }
@@ -420,7 +420,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       <div class="kwic-results-bar">
         <span class="kwic-total">—</span>
         <span class="kwic-results-bar-gap"></span>
-        <button class="btn btn-ghost" id="kwic-export-csv" style="font-size:11px;padding:2px 8px" disabled>⬇ CSV</button>
+        <button class="btn btn-ghost btn-sm" id="kwic-export-csv" disabled>⬇ CSV</button>
       </div>
 
       <div class="kwic-error" id="kwic-error"></div>

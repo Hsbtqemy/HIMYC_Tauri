@@ -316,9 +316,9 @@ function renderActions(container: HTMLElement, src: EpisodeSource | undefined) {
 
   if (isTranscript) {
     if (normGuard.allowed) {
-      actions += `<button class="btn btn-primary" id="insp-btn-normalize" style="font-size:12px;padding:4px 12px">Normaliser</button>`;
+      actions += `<button class="btn btn-primary btn-sm" id="insp-btn-normalize">Normaliser</button>`;
     } else if (segGuard.allowed) {
-      actions += `<button class="btn btn-primary" id="insp-btn-segment" style="font-size:12px;padding:4px 12px">Segmenter</button>`;
+      actions += `<button class="btn btn-primary btn-sm" id="insp-btn-segment">Segmenter</button>`;
     } else {
       // Aucune action disponible — afficher le message de guidance
       guidance = normGuard.reason ?? segGuard.reason ?? "";
@@ -463,7 +463,7 @@ function displayText(wrap: HTMLElement, text: string) {
       <pre class="insp-text">${escapeHtml(truncated)}</pre>
       <div style="padding:8px 0;font-size:0.75rem;color:var(--text-muted);font-style:italic">
         … ${remaining.toLocaleString("fr-FR")} caractères supplémentaires masqués.
-        <button class="btn btn-ghost" id="insp-show-all" style="font-size:11px;padding:2px 7px;margin-left:6px">Afficher tout</button>
+        <button class="btn btn-ghost btn-sm" id="insp-show-all" style="margin-left:6px">Afficher tout</button>
       </div>`;
     wrap.querySelector<HTMLButtonElement>("#insp-show-all")?.addEventListener("click", () => {
       wrap.innerHTML = `<pre class="insp-text">${escapeHtml(text)}</pre>`;
@@ -558,9 +558,9 @@ export function mountInspecter(container: HTMLElement, ctx: ShellContext) {
           </select>
         </div>
         <span class="insp-toolbar-gap"></span>
-        <button class="btn btn-secondary" id="insp-btn-align" style="font-size:11px;padding:3px 9px" disabled title="Passer en mode Aligner">→ Aligner</button>
-        <button class="btn btn-ghost" id="insp-btn-meta" style="font-size:12px;padding:4px 10px" disabled>ℹ Info</button>
-        <button class="btn btn-ghost" id="insp-btn-reload" style="font-size:12px;padding:4px 10px">↺</button>
+        <button class="btn btn-secondary btn-sm" id="insp-btn-align" disabled title="Passer en mode Aligner">→ Aligner</button>
+        <button class="btn btn-ghost btn-sm" id="insp-btn-meta" disabled>ℹ Info</button>
+        <button class="btn btn-ghost btn-sm" id="insp-btn-reload">↺</button>
       </div>
       <div class="insp-error" style="display:none"></div>
       <div class="insp-actions"></div>

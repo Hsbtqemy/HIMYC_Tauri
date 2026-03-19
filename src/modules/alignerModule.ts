@@ -395,7 +395,7 @@ function renderForm(
       <select class="align-select" id="align-segment-kind">${kindOptions}</select>
     </div>
     <div class="align-launch-row">
-      <button class="btn btn-primary" id="align-btn-launch" style="font-size:13px;padding:6px 16px">▶ Lancer l'alignement</button>
+      <button class="btn btn-primary" id="align-btn-launch">▶ Lancer l'alignement</button>
       <span class="align-feedback" id="align-feedback"></span>
     </div>`;
 
@@ -513,7 +513,7 @@ export function mountAligner(container: HTMLElement, ctx: ShellContext) {
           </select>
         </div>
         <span class="align-toolbar-gap"></span>
-        <button class="btn btn-ghost" id="align-btn-reload" style="font-size:12px;padding:4px 10px">↺</button>
+        <button class="btn btn-ghost btn-sm" id="align-btn-reload">↺</button>
       </div>
       <div class="align-error"></div>
       <div class="align-body">

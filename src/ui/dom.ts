@@ -55,33 +55,52 @@ const GLOBAL_CSS = `
   --danger:        #e63946;
   --success:       #2dc653;
   --warning:       #f4a261;
-  --radius:        8px;
+  --radius:        10px;
   --shadow:        0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.08);
 }
 
 * { box-sizing: border-box; }
 
-/* ─── Boutons generiques ─────────────────────────────────────────────── */
+body { font-size: 14px; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+/* ─── Boutons generiques (AGRAFES-aligned) ───────────────────────────── */
 .btn {
-  padding: 8px 14px;
+  padding: 0.35rem 0.9rem;
   border: 1.5px solid transparent;
   border-radius: var(--radius);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 0.85rem;
+  font-weight: 500;
   cursor: pointer;
   transition: background .15s, color .15s;
   white-space: nowrap;
 }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-sm { padding: 0.2rem 0.55rem; font-size: 0.78rem; }
+.btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
 .btn-primary { background: var(--brand); color: #fff; }
-.btn-primary:hover { background: var(--brand-dark); }
-.btn-primary:disabled { background: #a8b6f7; cursor: not-allowed; }
+.btn-primary:hover:not(:disabled) { background: var(--brand-dark); }
 
 .btn-secondary { background: var(--surface2); color: var(--text); border-color: var(--border); }
-.btn-secondary:hover { background: var(--border); }
+.btn-secondary:hover:not(:disabled) { background: var(--border); }
 .btn-secondary.active { background: var(--brand); color: #fff; border-color: var(--brand); }
 
 .btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border); }
-.btn-ghost:hover { background: var(--surface2); color: var(--text); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface2); color: var(--text); }
+
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #c62828; }
+
+/* ─── Focus visible (AGRAFES-aligned) ───────────────────────────────── */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
 
 /* ─── Status dot ─────────────────────────────────────────────────────── */
 .status-dot {

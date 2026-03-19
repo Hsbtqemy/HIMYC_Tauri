@@ -277,16 +277,17 @@ const CSS = `
 .cons-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: calc(var(--radius) * 1.5);
-  padding: 1rem 1.25rem;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+  margin-bottom: 0.75rem;
 }
+.cons-card:hover { box-shadow: 0 2px 6px rgba(0,0,0,.12); }
 .cons-card-title {
-  font-size: 0.82rem;
+  font-size: 0.95rem;
   font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 0.6rem;
+  color: var(--text);
+  margin: 0 0 0.6rem;
 }
 .cons-card-body { font-size: 0.85rem; }
 
@@ -726,7 +727,7 @@ function renderJobsPanel(container: HTMLElement, jobs: JobRecord[]) {
       const err   = j.error_msg ? `<span class="cons-job-err" title="${escapeHtml(j.error_msg)}">${escapeHtml(j.error_msg)}</span>` : "";
       const cancelBtn =
         j.status === "pending"
-          ? `<button class="btn btn-ghost" style="font-size:10px;padding:1px 5px" data-cancel="${escapeHtml(j.job_id)}">✕</button>`
+          ? `<button class="btn btn-ghost btn-sm" data-cancel="${escapeHtml(j.job_id)}">✕</button>`
           : "";
       return `
         <div class="cons-job-row">
@@ -896,9 +897,9 @@ function renderTable(
       // Actions : import transcript si absent, import SRT toujours possible
       const hasTranscript = transcript?.available ?? false;
       const importTrBtn = !hasTranscript
-        ? `<button class="btn btn-primary btn-xs" data-action="import-transcript" data-ep="${escapeHtml(ep.episode_id)}" style="font-size:11px;padding:3px 8px">+ transcript</button>`
+        ? `<button class="btn btn-primary btn-sm" data-action="import-transcript" data-ep="${escapeHtml(ep.episode_id)}">+ transcript</button>`
         : "";
-      const importSrtBtn = `<button class="btn btn-secondary btn-xs" data-action="import-srt" data-ep="${escapeHtml(ep.episode_id)}" style="font-size:11px;padding:3px 8px">+ SRT</button>`;
+      const importSrtBtn = `<button class="btn btn-secondary btn-sm" data-action="import-srt" data-ep="${escapeHtml(ep.episode_id)}">+ SRT</button>`;
 
       return `
         <tr>
@@ -913,9 +914,9 @@ function renderTable(
 
   const paginationHtml = pageCount > 1 ? `
     <div class="cons-pagination">
-      <button class="btn btn-ghost" id="cons-page-prev" style="font-size:11px;padding:2px 8px" ${_page === 0 ? "disabled" : ""}>‹ Préc.</button>
+      <button class="btn btn-ghost btn-sm" id="cons-page-prev" ${_page === 0 ? "disabled" : ""}>‹ Préc.</button>
       <span>${_page * PAGE_SIZE + 1}–${Math.min((_page + 1) * PAGE_SIZE, total)} / ${total} épisodes</span>
-      <button class="btn btn-ghost" id="cons-page-next" style="font-size:11px;padding:2px 8px" ${_page >= pageCount - 1 ? "disabled" : ""}>Suiv. ›</button>
+      <button class="btn btn-ghost btn-sm" id="cons-page-next" ${_page >= pageCount - 1 ? "disabled" : ""}>Suiv. ›</button>
     </div>` : `<div class="cons-pagination"><span>${total} épisode${total > 1 ? "s" : ""}</span></div>`;
 
   tableWrap.innerHTML = `
@@ -1027,7 +1028,7 @@ function renderDocumentsSection(pane: HTMLElement) {
     <div class="cons-toolbar">
       <span class="cons-toolbar-title">Documents</span>
       <input class="cons-search" id="docs-search" type="search" placeholder="Filtrer…" style="font-size:0.8rem;padding:3px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);width:180px">
-      <button class="btn btn-ghost" id="docs-refresh" style="font-size:12px;padding:4px 10px">↺ Actualiser</button>
+      <button class="btn btn-ghost btn-sm" id="docs-refresh">↺ Actualiser</button>
     </div>
     <div class="cons-error" id="docs-error" style="display:none"></div>
     <div class="cons-table-wrap" id="docs-table-wrap">
@@ -1097,7 +1098,7 @@ function renderDocumentsTable(pane: HTMLElement, filter: string) {
         <td>${transcriptCell}</td>
         ${srtCells}
         <td>
-          <button class="btn btn-secondary btn-xs" data-inspecter="${escapeHtml(ep.episode_id)}" style="font-size:11px;padding:3px 8px" title="Ouvrir dans l'Inspecter">→ Inspecter</button>
+          <button class="btn btn-secondary btn-sm" data-inspecter="${escapeHtml(ep.episode_id)}" title="Ouvrir dans l'Inspecter">→ Inspecter</button>
         </td>
       </tr>`;
   }).join("");
@@ -1133,7 +1134,7 @@ function renderImporterSection(pane: HTMLElement) {
       <div class="cons-card">
         <div class="cons-card-title">Projet</div>
         <div id="imp-config-body" class="cons-card-body">Chargement…</div>
-        <button class="btn btn-ghost" id="imp-config-refresh" style="font-size:11px;padding:2px 8px;margin-top:6px">↺ Rafraîchir</button>
+        <button class="btn btn-ghost btn-sm" id="imp-config-refresh" style="margin-top:6px">↺ Rafraîchir</button>
       </div>
       <!-- Import fichiers -->
       <div class="cons-card">
@@ -1146,8 +1147,8 @@ function renderImporterSection(pane: HTMLElement) {
             </select>
           </div>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-            <button class="btn btn-primary" id="imp-transcript-btn" style="font-size:0.8rem">📄 Importer transcript</button>
-            <button class="btn btn-secondary" id="imp-srt-btn" style="font-size:0.8rem">🔤 Importer SRT</button>
+            <button class="btn btn-primary btn-sm" id="imp-transcript-btn">📄 Importer transcript</button>
+            <button class="btn btn-secondary btn-sm" id="imp-srt-btn">🔤 Importer SRT</button>
           </div>
           <div id="imp-feedback" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em"></div>
         </div>
@@ -1165,7 +1166,7 @@ function renderImporterSection(pane: HTMLElement) {
           <div class="web-src-pane active" data-wsrc="tvmaze">
             <div class="web-src-row">
               <input class="web-src-input" id="tvmaze-name" type="text" placeholder="Nom de la série (ex: Breaking Bad)" />
-              <button class="btn btn-secondary" id="tvmaze-search-btn" style="font-size:0.8rem;white-space:nowrap">🔍 Chercher</button>
+              <button class="btn btn-secondary btn-sm" id="tvmaze-search-btn" style="white-space:nowrap">🔍 Chercher</button>
             </div>
             <div class="web-src-feedback" id="tvmaze-feedback"></div>
             <div class="web-src-results" id="tvmaze-results" style="display:none"></div>
@@ -1175,7 +1176,7 @@ function renderImporterSection(pane: HTMLElement) {
           <div class="web-src-pane" data-wsrc="subslikescript">
             <div class="web-src-row">
               <input class="web-src-input" id="subslike-url" type="text" placeholder="URL série (ex: https://subslikescript.com/series/...)" />
-              <button class="btn btn-secondary" id="subslike-discover-btn" style="font-size:0.8rem;white-space:nowrap">🔍 Découvrir</button>
+              <button class="btn btn-secondary btn-sm" id="subslike-discover-btn" style="white-space:nowrap">🔍 Découvrir</button>
             </div>
             <div class="web-src-feedback" id="subslike-feedback"></div>
             <div class="web-src-results" id="subslike-results" style="display:none"></div>
@@ -1233,7 +1234,7 @@ function renderWebEpisodesTable(episodes: WebEpisodeRef[], showFetchBtn: boolean
     <tr>
       <td style="white-space:nowrap">${escapeHtml(ep.episode_id)}</td>
       <td>${escapeHtml(ep.title)}</td>
-      ${showFetchBtn ? `<td><button class="btn btn-ghost web-fetch-transcript-btn" data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-url="${escapeHtml(ep.url)}" style="font-size:0.72rem;padding:2px 7px">⬇ Importer</button></td>` : ""}
+      ${showFetchBtn ? `<td><button class="btn btn-ghost btn-sm web-fetch-transcript-btn" data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-url="${escapeHtml(ep.url)}">⬇ Importer</button></td>` : ""}
     </tr>`).join("");
   return `<table>
     <thead><tr>
@@ -1389,10 +1390,10 @@ function renderExporterSection(pane: HTMLElement) {
               Utilise <code>clean.txt</code> si disponible, sinon <code>raw.txt</code>.
             </div>
             <div class="exp-fmt-row">
-              <button class="btn btn-secondary exp-export-btn" data-scope="corpus" data-fmt="txt" style="font-size:0.78rem">TXT</button>
-              <button class="btn btn-secondary exp-export-btn" data-scope="corpus" data-fmt="csv" style="font-size:0.78rem">CSV</button>
-              <button class="btn btn-secondary exp-export-btn" data-scope="corpus" data-fmt="json" style="font-size:0.78rem">JSON</button>
-              <button class="btn btn-secondary exp-export-btn" data-scope="corpus" data-fmt="docx" style="font-size:0.78rem">DOCX</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="corpus" data-fmt="txt">TXT</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="corpus" data-fmt="csv">CSV</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="corpus" data-fmt="json">JSON</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="corpus" data-fmt="docx">DOCX</button>
             </div>
             <div class="exp-result" id="exp-corpus-result"></div>
           </div>
@@ -1407,9 +1408,9 @@ function renderExporterSection(pane: HTMLElement) {
               Requiert que la segmentation ait été lancée.
             </div>
             <div class="exp-fmt-row">
-              <button class="btn btn-secondary exp-export-btn" data-scope="segments" data-fmt="txt" style="font-size:0.78rem">TXT</button>
-              <button class="btn btn-secondary exp-export-btn" data-scope="segments" data-fmt="csv" style="font-size:0.78rem">CSV</button>
-              <button class="btn btn-secondary exp-export-btn" data-scope="segments" data-fmt="tsv" style="font-size:0.78rem">TSV</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="segments" data-fmt="txt">TXT</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="segments" data-fmt="csv">CSV</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="segments" data-fmt="tsv">TSV</button>
             </div>
             <div class="exp-result" id="exp-segments-result"></div>
           </div>
@@ -1459,7 +1460,7 @@ function renderPersonnagesSection(pane: HTMLElement) {
     <div class="pers-toolbar">
       <span class="pers-toolbar-title">Personnages</span>
       <button class="btn btn-primary" id="pers-add-btn" style="font-size:0.8rem">+ Nouveau</button>
-      <button class="btn btn-ghost" id="pers-refresh" style="font-size:12px;padding:4px 10px">↺</button>
+      <button class="btn btn-ghost btn-sm" id="pers-refresh">↺</button>
     </div>
     <div class="cons-error" id="pers-error" style="display:none;margin:0 16px 0"></div>
     <div class="pers-body">
@@ -1830,8 +1831,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <button class="acts-back-btn" id="cons-back-curation">← Actions</button>
               <span class="cons-toolbar-title">Curation</span>
               <span class="cons-toolbar-series"></span>
-              <button class="btn btn-secondary" id="cons-batch-normalize" style="font-size:11px;padding:3px 9px">⚡ Normaliser tout</button>
-              <button class="btn btn-ghost" id="cons-refresh" style="font-size:12px;padding:4px 10px">↺ Actualiser</button>
+              <button class="btn btn-secondary btn-sm" id="cons-batch-normalize">⚡ Normaliser tout</button>
+              <button class="btn btn-ghost btn-sm" id="cons-refresh">↺ Actualiser</button>
               <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
             </div>
             <div class="cons-error" style="display:none"></div>
@@ -1843,7 +1844,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               </div>
               <div id="cons-jobs-body" style="display:block">
                 <div class="cons-jobs-actions">
-                  <button class="btn btn-ghost" id="cons-refresh-jobs" style="font-size:11px;padding:2px 8px">↺ Rafraîchir</button>
+                  <button class="btn btn-ghost btn-sm" id="cons-refresh-jobs">↺ Rafraîchir</button>
                 </div>
                 <div class="cons-jobs-list"></div>
               </div>
