@@ -67,8 +67,8 @@ import {
   guardedAction,
 } from "../guards";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
-import { open } from "@tauri-apps/plugin-dialog";
-import { readTextFile } from "@tauri-apps/plugin-fs";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { measureAsync } from "../perf";
 
 // ── CSS module ─────────────────────────────────────────────────────────────
@@ -3045,6 +3045,20 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
         <button class="audit-back-btn" id="audit-back">← Runs</button>
         <span style="font-size:0.8rem;font-weight:600;color:var(--text);flex:1">${escapeHtml(epTitle)}</span>
         <span style="font-size:0.72rem;color:var(--text-muted);font-family:ui-monospace,monospace">${escapeHtml(runId.slice(0, 14))}…</span>
+        <button id="audit-export-btn" style="
+          margin-left:auto;
+          padding:3px 10px;
+          font-size:0.72rem;
+          background:var(--surface);
+          border:1px solid var(--border);
+          border-radius:4px;
+          cursor:pointer;
+          color:var(--text);
+          display:flex;
+          align-items:center;
+          gap:4px;
+          white-space:nowrap;
+        ">⬇ Export JSON</button>
       </div>
       <div id="audit-kpi-strip" class="audit-stats-strip" style="padding-top:4px;padding-bottom:4px">
         <span style="font-size:0.76rem;color:var(--text-muted)">Chargement stats…</span>
@@ -3091,6 +3105,22 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
   // Back button → restore run list
   panel.querySelector<HTMLButtonElement>("#audit-back")!.addEventListener("click", () => {
     loadAlignmentRunHistory(panel, epId, epTitle);
+  });
+
+  // Export rapport JSON (MX-038)
+  panel.querySelector<HTMLButtonElement>("#audit-export-btn")!.addEventListener("click", async () => {
+    const btn = panel.querySelector<HTMLButtonElement>("#audit-export-btn")!;
+    const origText = btn.textContent ?? "⬇ Export JSON";
+    btn.disabled = true;
+    btn.textContent = "Chargement…";
+    try {
+      await exportAuditReport(epId, epTitle, runId);
+    } catch (e) {
+      alert(`Export échoué : ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = origText;
+    }
   });
 
   // Tab switching (lazy-load concordance on first activation)
@@ -3413,6 +3443,94 @@ async function loadAuditCollisions(panel: HTMLElement, epId: string, runId: stri
   } catch (e) {
     listEl.innerHTML = `<div style="padding:14px;font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
   }
+}
+
+// ── Export rapport de run (MX-038) ────────────────────────────────────────────
+
+/**
+ * Génère et sauvegarde un rapport JSON complet d'un run d'alignement.
+ *
+ * Le rapport inclut :
+ * - Métadonnées du run (episode_id, episode_title, run_id, timestamp)
+ * - Statistiques agrégées (nb_links, nb_pivot, nb_target, by_status, avg_confidence, coverage_pct, n_collisions)
+ * - Liste complète des liens d'alignement (tous statuts, sans pagination)
+ * - Liste des collisions avec leurs cibles candidates
+ *
+ * Ouvre un dialog "Enregistrer sous" Tauri pour laisser l'utilisateur choisir
+ * l'emplacement. Annule silencieusement si l'utilisateur ferme le dialog.
+ */
+async function exportAuditReport(
+  epId: string,
+  epTitle: string,
+  runId: string,
+): Promise<void> {
+  // Fetch toutes les données en parallèle (limit 9999 = pas de pagination pour l'export)
+  const [stats, collisionsRes, linksRes] = await Promise.all([
+    fetchAlignRunStats(epId, runId),
+    fetchAlignCollisions(epId, runId),
+    fetchAuditLinks(epId, runId, { limit: 9999, offset: 0 }),
+  ]);
+
+  const report = {
+    version:       "1.0",
+    generated_at:  new Date().toISOString(),
+    episode_id:    epId,
+    episode_title: epTitle,
+    run_id:        runId,
+    stats: {
+      nb_links:       stats.nb_links,
+      nb_pivot:       stats.nb_pivot,
+      nb_target:      stats.nb_target,
+      by_status:      stats.by_status,
+      avg_confidence: stats.avg_confidence,
+      coverage_pct:   stats.coverage_pct,
+      n_collisions:   stats.n_collisions,
+    },
+    collisions: collisionsRes.collisions.map((col) => ({
+      pivot_cue_id: col.pivot_cue_id,
+      pivot_text:   col.pivot_text,
+      lang:         col.lang,
+      n_targets:    col.n_targets,
+      targets:      col.targets.map((t) => ({
+        link_id:        t.link_id,
+        cue_id_target:  t.cue_id_target,
+        target_text:    t.target_text,
+        confidence:     t.confidence,
+        status:         t.status,
+      })),
+    })),
+    links: linksRes.links.map((lnk) => ({
+      link_id:          lnk.link_id,
+      role:             lnk.role,
+      lang:             lnk.lang,
+      confidence:       lnk.confidence,
+      status:           lnk.status,
+      segment_id:       lnk.segment_id,
+      cue_id:           lnk.cue_id,
+      cue_id_target:    lnk.cue_id_target,
+      segment_n:        lnk.segment_n,
+      speaker_explicit: lnk.speaker_explicit,
+      text_segment:     lnk.text_segment,
+      text_pivot:       lnk.text_pivot,
+      text_target:      lnk.text_target,
+    })),
+  };
+
+  const json = JSON.stringify(report, null, 2);
+
+  // Nom de fichier par défaut : himyc_audit_<ep>_<run8>.json
+  const safeEp  = epId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
+  const safeRun = runId.slice(0, 8);
+  const defaultPath = `himyc_audit_${safeEp}_${safeRun}.json`;
+
+  const filePath = await save({
+    defaultPath,
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+
+  if (!filePath) return;  // utilisateur a annulé
+
+  await writeTextFile(filePath, json);
 }
 
 // ── Concordancier parallèle ───────────────────────────────────────────────────
