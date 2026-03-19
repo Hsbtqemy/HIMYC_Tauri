@@ -13,6 +13,7 @@ import type { ShellContext } from "../context";
 import {
   fetchEpisodes,
   fetchEpisodeSource,
+  fetchJobs,
   createJob,
   type Episode,
   type EpisodeSource,
@@ -191,6 +192,9 @@ let _selectedSrcKey = "";
 let _activeTab: "raw" | "clean" = "raw";
 /** Référence au bouton Aligner pour mise à jour hors mountInspecter */
 let _alignBtn: HTMLButtonElement | null = null;
+/** Polling auto-refresh (Écart #2) */
+let _pollTimer: ReturnType<typeof setInterval> | null = null;
+let _watchedJobId: string | null = null;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -201,6 +205,47 @@ function updateAlignBtn() {
   const g = guardAlignEpisode(ep);
   _alignBtn.disabled = !g.allowed;
   _alignBtn.title = g.allowed ? "Passer en mode Aligner" : (g.reason ?? "");
+}
+
+// ── Auto-refresh job poll (Écart #2) ────────────────────────────────────────
+
+function stopJobPoll() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  _watchedJobId = null;
+}
+
+function startJobPoll(container: HTMLElement, jobId: string) {
+  stopJobPoll();
+  _watchedJobId = jobId;
+
+  _pollTimer = setInterval(async () => {
+    if (!_watchedJobId) { stopJobPoll(); return; }
+    try {
+      const { jobs } = await fetchJobs();
+      const job = jobs.find((j) => j.job_id === _watchedJobId);
+      if (!job) { stopJobPoll(); return; }
+
+      const fb = container.querySelector<HTMLElement>("#insp-job-fb");
+
+      if (job.status === "running") {
+        if (fb) { fb.textContent = "En cours…"; fb.style.color = "var(--brand, #2c5f9e)"; }
+      } else if (job.status === "done") {
+        stopJobPoll();
+        if (fb) { fb.textContent = "Terminé ✓"; fb.style.color = "var(--success, #16a34a)"; }
+        await loadEpisodes(container);
+      } else if (job.status === "error") {
+        stopJobPoll();
+        if (fb) {
+          fb.textContent = `Erreur : ${job.error_msg ?? "inconnue"}`;
+          fb.style.color = "var(--danger, #dc2626)";
+        }
+        await loadEpisodes(container);
+      } else if (job.status === "cancelled") {
+        stopJobPoll();
+        if (fb) { fb.textContent = "Annulé."; fb.style.color = "var(--text-muted)"; }
+      }
+    } catch { /* backend down — on arrête */ stopJobPoll(); }
+  }, 2000);
 }
 
 function availableSources(ep: Episode): EpisodeSource[] {
@@ -305,8 +350,9 @@ function renderActions(container: HTMLElement, src: EpisodeSource | undefined) {
     await guardedAction(
       guardNormalizeTranscript(src),
       async () => {
-        await createJob("normalize_transcript", _selectedEpId);
-        showFeedback("Job normalisation ajouté ✓", true);
+        const job = await createJob("normalize_transcript", _selectedEpId);
+        showFeedback("Job normalisation ajouté — en attente…", true);
+        startJobPoll(container, job.job_id);
       },
       (reason) => showFeedback(reason, false),
     ).catch((err) => showFeedback(err instanceof ApiError ? err.message : String(err), false));
@@ -320,8 +366,9 @@ function renderActions(container: HTMLElement, src: EpisodeSource | undefined) {
     await guardedAction(
       guardSegmentTranscript(src),
       async () => {
-        await createJob("segment_transcript", _selectedEpId);
-        showFeedback("Job segmentation ajouté ✓", true);
+        const job = await createJob("segment_transcript", _selectedEpId);
+        showFeedback("Job segmentation ajouté — en attente…", true);
+        startJobPoll(container, job.job_id);
       },
       (reason) => showFeedback(reason, false),
     ).catch((err) => showFeedback(err instanceof ApiError ? err.message : String(err), false));
@@ -603,5 +650,6 @@ export function mountInspecter(container: HTMLElement, ctx: ShellContext) {
 
 export function disposeInspecter() {
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+  stopJobPoll();
   _alignBtn = null;
 }
