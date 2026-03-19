@@ -16,6 +16,8 @@ import {
   fetchEpisodeSource,
   importTranscript,
   importSrt,
+  deleteTranscript,
+  deleteSrt,
   fetchJobs,
   createJob,
   cancelJob,
@@ -1859,12 +1861,23 @@ function renderTable(
         })
         .join("");
 
-      // Actions : import transcript si absent, import SRT toujours possible
+      // Actions : import/suppression transcript + import SRT
       const hasTranscript = transcript?.available ?? false;
       const importTrBtn = !hasTranscript
         ? `<button class="btn btn-primary btn-sm" data-action="import-transcript" data-ep="${escapeHtml(ep.episode_id)}">+ transcript</button>`
-        : "";
+        : `<button class="btn btn-ghost btn-sm" data-action="delete-transcript" data-ep="${escapeHtml(ep.episode_id)}"
+             title="Supprimer le transcript (raw, clean, segments)"
+             style="color:var(--danger);opacity:.7">✕ transcript</button>`;
       const importSrtBtn = `<button class="btn btn-secondary btn-sm" data-action="import-srt" data-ep="${escapeHtml(ep.episode_id)}">+ SRT</button>`;
+
+      // Boutons ✕ pour chaque SRT présent
+      const deleteSrtBtns = srtLangs
+        .filter((lang) => sourceForKey(ep, `srt_${lang}`)?.available)
+        .map((lang) => `<button class="btn btn-ghost btn-sm" data-action="delete-srt"
+             data-ep="${escapeHtml(ep.episode_id)}" data-lang="${escapeHtml(lang)}"
+             title="Supprimer la piste SRT ${lang.toUpperCase()}"
+             style="color:var(--danger);opacity:.7">✕ SRT ${escapeHtml(lang.toUpperCase())}</button>`)
+        .join("");
 
       return `
         <tr data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}">
@@ -1872,7 +1885,7 @@ function renderTable(
           <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title)}</td>
           <td>${transcriptCell}</td>
           ${srtCells}
-          <td><div class="cons-actions">${importTrBtn}${importSrtBtn}</div></td>
+          <td><div class="cons-actions">${importTrBtn}${importSrtBtn}${deleteSrtBtns}</div></td>
         </tr>`;
     })
     .join("");
@@ -1948,6 +1961,29 @@ function renderTable(
       const g = ep ? guardImportSrt(ep, lang.trim()) : { allowed: true };
       if (g.reason && !confirm(`${g.reason}\nContinuer ?`)) { btn.disabled = false; return; }
       await handleImportSrt(epId, lang.trim(), onRefresh, showErr);
+    } else if (action === "delete-transcript") {
+      hideErr();
+      if (!confirm(`Supprimer le transcript de « ${epId} » ?\n(raw, clean, segments — irréversible)`)) {
+        btn.disabled = false; return;
+      }
+      try {
+        await deleteTranscript(epId);
+        onRefresh();
+      } catch (err: unknown) {
+        showErr(err instanceof Error ? err.message : String(err));
+      }
+    } else if (action === "delete-srt") {
+      hideErr();
+      const lang = btn.dataset.lang!;
+      if (!confirm(`Supprimer la piste SRT ${lang.toUpperCase()} de « ${epId} » ? (irréversible)`)) {
+        btn.disabled = false; return;
+      }
+      try {
+        await deleteSrt(epId, lang);
+        onRefresh();
+      } catch (err: unknown) {
+        showErr(err instanceof Error ? err.message : String(err));
+      }
     }
 
     btn.disabled = false;

@@ -86,6 +86,21 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   return JSON.parse(res.body) as T;
 }
 
+export async function apiDelete<T>(path: string): Promise<T> {
+  const res = await _loopbackFetch(path, "DELETE");
+  if (!res.ok) {
+    let errorCode = "UNKNOWN";
+    let message = res.body;
+    try {
+      const parsed = JSON.parse(res.body);
+      errorCode = parsed.error ?? errorCode;
+      message = parsed.message ?? message;
+    } catch { /* not JSON */ }
+    throw new ApiError(res.status, errorCode, message);
+  }
+  return JSON.parse(res.body) as T;
+}
+
 // ── Endpoints typés (MX-003) ──────────────────────────────────────────────────
 
 // /health
@@ -198,6 +213,19 @@ export async function importTranscript(
   return apiPost<ImportResult>(`/episodes/${episodeId}/sources/transcript`, {
     content,
   });
+}
+
+export async function deleteTranscript(
+  episodeId: string,
+): Promise<{ episode_id: string; source_key: string; removed: string[] }> {
+  return apiDelete(`/episodes/${episodeId}/sources/transcript`);
+}
+
+export async function deleteSrt(
+  episodeId: string,
+  lang: string,
+): Promise<{ episode_id: string; source_key: string; lang: string }> {
+  return apiDelete(`/episodes/${episodeId}/sources/srt_${lang}`);
 }
 
 export async function importSrt(
