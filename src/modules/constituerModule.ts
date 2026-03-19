@@ -25,6 +25,8 @@ import {
   discoverTvmaze,
   discoverSubslikescript,
   fetchSubslikescriptTranscript,
+  runExport,
+  type ExportResult,
   type Episode,
   type EpisodeSource,
   type EpisodesResponse,
@@ -603,6 +605,26 @@ const CSS = `
 .web-src-results tr:last-child td { border-bottom: none; }
 .web-src-results tr:hover td { background: var(--surface2); }
 .web-src-feedback { margin-top: 6px; font-size: 0.78rem; color: var(--text-muted); min-height: 1.2em; }
+
+/* Exporter section */
+.exp-section { padding: 1.25rem; overflow-y: auto; height: 100%; display: flex; flex-direction: column; gap: 1rem; }
+.exp-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 600px) { .exp-card-grid { grid-template-columns: 1fr; } }
+.exp-fmt-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.exp-result {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  padding: 6px 10px;
+  border-radius: 5px;
+  background: var(--surface2);
+  color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+  display: none;
+}
+.exp-result.visible { display: block; }
+.exp-result.ok { color: var(--success, #16a34a); background: #f0fdf4; }
+.exp-result.err { color: var(--danger, #dc2626); background: #fef2f2; }
 `;
 
 // ── Module state ────────────────────────────────────────────────────────────
@@ -1351,6 +1373,81 @@ function wireImporterButtons(pane: HTMLElement) {
   });
 }
 
+// ── Section Exporter ─────────────────────────────────────────────────────────
+
+function renderExporterSection(pane: HTMLElement) {
+  pane.innerHTML = `
+    <div class="exp-section">
+      <div class="exp-card-grid">
+
+        <!-- Corpus -->
+        <div class="cons-card">
+          <div class="cons-card-title">Corpus (texte)</div>
+          <div class="cons-card-body">
+            <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.5">
+              Export de tous les épisodes normalisés.<br>
+              Utilise <code>clean.txt</code> si disponible, sinon <code>raw.txt</code>.
+            </div>
+            <div class="exp-fmt-row">
+              <button class="btn btn-secondary exp-export-btn" data-scope="corpus" data-fmt="txt" style="font-size:0.78rem">TXT</button>
+              <button class="btn btn-secondary exp-export-btn" data-scope="corpus" data-fmt="csv" style="font-size:0.78rem">CSV</button>
+              <button class="btn btn-secondary exp-export-btn" data-scope="corpus" data-fmt="json" style="font-size:0.78rem">JSON</button>
+              <button class="btn btn-secondary exp-export-btn" data-scope="corpus" data-fmt="docx" style="font-size:0.78rem">DOCX</button>
+            </div>
+            <div class="exp-result" id="exp-corpus-result"></div>
+          </div>
+        </div>
+
+        <!-- Segments -->
+        <div class="cons-card">
+          <div class="cons-card-title">Segments</div>
+          <div class="cons-card-body">
+            <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.5">
+              Export des segments issus de la segmentation.<br>
+              Requiert que la segmentation ait été lancée.
+            </div>
+            <div class="exp-fmt-row">
+              <button class="btn btn-secondary exp-export-btn" data-scope="segments" data-fmt="txt" style="font-size:0.78rem">TXT</button>
+              <button class="btn btn-secondary exp-export-btn" data-scope="segments" data-fmt="csv" style="font-size:0.78rem">CSV</button>
+              <button class="btn btn-secondary exp-export-btn" data-scope="segments" data-fmt="tsv" style="font-size:0.78rem">TSV</button>
+            </div>
+            <div class="exp-result" id="exp-segments-result"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Destination note -->
+      <div style="font-size:0.76rem;color:var(--text-muted);line-height:1.6">
+        Les fichiers sont écrits dans le dossier <code>exports/</code> du projet.
+      </div>
+    </div>`;
+
+  pane.querySelectorAll<HTMLButtonElement>(".exp-export-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const scope = btn.dataset.scope as "corpus" | "segments";
+      const fmt   = btn.dataset.fmt!;
+      const resultEl = pane.querySelector<HTMLElement>(`#exp-${scope}-result`)!;
+
+      btn.disabled = true;
+      resultEl.textContent = "Export en cours…";
+      resultEl.className = "exp-result visible";
+
+      try {
+        const res: ExportResult = await runExport(scope, fmt);
+        const count = res.episodes != null ? `${res.episodes} épisodes` : `${res.segments} segments`;
+        resultEl.textContent = `✓ ${count} → ${res.path}`;
+        resultEl.className = "exp-result visible ok";
+      } catch (e) {
+        resultEl.textContent = e instanceof ApiError ? e.message : String(e);
+        resultEl.className = "exp-result visible err";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 // ── Section Personnages ──────────────────────────────────────────────────────
 
 let _characters: Character[] = [];
@@ -1830,6 +1927,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
     if (sec === "documents"   && pane.querySelector(".cons-placeholder")) renderDocumentsSection(pane);
     if (sec === "importer"    && pane.querySelector(".cons-placeholder")) renderImporterSection(pane);
     if (sec === "personnages" && pane.querySelector(".cons-placeholder")) renderPersonnagesSection(pane);
+    if (sec === "exporter"    && pane.querySelector(".cons-placeholder")) renderExporterSection(pane);
   }
 
   // ── Helper: switch Actions sub-view ──────────────────────────────────────

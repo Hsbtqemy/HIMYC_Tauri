@@ -375,3 +375,22 @@ export async function fetchSubslikescriptTranscript(
     { episode_id, episode_url },
   );
 }
+
+
+// ── Export (Exporter section) ─────────────────────────────────────────────────
+
+export interface ExportResult {
+  scope: string;
+  fmt: string;
+  episodes?: number;
+  segments?: number;
+  path: string;
+}
+
+export async function runExport(
+  scope: "corpus" | "segments",
+  fmt: string,
+  use_clean = true,
+): Promise<ExportResult> {
+  return apiPost<ExportResult>("/export", { scope, fmt, use_clean });
+}
