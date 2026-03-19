@@ -339,3 +339,39 @@ export async function saveAssignments(
 ): Promise<{ saved: number }> {
   return apiPut<{ saved: number }>("/assignments", { assignments });
 }
+
+
+// ── Web sources (MX-021b) ─────────────────────────────────────────────────────
+
+export interface WebEpisodeRef {
+  episode_id: string;
+  season: number;
+  episode: number;
+  title: string;
+  url: string;
+}
+
+export interface WebDiscoverResult {
+  series_title: string;
+  series_url: string;
+  episode_count: number;
+  episodes: WebEpisodeRef[];
+}
+
+export async function discoverTvmaze(series_name: string): Promise<WebDiscoverResult> {
+  return apiPost<WebDiscoverResult>("/web/tvmaze/discover", { series_name });
+}
+
+export async function discoverSubslikescript(series_url: string): Promise<WebDiscoverResult> {
+  return apiPost<WebDiscoverResult>("/web/subslikescript/discover", { series_url });
+}
+
+export async function fetchSubslikescriptTranscript(
+  episode_id: string,
+  episode_url: string,
+): Promise<{ episode_id: string; source_key: string; chars: number; state: string }> {
+  return apiPost<{ episode_id: string; source_key: string; chars: number; state: string }>(
+    "/web/subslikescript/fetch_transcript",
+    { episode_id, episode_url },
+  );
+}

@@ -22,6 +22,9 @@ import {
   saveCharacters,
   fetchAssignments,
   saveAssignments,
+  discoverTvmaze,
+  discoverSubslikescript,
+  fetchSubslikescriptTranscript,
   type Episode,
   type EpisodeSource,
   type EpisodesResponse,
@@ -30,6 +33,7 @@ import {
   type JobType,
   type Character,
   type CharacterAssignment,
+  type WebEpisodeRef,
   ApiError,
 } from "../api";
 import {
@@ -563,6 +567,42 @@ const CSS = `
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+/* Web sources (MX-021b) */
+.web-src-tabs { display: flex; gap: 2px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+.web-src-tab {
+  padding: 5px 14px;
+  font-size: 0.8rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+}
+.web-src-tab:hover { color: var(--text); background: var(--surface2); }
+.web-src-tab.active { color: var(--accent, #0f766e); border-bottom-color: var(--accent, #0f766e); font-weight: 600; }
+.web-src-pane { display: none; }
+.web-src-pane.active { display: block; }
+.web-src-row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+.web-src-input {
+  flex: 1;
+  min-width: 200px;
+  padding: 5px 9px;
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+}
+.web-src-input:focus { outline: none; border-color: var(--accent, #0f766e); }
+.web-src-results { margin-top: 8px; max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.web-src-results table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.web-src-results th { position: sticky; top: 0; background: var(--surface2); padding: 5px 8px; text-align: left; color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--border); }
+.web-src-results td { padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+.web-src-results tr:last-child td { border-bottom: none; }
+.web-src-results tr:hover td { background: var(--surface2); }
+.web-src-feedback { margin-top: 6px; font-size: 0.78rem; color: var(--text-muted); min-height: 1.2em; }
 `;
 
 // ── Module state ────────────────────────────────────────────────────────────
@@ -1090,12 +1130,34 @@ function renderImporterSection(pane: HTMLElement) {
           <div id="imp-feedback" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em"></div>
         </div>
       </div>
-      <!-- Sources web (placeholder) -->
+      <!-- Sources web (MX-021b) -->
       <div class="cons-card">
         <div class="cons-card-title">Sources web</div>
-        <div class="cons-card-body" style="color:var(--text-muted);font-size:0.82rem;line-height:1.6">
-          Import depuis subslikescript · TVMaze · OpenSubtitles API.<br>
-          <em style="opacity:0.6">En développement — MX-021b.</em>
+        <div class="cons-card-body" id="web-src-body">
+          <div class="web-src-tabs">
+            <button class="web-src-tab active" data-wsrc="tvmaze">TVMaze</button>
+            <button class="web-src-tab" data-wsrc="subslikescript">Subslikescript</button>
+          </div>
+
+          <!-- TVMaze tab -->
+          <div class="web-src-pane active" data-wsrc="tvmaze">
+            <div class="web-src-row">
+              <input class="web-src-input" id="tvmaze-name" type="text" placeholder="Nom de la série (ex: Breaking Bad)" />
+              <button class="btn btn-secondary" id="tvmaze-search-btn" style="font-size:0.8rem;white-space:nowrap">🔍 Chercher</button>
+            </div>
+            <div class="web-src-feedback" id="tvmaze-feedback"></div>
+            <div class="web-src-results" id="tvmaze-results" style="display:none"></div>
+          </div>
+
+          <!-- Subslikescript tab -->
+          <div class="web-src-pane" data-wsrc="subslikescript">
+            <div class="web-src-row">
+              <input class="web-src-input" id="subslike-url" type="text" placeholder="URL série (ex: https://subslikescript.com/series/...)" />
+              <button class="btn btn-secondary" id="subslike-discover-btn" style="font-size:0.8rem;white-space:nowrap">🔍 Découvrir</button>
+            </div>
+            <div class="web-src-feedback" id="subslike-feedback"></div>
+            <div class="web-src-results" id="subslike-results" style="display:none"></div>
+          </div>
         </div>
       </div>
     </div>`;
@@ -1143,6 +1205,47 @@ function populateEpSelect(sel: HTMLSelectElement, episodes: Episode[]) {
     : episodes.map((ep) => `<option value="${escapeHtml(ep.episode_id)}">${escapeHtml(ep.episode_id)} — ${escapeHtml(ep.title)}</option>`).join("");
 }
 
+function renderWebEpisodesTable(episodes: WebEpisodeRef[], showFetchBtn: boolean): string {
+  if (episodes.length === 0) return `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.82rem">Aucun épisode trouvé.</div>`;
+  const rows = episodes.map((ep) => `
+    <tr>
+      <td style="white-space:nowrap">${escapeHtml(ep.episode_id)}</td>
+      <td>${escapeHtml(ep.title)}</td>
+      ${showFetchBtn ? `<td><button class="btn btn-ghost web-fetch-transcript-btn" data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-url="${escapeHtml(ep.url)}" style="font-size:0.72rem;padding:2px 7px">⬇ Importer</button></td>` : ""}
+    </tr>`).join("");
+  return `<table>
+    <thead><tr>
+      <th>ID</th><th>Titre</th>${showFetchBtn ? "<th></th>" : ""}
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function wireSubslikeFetchButtons(
+  container: HTMLElement,
+  setFeedback: (msg: string, ok?: boolean) => void,
+) {
+  container.querySelectorAll<HTMLButtonElement>(".web-fetch-transcript-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const epId  = btn.dataset.epId!;
+      const epUrl = btn.dataset.epUrl!;
+      btn.disabled = true;
+      btn.textContent = "…";
+      setFeedback(`Téléchargement ${epId}…`);
+      try {
+        const res = await fetchSubslikescriptTranscript(epId, epUrl);
+        btn.textContent = "✓";
+        setFeedback(`${epId} importé — ${res.chars} chars.`);
+        _cachedEpisodes = null;
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "⬇ Importer";
+        setFeedback(e instanceof ApiError ? e.message : String(e), false);
+      }
+    });
+  });
+}
+
 function wireImporterButtons(pane: HTMLElement) {
   const feedback = pane.querySelector<HTMLElement>("#imp-feedback")!;
 
@@ -1174,6 +1277,78 @@ function wireImporterButtons(pane: HTMLElement) {
         (msg) => setFeedback(msg, false),
       );
     });
+
+  // ── Web source tabs ─────────────────────────────────────────────────────────
+  pane.querySelectorAll<HTMLButtonElement>(".web-src-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const src = tab.dataset.wsrc!;
+      pane.querySelectorAll(".web-src-tab").forEach((t) => t.classList.toggle("active", t === tab));
+      pane.querySelectorAll(".web-src-pane").forEach((p) =>
+        (p as HTMLElement).classList.toggle("active", (p as HTMLElement).dataset.wsrc === src),
+      );
+    });
+  });
+
+  // ── TVMaze search ───────────────────────────────────────────────────────────
+  const tvFeedback = pane.querySelector<HTMLElement>("#tvmaze-feedback")!;
+  const tvResults  = pane.querySelector<HTMLElement>("#tvmaze-results")!;
+  const tvInput    = pane.querySelector<HTMLInputElement>("#tvmaze-name")!;
+
+  const setTvFeedback = (msg: string, ok = true) => {
+    tvFeedback.textContent = msg;
+    tvFeedback.style.color = ok ? "var(--text-muted)" : "var(--danger, #dc2626)";
+  };
+
+  pane.querySelector<HTMLButtonElement>("#tvmaze-search-btn")!
+    .addEventListener("click", async () => {
+      const name = tvInput.value.trim();
+      if (!name) { setTvFeedback("Saisissez un nom de série.", false); return; }
+      setTvFeedback("Recherche en cours…");
+      tvResults.style.display = "none";
+      try {
+        const data = await discoverTvmaze(name);
+        setTvFeedback(`${data.series_title} — ${data.episode_count} épisodes.`);
+        tvResults.style.display = "block";
+        tvResults.innerHTML = renderWebEpisodesTable(data.episodes, false);
+      } catch (e) {
+        setTvFeedback(e instanceof ApiError ? e.message : String(e), false);
+      }
+    });
+
+  tvInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") pane.querySelector<HTMLButtonElement>("#tvmaze-search-btn")!.click();
+  });
+
+  // ── Subslikescript discover ─────────────────────────────────────────────────
+  const slFeedback = pane.querySelector<HTMLElement>("#subslike-feedback")!;
+  const slResults  = pane.querySelector<HTMLElement>("#subslike-results")!;
+  const slInput    = pane.querySelector<HTMLInputElement>("#subslike-url")!;
+
+  const setSlFeedback = (msg: string, ok = true) => {
+    slFeedback.textContent = msg;
+    slFeedback.style.color = ok ? "var(--text-muted)" : "var(--danger, #dc2626)";
+  };
+
+  pane.querySelector<HTMLButtonElement>("#subslike-discover-btn")!
+    .addEventListener("click", async () => {
+      const url = slInput.value.trim();
+      if (!url) { setSlFeedback("Saisissez l'URL de la série.", false); return; }
+      setSlFeedback("Découverte en cours…");
+      slResults.style.display = "none";
+      try {
+        const data = await discoverSubslikescript(url);
+        setSlFeedback(`${data.series_title} — ${data.episode_count} épisodes.`);
+        slResults.style.display = "block";
+        slResults.innerHTML = renderWebEpisodesTable(data.episodes, true);
+        wireSubslikeFetchButtons(slResults, setSlFeedback);
+      } catch (e) {
+        setSlFeedback(e instanceof ApiError ? e.message : String(e), false);
+      }
+    });
+
+  slInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") pane.querySelector<HTMLButtonElement>("#subslike-discover-btn")!.click();
+  });
 }
 
 // ── Section Personnages ──────────────────────────────────────────────────────
