@@ -104,12 +104,26 @@ export async function fetchHealth(): Promise<HealthResponse> {
 export interface ConfigResponse {
   project_name: string;
   project_path: string;
+  source_id: string;
+  series_url: string;
   languages: string[];
   normalize_profile: string;
 }
 
 export async function fetchConfig(): Promise<ConfigResponse> {
   return apiGet<ConfigResponse>("/config");
+}
+
+export interface ConfigUpdate {
+  project_name?:      string;
+  source_id?:         string;
+  series_url?:        string;
+  normalize_profile?: string;
+  languages?:         string[];
+}
+
+export async function saveConfig(update: ConfigUpdate): Promise<ConfigResponse> {
+  return apiPut<ConfigResponse>("/config", update);
 }
 
 // /episodes

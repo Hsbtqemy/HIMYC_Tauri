@@ -26,7 +26,9 @@ import {
   discoverSubslikescript,
   fetchSubslikescriptTranscript,
   runExport,
+  saveConfig,
   type ExportResult,
+  type ConfigUpdate,
   type Episode,
   type EpisodeSource,
   type EpisodesResponse,
@@ -570,6 +572,25 @@ const CSS = `
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+/* Config form */
+.cfg-form { display: flex; flex-direction: column; gap: 8px; }
+.cfg-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.cfg-label { font-size: 0.78rem; color: var(--text-muted); min-width: 110px; flex-shrink: 0; }
+.cfg-input {
+  flex: 1;
+  min-width: 160px;
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.cfg-input:focus { outline: none; border-color: var(--accent, #0f766e); }
+.cfg-select { appearance: none; cursor: pointer; }
+.cfg-feedback { font-size: 0.76rem; min-height: 1.2em; color: var(--text-muted); }
+.cfg-path { font-size: 0.72rem; font-family: ui-monospace, monospace; color: var(--text-muted); word-break: break-all; }
 
 /* Web sources (MX-021b) */
 .web-src-tabs { display: flex; gap: 2px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
@@ -1134,7 +1155,6 @@ function renderImporterSection(pane: HTMLElement) {
       <div class="cons-card">
         <div class="cons-card-title">Projet</div>
         <div id="imp-config-body" class="cons-card-body">Chargement…</div>
-        <button class="btn btn-ghost btn-sm" id="imp-config-refresh" style="margin-top:6px">↺ Rafraîchir</button>
       </div>
       <!-- Import fichiers -->
       <div class="cons-card">
@@ -1186,39 +1206,107 @@ function renderImporterSection(pane: HTMLElement) {
     </div>`;
 
   loadImporterConfig(pane);
-
-  pane.querySelector<HTMLButtonElement>("#imp-config-refresh")!
-    .addEventListener("click", () => loadImporterConfig(pane));
-
   wireImporterButtons(pane);
 }
+
+const NORMALIZE_PROFILES = [
+  { id: "default_en_v1",   label: "default_en_v1 — Anglais standard" },
+  { id: "default_fr_v1",   label: "default_fr_v1 — Français standard" },
+  { id: "conservative_v1", label: "conservative_v1 — Conservateur" },
+  { id: "aggressive_v1",   label: "aggressive_v1 — Agressif" },
+];
+
+const SOURCE_IDS = [
+  { id: "subslikescript", label: "Subslikescript" },
+  { id: "tvmaze",         label: "TVMaze" },
+  { id: "",               label: "— autre —" },
+];
 
 async function loadImporterConfig(pane: HTMLElement) {
   const body = pane.querySelector<HTMLElement>("#imp-config-body");
   if (!body) return;
+  body.innerHTML = `<div class="cons-loading" style="padding:8px 0">Chargement…</div>`;
   try {
     _cachedConfig = await fetchConfig();
-    const cfg = _cachedConfig;
-    body.innerHTML = `
-      <table style="font-size:0.8rem;border-collapse:collapse;width:100%">
-        <tr><td style="color:var(--text-muted);padding:2px 8px 2px 0;white-space:nowrap">Projet</td><td><strong>${escapeHtml(cfg.project_name)}</strong></td></tr>
-        <tr><td style="color:var(--text-muted);padding:2px 8px 2px 0">Chemin</td><td style="font-family:ui-monospace,monospace;font-size:0.75rem;word-break:break-all">${escapeHtml(cfg.project_path)}</td></tr>
-        <tr><td style="color:var(--text-muted);padding:2px 8px 2px 0">Profil</td><td><code>${escapeHtml(cfg.normalize_profile)}</code></td></tr>
-        <tr><td style="color:var(--text-muted);padding:2px 8px 2px 0">Langues</td><td>${cfg.languages.map((l) => `<span class="cons-badge normalized" style="margin-right:3px">${escapeHtml(l)}</span>`).join("")}</td></tr>
-      </table>`;
-
-    // Peupler le sélecteur d'épisodes
-    const epSel = pane.querySelector<HTMLSelectElement>("#imp-ep-select");
-    if (epSel && _cachedEpisodes) {
-      populateEpSelect(epSel, _cachedEpisodes.episodes);
-    } else if (epSel) {
-      fetchEpisodes().then((data) => {
-        _cachedEpisodes = data;
-        populateEpSelect(epSel, data.episodes);
-      }).catch(() => {});
-    }
+    renderConfigForm(body, _cachedConfig, pane);
   } catch (e) {
-    body.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e)}</div>`;
+  }
+}
+
+function renderConfigForm(body: HTMLElement, cfg: ConfigResponse, pane: HTMLElement) {
+  const profileOpts = NORMALIZE_PROFILES.map((p) =>
+    `<option value="${p.id}" ${cfg.normalize_profile === p.id ? "selected" : ""}>${escapeHtml(p.label)}</option>`
+  ).join("");
+  const sourceOpts = SOURCE_IDS.map((s) =>
+    `<option value="${s.id}" ${cfg.source_id === s.id ? "selected" : ""}>${escapeHtml(s.label)}</option>`
+  ).join("");
+
+  body.innerHTML = `
+    <div class="cfg-form">
+      <div class="cfg-row">
+        <span class="cfg-label">Nom</span>
+        <input class="cfg-input" id="cfg-project-name" type="text" value="${escapeHtml(cfg.project_name)}" />
+      </div>
+      <div class="cfg-row">
+        <span class="cfg-label">Source</span>
+        <select class="cfg-input cfg-select" id="cfg-source-id">${sourceOpts}</select>
+      </div>
+      <div class="cfg-row">
+        <span class="cfg-label">URL série</span>
+        <input class="cfg-input" id="cfg-series-url" type="text" value="${escapeHtml(cfg.series_url)}" placeholder="https://subslikescript.com/series/…" />
+      </div>
+      <div class="cfg-row">
+        <span class="cfg-label">Profil normalisation</span>
+        <select class="cfg-input cfg-select" id="cfg-profile">${profileOpts}</select>
+      </div>
+      <div class="cfg-row">
+        <span class="cfg-label">Langues</span>
+        <input class="cfg-input" id="cfg-languages" type="text" value="${escapeHtml(cfg.languages.join(", "))}" placeholder="en, fr, it…" />
+      </div>
+      <div class="cfg-row" style="justify-content:flex-end;gap:6px">
+        <span class="cfg-feedback" id="cfg-feedback"></span>
+        <button class="btn btn-primary btn-sm" id="cfg-save-btn">Enregistrer</button>
+      </div>
+      <div class="cfg-path">📁 ${escapeHtml(cfg.project_path)}</div>
+    </div>`;
+
+  const feedback = body.querySelector<HTMLElement>("#cfg-feedback")!;
+  body.querySelector<HTMLButtonElement>("#cfg-save-btn")!
+    .addEventListener("click", async () => {
+      feedback.textContent = "Enregistrement…";
+      feedback.style.color = "var(--text-muted)";
+      const update: ConfigUpdate = {
+        project_name:      (body.querySelector<HTMLInputElement>("#cfg-project-name")!.value),
+        source_id:         (body.querySelector<HTMLSelectElement>("#cfg-source-id")!.value),
+        series_url:        (body.querySelector<HTMLInputElement>("#cfg-series-url")!.value),
+        normalize_profile: (body.querySelector<HTMLSelectElement>("#cfg-profile")!.value),
+        languages:         (body.querySelector<HTMLInputElement>("#cfg-languages")!.value)
+                             .split(",").map((l) => l.trim()).filter(Boolean),
+      };
+      try {
+        _cachedConfig = await saveConfig(update);
+        feedback.textContent = "✓ Enregistré";
+        feedback.style.color = "var(--success, #16a34a)";
+        // refresh episode select in case languages changed
+        const epSel = pane.querySelector<HTMLSelectElement>("#imp-ep-select");
+        if (epSel && _cachedEpisodes) populateEpSelect(epSel, _cachedEpisodes.episodes);
+        setTimeout(() => { feedback.textContent = ""; }, 2500);
+      } catch (e) {
+        feedback.textContent = e instanceof ApiError ? e.message : String(e);
+        feedback.style.color = "var(--danger, #dc2626)";
+      }
+    });
+
+  // Peupler le sélecteur d'épisodes
+  const epSel = pane.querySelector<HTMLSelectElement>("#imp-ep-select");
+  if (epSel && _cachedEpisodes) {
+    populateEpSelect(epSel, _cachedEpisodes.episodes);
+  } else if (epSel) {
+    fetchEpisodes().then((data) => {
+      _cachedEpisodes = data;
+      populateEpSelect(epSel, data.episodes);
+    }).catch(() => {});
   }
 }
 
