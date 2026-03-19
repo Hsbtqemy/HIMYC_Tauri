@@ -1122,14 +1122,45 @@ const CSS = `
   background: var(--surface); flex-shrink: 0;
   font-size: 0.76rem; color: var(--text-muted);
 }
+/* Quality bar */
+.audit-quality-bar-row {
+  display: none; align-items: center; gap: 10px; padding: 4px 14px 6px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.audit-quality-bar-wrap {
+  flex: 1; height: 8px; border-radius: 4px; overflow: hidden;
+  background: var(--border); display: flex; gap: 1px;
+}
+.audit-quality-seg { height: 100%; transition: flex .3s; min-width: 0; }
+.audit-quality-seg.accepted { background: #16a34a; }
+.audit-quality-seg.auto     { background: #ca8a04; }
+.audit-quality-seg.rejected { background: #dc2626; }
+.audit-quality-label {
+  font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
+}
 /* Collisions */
-.audit-collision-list { overflow-y: auto; flex: 1; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
+.audit-collision-list { overflow-y: auto; flex: 1; padding: 0; display: flex; flex-direction: column; }
+.audit-collision-actions {
+  display: flex; align-items: center; gap: 8px; padding: 6px 14px;
+  border-bottom: 1px solid #fca5a5; background: #fff8f8; flex-shrink: 0; flex-wrap: wrap;
+}
+.audit-collision-scroll { overflow-y: auto; flex: 1; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
 .audit-collision-card {
   border: 1px solid #fca5a5; border-radius: var(--radius);
   background: #fef2f2; padding: 8px 12px;
 }
 .audit-collision-pivot { font-size: 0.77rem; font-weight: 600; color: #7f1d1d; margin-bottom: 6px; }
-.audit-collision-target { font-size: 0.76rem; padding: 3px 0; border-top: 1px solid #fecaca; color: var(--text); }
+.audit-collision-target-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 0;
+  border-top: 1px solid #fecaca;
+}
+.audit-collision-target-text {
+  flex: 1; font-size: 0.76rem; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.audit-collision-target-conf { font-size: 0.68rem; color: var(--text-muted); flex-shrink: 0; }
+.audit-collision-target-btns { display: flex; gap: 3px; flex-shrink: 0; }
 .audit-back-btn {
   padding: 3px 10px; font-size: 0.76rem;
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -2831,6 +2862,10 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
       <div id="audit-kpi-strip" class="audit-stats-strip" style="padding-top:4px;padding-bottom:4px">
         <span style="font-size:0.76rem;color:var(--text-muted)">Chargement stats…</span>
       </div>
+      <div id="audit-quality-bar-row" class="audit-quality-bar-row">
+        <div class="audit-quality-bar-wrap" id="audit-quality-bar"></div>
+        <span id="audit-quality-label" class="audit-quality-label"></span>
+      </div>
       <div class="audit-tabs">
         <button class="audit-tab active" data-tab="links">Liens</button>
         <button class="audit-tab" data-tab="collisions">Collisions <span class="audit-tab-badge" id="audit-collision-badge" style="display:none">0</span></button>
@@ -2944,6 +2979,20 @@ async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
     if (badge) {
       badge.textContent = String(s.n_collisions);
       badge.style.display = s.n_collisions > 0 ? "inline-flex" : "none";
+    }
+
+    // Quality bar
+    const total = nAccepted + nAuto + nRejected;
+    const qualRow = panel.querySelector<HTMLElement>("#audit-quality-bar-row");
+    const qualBar = panel.querySelector<HTMLElement>("#audit-quality-bar");
+    const qualLabel = panel.querySelector<HTMLElement>("#audit-quality-label");
+    if (qualRow && qualBar && qualLabel && total > 0) {
+      qualBar.innerHTML = `
+        <div class="audit-quality-seg accepted" style="flex:${nAccepted}"></div>
+        <div class="audit-quality-seg auto"     style="flex:${nAuto}"></div>
+        <div class="audit-quality-seg rejected" style="flex:${nRejected}"></div>`;
+      qualLabel.textContent = `${nAccepted} acceptés · ${nAuto} auto · ${nRejected} rejetés`;
+      qualRow.style.display = "flex";
     }
   } catch (e) {
     kpiStrip.innerHTML = `<span style="font-size:0.76rem;color:var(--danger)">${e instanceof ApiError ? e.message : String(e)}</span>`;
@@ -3096,10 +3145,18 @@ async function loadAuditCollisions(panel: HTMLElement, epId: string, runId: stri
     const res = await fetchAlignCollisions(epId, runId);
     const cols: AlignCollision[] = res.collisions ?? [];
     if (cols.length === 0) {
-      listEl.innerHTML = `<div style="font-size:0.78rem;color:var(--success,#16a34a)">✅ Aucune collision détectée.</div>`;
+      listEl.innerHTML = `<div style="padding:14px;font-size:0.78rem;color:var(--success,#16a34a)">✅ Aucune collision détectée.</div>`;
       return;
     }
-    listEl.innerHTML = cols.map((c) => `
+
+    const batchHtml = `
+      <div class="audit-collision-actions">
+        <span style="font-weight:600;color:#7f1d1d;font-size:0.76rem">${cols.length} pivot${cols.length > 1 ? "s" : ""} en collision</span>
+        <button class="audit-action-btn accept" id="col-keep-best" title="Accepter la cible la plus confiante par pivot, rejeter les autres">✓ Conserver les meilleurs</button>
+        <button class="audit-action-btn reject" id="col-reject-all" title="Rejeter toutes les cibles en collision">✗ Tout rejeter</button>
+      </div>`;
+
+    const cardsHtml = cols.map((c) => `
       <div class="audit-collision-card">
         <div class="audit-collision-pivot">
           <span class="align-run-lang-badge" style="background:#dbeafe;color:#1d4ed8">${escapeHtml(c.lang)}</span>
@@ -3107,14 +3164,67 @@ async function loadAuditCollisions(panel: HTMLElement, epId: string, runId: stri
           <span style="font-size:0.7rem;color:#b91c1c;margin-left:8px">${c.n_targets} cibles en conflit</span>
         </div>
         ${c.targets.map((t) => `
-          <div class="audit-collision-target">
+          <div class="audit-collision-target-row" data-link-id="${escapeHtml(t.link_id)}">
             <span class="audit-status-badge ${t.status}">${t.status}</span>
-            ${escapeHtml(t.target_text || t.cue_id_target)}
-            ${t.confidence != null ? `<span style="font-size:0.68rem;color:var(--text-muted);margin-left:6px">${Math.round(t.confidence * 100)}%</span>` : ""}
+            <span class="audit-collision-target-text" title="${escapeHtml(t.target_text || t.cue_id_target)}">${escapeHtml(t.target_text || t.cue_id_target)}</span>
+            ${t.confidence != null ? `<span class="audit-collision-target-conf">${Math.round(t.confidence * 100)}%</span>` : ""}
+            <div class="audit-collision-target-btns">
+              <button class="audit-action-btn accept col-accept" data-link-id="${escapeHtml(t.link_id)}" title="Accepter">✓</button>
+              <button class="audit-action-btn reject col-reject" data-link-id="${escapeHtml(t.link_id)}" title="Rejeter">✗</button>
+            </div>
           </div>`).join("")}
       </div>`).join("");
+
+    listEl.innerHTML = batchHtml + `<div class="audit-collision-scroll">${cardsHtml}</div>`;
+
+    // Per-target actions
+    listEl.querySelectorAll<HTMLButtonElement>(".col-accept, .col-reject").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const lid = btn.dataset.linkId!;
+        const newStatus: "accepted" | "rejected" = btn.classList.contains("col-accept") ? "accepted" : "rejected";
+        btn.disabled = true;
+        try {
+          await setAlignLinkStatus(lid, newStatus);
+          loadAuditCollisions(panel, epId, runId);
+          loadAuditStats(panel, epId, runId);
+        } catch { btn.disabled = false; }
+      });
+    });
+
+    // Batch: reject all
+    listEl.querySelector<HTMLButtonElement>("#col-reject-all")?.addEventListener("click", async () => {
+      const allLinks = cols.flatMap((c) => c.targets.map((t) => t.link_id));
+      try {
+        await Promise.all(allLinks.map((lid) => setAlignLinkStatus(lid, "rejected")));
+        loadAuditCollisions(panel, epId, runId);
+        loadAuditStats(panel, epId, runId);
+      } catch (e) {
+        listEl.insertAdjacentHTML("afterbegin",
+          `<div style="padding:6px 14px;font-size:0.76rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`);
+      }
+    });
+
+    // Batch: keep best (highest confidence per pivot, reject rest)
+    listEl.querySelector<HTMLButtonElement>("#col-keep-best")?.addEventListener("click", async () => {
+      const ops: Promise<unknown>[] = [];
+      for (const col of cols) {
+        const sorted = [...col.targets].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+        sorted.forEach((t, i) => {
+          ops.push(setAlignLinkStatus(t.link_id, i === 0 ? "accepted" : "rejected"));
+        });
+      }
+      try {
+        await Promise.all(ops);
+        loadAuditCollisions(panel, epId, runId);
+        loadAuditStats(panel, epId, runId);
+      } catch (e) {
+        listEl.insertAdjacentHTML("afterbegin",
+          `<div style="padding:6px 14px;font-size:0.76rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`);
+      }
+    });
+
   } catch (e) {
-    listEl.innerHTML = `<div style="font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
+    listEl.innerHTML = `<div style="padding:14px;font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
   }
 }
 
