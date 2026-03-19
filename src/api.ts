@@ -594,3 +594,36 @@ export interface QaReport {
 export async function fetchQaReport(policy: "lenient" | "strict" = "lenient"): Promise<QaReport> {
   return apiGet<QaReport>(`/export/qa?policy=${policy}`);
 }
+
+// ── /alignment_runs (MX-030) ──────────────────────────────────────────────────
+
+export interface AlignmentRunFlat extends AlignmentRun {
+  // same shape as AlignmentRun, listed together for all episodes
+}
+
+export interface AllAlignmentRunsResponse {
+  runs: AlignmentRunFlat[];
+}
+
+export async function fetchAllAlignmentRuns(): Promise<AllAlignmentRunsResponse> {
+  return apiGet<AllAlignmentRunsResponse>("/alignment_runs");
+}
+
+// ── /export/alignments (MX-030) ───────────────────────────────────────────────
+
+export interface AlignExportResult {
+  episode_id: string;
+  run_id: string;
+  fmt: string;
+  rows: number;
+  path: string;
+}
+
+export async function exportAlignments(
+  episodeId: string,
+  runId: string,
+  fmt: "csv" | "tsv" = "csv",
+): Promise<AlignExportResult> {
+  const qs = new URLSearchParams({ episode_id: episodeId, run_id: runId, fmt });
+  return apiGet<AlignExportResult>(`/export/alignments?${qs}`);
+}

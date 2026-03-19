@@ -11,9 +11,12 @@ import {
   runExport,
   fetchConfig,
   fetchQaReport,
+  fetchAllAlignmentRuns,
+  exportAlignments,
   ApiError,
   type ExportResult,
   type QaReport,
+  type AlignmentRunFlat,
 } from "../api";
 
 const CSS = `
@@ -187,12 +190,22 @@ const CSS = `
 }
 .exp-issue.blocking { background: #fef2f2; border-color: #dc2626; color: #7f1d1d; }
 .exp-issue.warning  { background: #fefce8; border-color: #ca8a04; color: #713f12; }
+/* Alignements tab */
+.exp-align-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.exp-align-table th { background: var(--surface2); font-weight: 600; color: var(--text-muted); padding: 5px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.exp-align-table td { padding: 5px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.exp-align-table tr:hover td { background: var(--surface2); }
+.exp-align-mono { font-family: ui-monospace, monospace; font-size: 0.72rem; color: var(--text-muted); }
+.exp-align-badge { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+.exp-align-actions { display: flex; gap: 4px; }
 `;
 
 let _styleInjected = false;
 let _unsubscribe: (() => void) | null = null;
 let _qaPolicy: "lenient" | "strict" = "lenient";
 let _qaData: QaReport | null = null;
+let _alignRuns: AlignmentRunFlat[] | null = null;
+let _alignTabLoaded = false;
 
 export function mountExporter(container: HTMLElement, ctx: ShellContext) {
   injectGlobalCss();
@@ -227,6 +240,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
         <div class="exp-tabs">
           <button class="exp-tab active" data-stage="corpus">Corpus</button>
           <button class="exp-tab" data-stage="segments">Segments</button>
+          <button class="exp-tab" data-stage="alignements">Alignements</button>
           <button class="exp-tab" data-stage="qa">QA</button>
           <button class="exp-tab" data-stage="jobs">Jobs</button>
         </div>
@@ -270,6 +284,13 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
               </div>
               <div class="exp-result" id="exp-segments-result"></div>
             </div>
+          </div>
+        </div>
+
+        <!-- ── Alignements ────────────────────── -->
+        <div class="exp-pane" data-stage="alignements">
+          <div id="exp-align-body">
+            <div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Chargement…</div>
           </div>
         </div>
 
@@ -328,6 +349,11 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
       container.querySelectorAll(".exp-pane").forEach((p) => p.classList.remove("active"));
       tab.classList.add("active");
       container.querySelector<HTMLElement>(`.exp-pane[data-stage="${tab.dataset.stage}"]`)?.classList.add("active");
+      // Lazy-load alignements tab
+      if (tab.dataset.stage === "alignements" && !_alignTabLoaded) {
+        _alignTabLoaded = true;
+        loadAlignmentsTab(container);
+      }
     });
   });
 
@@ -461,4 +487,91 @@ async function loadQaData(container: HTMLElement) {
 export function disposeExporter() {
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   _qaData = null;
+  _alignRuns = null;
+  _alignTabLoaded = false;
+}
+
+// ── Alignements tab ──────────────────────────────────────────────────────────
+
+async function loadAlignmentsTab(container: HTMLElement) {
+  const body = container.querySelector<HTMLElement>("#exp-align-body");
+  if (!body) return;
+  body.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Chargement des runs…</div>`;
+  try {
+    const { runs } = await fetchAllAlignmentRuns();
+    _alignRuns = runs;
+    renderAlignmentsTab(body);
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e)}</div>`;
+  }
+}
+
+function renderAlignmentsTab(body: HTMLElement) {
+  const runs = _alignRuns ?? [];
+
+  if (runs.length === 0) {
+    body.innerHTML = `<div class="exp-card" style="max-width:480px">
+      <div class="exp-card-title">Aucun run d'alignement</div>
+      <div class="exp-card-desc">Lancez un alignement depuis la section Constituer → Alignement pour exporter les concordances ici.</div>
+    </div>`;
+    return;
+  }
+
+  const rows = runs.map((r) => {
+    const created = r.created_at ? new Date(r.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "—";
+    const langs = [r.pivot_lang, ...r.target_langs].filter(Boolean).join(" → ");
+    return `
+      <tr data-run-id="${escapeHtml(r.run_id)}" data-ep-id="${escapeHtml(r.episode_id)}">
+        <td class="exp-align-mono">${escapeHtml(r.episode_id)}</td>
+        <td class="exp-align-mono" style="font-size:0.7rem;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.run_id)}">${escapeHtml(r.run_id.slice(0, 12))}…</td>
+        <td><span class="exp-align-badge">${escapeHtml(langs)}</span></td>
+        <td style="white-space:nowrap;font-size:0.75rem;color:var(--text-muted)">${created}</td>
+        <td>
+          <div class="exp-align-actions">
+            <button class="btn btn-secondary btn-sm align-export-btn" data-fmt="csv">CSV</button>
+            <button class="btn btn-secondary btn-sm align-export-btn" data-fmt="tsv">TSV</button>
+          </div>
+          <div class="exp-result align-export-result" style="margin-top:4px"></div>
+        </td>
+      </tr>`;
+  }).join("");
+
+  body.innerHTML = `
+    <div style="overflow-x:auto">
+      <table class="exp-align-table">
+        <thead><tr>
+          <th>Épisode</th>
+          <th>Run ID</th>
+          <th>Langues</th>
+          <th>Date</th>
+          <th>Export</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  body.querySelectorAll<HTMLTableRowElement>("tr[data-run-id]").forEach((row) => {
+    const epId  = row.dataset.epId!;
+    const runId = row.dataset.runId!;
+    const result = row.querySelector<HTMLElement>(".align-export-result")!;
+
+    row.querySelectorAll<HTMLButtonElement>(".align-export-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const fmt = btn.dataset.fmt as "csv" | "tsv";
+        btn.disabled = true;
+        result.textContent = "Export…";
+        result.className = "exp-result visible";
+        try {
+          const res = await exportAlignments(epId, runId, fmt);
+          result.textContent = `✓ ${res.rows} lignes → ${res.path}`;
+          result.className = "exp-result visible ok";
+        } catch (e) {
+          result.textContent = e instanceof ApiError ? e.message : String(e);
+          result.className = "exp-result visible err";
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  });
 }
