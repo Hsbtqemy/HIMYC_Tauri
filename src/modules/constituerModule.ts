@@ -280,6 +280,44 @@ const CSS = `
 .cons-placeholder-title { font-size: 0.95rem; font-weight: 600; color: var(--text); }
 .cons-placeholder-desc { font-size: 0.8rem; line-height: 1.5; max-width: 320px; }
 
+/* ── Documents stats bar ────────────────────────────────────── */
+.docs-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.docs-stats-bar:empty { display: none; }
+.docs-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.docs-stat-sep { opacity: 0.3; }
+
+/* Per-episode normalize button in curation list */
+.cur-ep-item { position: relative; }
+.cur-ep-normalize {
+  margin-left: auto;
+  padding: 1px 5px;
+  font-size: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: background .1s, color .1s;
+}
+.cur-ep-normalize:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); border-color: var(--accent); }
+
 /* ── Cards (Importer) ───────────────────────────────────────── */
 .cons-card {
   background: var(--surface);
@@ -1415,10 +1453,12 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
       state === "normalized" ? `<span class="cons-badge normalized" style="font-size:0.65rem">norm.</span>` :
       state === "raw"        ? `<span class="cons-badge raw" style="font-size:0.65rem">brut</span>` :
                                `<span class="cons-badge absent" style="font-size:0.65rem">—</span>`;
+    const canNormalize = state === "raw" || state === "unknown";
     return `<div class="cur-ep-item" data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}" data-ep-state="${escapeHtml(state)}">
       <span class="cur-ep-id">${escapeHtml(ep.episode_id)}</span>
       <span class="cur-ep-name" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title)}</span>
       ${badge}
+      ${canNormalize ? `<button class="cur-ep-normalize" data-ep="${escapeHtml(ep.episode_id)}" title="Normaliser cet épisode">⚡</button>` : ""}
     </div>`;
   }).join("");
 
@@ -1451,6 +1491,33 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
       }
 
       await loadCurationPreview(previewPanes, epId, epTitle, activeMode());
+    });
+  });
+
+  // Per-episode normalize buttons
+  listEl.querySelectorAll<HTMLButtonElement>(".cur-ep-normalize").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const epId = btn.dataset.ep!;
+      const profile = container.querySelector<HTMLSelectElement>("#cur-profile")?.value ?? "default_en_v1";
+      btn.disabled = true;
+      btn.textContent = "…";
+      try {
+        await createJob("normalize_transcript", epId, "transcript", { normalize_profile: profile });
+        startJobPoll(container);
+        btn.textContent = "✓";
+        // Update badge in the item
+        const item = listEl.querySelector<HTMLElement>(`[data-ep-id="${epId}"]`);
+        if (item) {
+          item.dataset.epState = "normalized";
+          const badgeEl = item.querySelector(".cons-badge");
+          if (badgeEl) { badgeEl.textContent = "norm."; badgeEl.className = "cons-badge normalized"; (badgeEl as HTMLElement).style.fontSize = "0.65rem"; }
+          setTimeout(() => btn.remove(), 800);
+        }
+      } catch {
+        btn.disabled = false;
+        btn.textContent = "⚡";
+      }
     });
   });
 }
@@ -1548,6 +1615,7 @@ function renderDocumentsSection(pane: HTMLElement) {
       <input class="cons-search" id="docs-search" type="search" placeholder="Filtrer…" style="font-size:0.8rem;padding:3px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);width:180px">
       <button class="btn btn-ghost btn-sm" id="docs-refresh">↺ Actualiser</button>
     </div>
+    <div class="docs-stats-bar" id="docs-stats-bar"></div>
     <div class="cons-error" id="docs-error" style="display:none"></div>
     <div class="cons-table-wrap" id="docs-table-wrap">
       <div class="cons-empty">Chargement…</div>
@@ -1581,6 +1649,27 @@ async function loadDocuments(pane: HTMLElement) {
 function renderDocumentsTable(pane: HTMLElement, filter: string) {
   const wrap = pane.querySelector<HTMLElement>("#docs-table-wrap");
   if (!wrap || !_cachedEpisodes) return;
+
+  // Pipeline stats (on the unfiltered set)
+  const statsBar = pane.querySelector<HTMLElement>("#docs-stats-bar");
+  if (statsBar) {
+    let nRaw = 0, nNorm = 0, nSeg = 0, nMissing = 0;
+    for (const ep of _cachedEpisodes.episodes) {
+      const t = ep.sources.find((s) => s.source_key === "transcript");
+      if (!t?.available) { nMissing++; continue; }
+      if (t.state === "segmented")  nSeg++;
+      else if (t.state === "normalized") nNorm++;
+      else nRaw++;
+    }
+    const total = _cachedEpisodes.episodes.length;
+    statsBar.innerHTML = [
+      `<span class="docs-stat">${total} épisode${total !== 1 ? "s" : ""}</span>`,
+      nRaw     ? `<span class="docs-stat-sep">·</span><span class="docs-stat"><span class="cons-badge raw" style="font-size:0.68rem">brut</span> ${nRaw}</span>`         : "",
+      nNorm    ? `<span class="docs-stat-sep">·</span><span class="docs-stat"><span class="cons-badge normalized" style="font-size:0.68rem">normalisé</span> ${nNorm}</span>` : "",
+      nSeg     ? `<span class="docs-stat-sep">·</span><span class="docs-stat"><span class="cons-badge segmented" style="font-size:0.68rem">segmenté</span> ${nSeg}</span>`   : "",
+      nMissing ? `<span class="docs-stat-sep">·</span><span class="docs-stat" style="color:var(--text-muted)">${nMissing} sans transcript</span>` : "",
+    ].join("");
+  }
 
   const episodes = filter
     ? _cachedEpisodes.episodes.filter(
@@ -2503,11 +2592,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           <div class="cons-placeholder">
             <div class="cons-placeholder-icon">📥</div>
             <div class="cons-placeholder-title">Importer</div>
-            <div class="cons-placeholder-desc">
-              Configuration projet (série, source, profil, langues) +<br>
-              import depuis subslikescript · TVMaze · OpenSubtitles · fichiers locaux.<br>
-              <em style="opacity:0.6">En développement — MX-021.</em>
-            </div>
+            <div class="cons-placeholder-desc">Chargement…</div>
           </div>
         </div>
 
@@ -2516,11 +2601,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           <div class="cons-placeholder">
             <div class="cons-placeholder-icon">📄</div>
             <div class="cons-placeholder-title">Documents</div>
-            <div class="cons-placeholder-desc">
-              Table des épisodes avec sources et états — gestion gros corpus,<br>
-              virtualisation, filtres, accès à l'Inspecter par épisode.<br>
-              <em style="opacity:0.6">En développement — MX-021.</em>
-            </div>
+            <div class="cons-placeholder-desc">Chargement…</div>
           </div>
         </div>
 
@@ -2710,12 +2791,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           <div class="cons-placeholder">
             <div class="cons-placeholder-icon">🎭</div>
             <div class="cons-placeholder-title">Personnages</div>
-            <div class="cons-placeholder-desc">
-              Définition des personnages (canonical + noms par langue + alias),<br>
-              assignation segment/cue → personnage, propagation via alignement,<br>
-              réécriture SRT avec noms de locuteurs.<br>
-              <em style="opacity:0.6">En développement — MX-021c.</em>
-            </div>
+            <div class="cons-placeholder-desc">Chargement…</div>
           </div>
         </div>
 
@@ -2724,11 +2800,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           <div class="cons-placeholder">
             <div class="cons-placeholder-icon">📤</div>
             <div class="cons-placeholder-title">Exporter</div>
-            <div class="cons-placeholder-desc">
-              Export corpus, alignements et SRT final avec noms de personnages.<br>
-              Formats : TXT, CSV, TSV, DOCX, JSON.<br>
-              <em style="opacity:0.6">En développement.</em>
-            </div>
+            <div class="cons-placeholder-desc">Chargement…</div>
           </div>
         </div>
 
