@@ -31,6 +31,8 @@ import {
   fetchAuditLinks,
   fetchAlignCollisions,
   setAlignLinkStatus,
+  fetchConcordance,
+  fetchEpisodeSegments,
   fetchQaReport,
   runExport,
   saveConfig,
@@ -39,6 +41,8 @@ import {
   type AlignRunStats,
   type AuditLink,
   type AlignCollision,
+  type ConcordanceRow,
+  type SegmentRow,
   type ConfigUpdate,
   type Episode,
   type EpisodeSource,
@@ -1131,6 +1135,68 @@ const CSS = `
   color: var(--text-muted); flex-shrink: 0;
 }
 .audit-back-btn:hover { background: var(--surface2); }
+
+/* ── Concordancier parallèle ─────────────────────────────────── */
+.conc-panel {
+  display: flex; flex-direction: column; height: 100%; overflow: hidden;
+}
+.conc-toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  flex-shrink: 0; flex-wrap: wrap;
+}
+.conc-toolbar-title { font-size: 0.82rem; font-weight: 700; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conc-search { padding: 3px 8px; font-size: 0.78rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface2); color: var(--text); font-family: inherit; min-width: 140px; }
+.conc-filter-select { padding: 3px 8px; font-size: 0.78rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font-family: inherit; }
+.conc-count { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.conc-table-wrap { flex: 1; overflow-y: auto; min-height: 0; }
+.conc-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+.conc-table thead { position: sticky; top: 0; background: var(--surface); z-index: 2; }
+.conc-table th {
+  padding: 5px 8px; border-bottom: 2px solid var(--border);
+  text-align: left; font-size: 0.69rem; color: var(--text-muted);
+  text-transform: uppercase; white-space: nowrap;
+}
+.conc-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.conc-table tr:hover td { background: var(--surface2); }
+.conc-table tr:nth-child(even) td { background: color-mix(in srgb, var(--surface2) 40%, transparent); }
+.conc-speaker { font-size: 0.68rem; font-weight: 700; color: var(--accent); display: block; margin-bottom: 2px; }
+.conc-conf { font-size: 0.65rem; color: var(--text-muted); }
+.conc-empty { padding: 1.5rem; font-size: 0.78rem; color: var(--text-muted); text-align: center; }
+.conc-highlight { background: #fef08a; border-radius: 2px; }
+
+/* ── Segmentation longtext mode ──────────────────────────────── */
+.seg-mode-toggle {
+  display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+}
+.seg-mode-btn {
+  padding: 3px 10px; font-size: 0.76rem; border: none; border-right: 1px solid var(--border);
+  background: var(--surface); color: var(--text-muted); cursor: pointer; font-family: inherit;
+  transition: background .1s;
+}
+.seg-mode-btn:last-child { border-right: none; }
+.seg-mode-btn.active { background: var(--accent, #0f766e); color: #fff; }
+.seg-mode-btn:hover:not(.active) { background: var(--surface2); }
+.seg-lt-wrap { flex: 1; overflow-y: auto; min-height: 0; padding: 1rem 1.5rem; display: flex; flex-direction: column; gap: 0; }
+.seg-lt-para {
+  padding: 5px 8px; border-radius: 3px; font-size: 0.82rem; line-height: 1.6;
+  color: var(--text); position: relative;
+  border-left: 3px solid transparent; margin-bottom: 2px;
+}
+.seg-lt-para:hover { background: var(--surface2); border-left-color: var(--accent); }
+.seg-lt-para.matched { background: #fef9c3; border-left-color: #ca8a04; }
+.seg-lt-speaker { font-size: 0.68rem; font-weight: 700; color: var(--accent); display: block; margin-bottom: 1px; }
+.seg-lt-n { font-size: 0.62rem; color: var(--text-muted); font-family: ui-monospace, monospace; position: absolute; right: 6px; top: 6px; }
+.seg-lt-search-bar {
+  display: flex; align-items: center; gap: 8px; padding: 5px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.seg-lt-search-bar input { flex: 1; padding: 3px 8px; font-size: 0.78rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface2); color: var(--text); font-family: inherit; }
+.seg-lt-search-count { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.seg-lt-search-nav { display: flex; gap: 3px; }
+.seg-lt-search-nav button { padding: 1px 7px; font-size: 0.72rem; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); cursor: pointer; font-family: inherit; color: var(--text-muted); }
+.seg-lt-search-nav button:hover { background: var(--surface2); }
 
 /* ── Presets nav button + modal ─────────────────────────────── */
 .cons-nav-presets-btn {
@@ -2472,6 +2538,134 @@ async function loadAndRenderSegmentation(container: HTMLElement) {
   }
 }
 
+// ── Segmentation Longtext view ───────────────────────────────────────────────
+
+async function loadLongtextView(
+  container: HTMLElement,
+  epId: string | null,
+  epTitle: string,
+  kind: "utterance" | "sentence",
+) {
+  if (!epId) {
+    container.innerHTML = `<div class="acts-text-empty">← Sélectionnez un épisode dans la vue Table</div>`;
+    return;
+  }
+  container.innerHTML = `<div class="cons-loading">Chargement des segments…</div>`;
+  try {
+    const data = await fetchEpisodeSegments(epId, kind);
+    if (data.segments.length === 0) {
+      container.innerHTML = `<div class="acts-text-empty">Aucun segment de type «&nbsp;${escapeHtml(kind)}&nbsp;» pour cet épisode.</div>`;
+      return;
+    }
+    renderLongtextSegments(container, epTitle, data.segments);
+  } catch (e) {
+    container.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
+  }
+}
+
+function renderLongtextSegments(
+  container: HTMLElement,
+  _epTitle: string,
+  segments: SegmentRow[],
+) {
+  const parasHtml = segments.map((s) => {
+    const speakerAttr = s.speaker_explicit ? ` data-speaker="${escapeHtml(s.speaker_explicit)}"` : "";
+    const speakerHtml = s.speaker_explicit
+      ? `<span class="seg-lt-speaker">${escapeHtml(s.speaker_explicit)}</span>`
+      : "";
+    return `<div class="seg-lt-para" data-seg-id="${escapeHtml(s.segment_id)}" data-n="${s.n}" data-raw-text="${escapeHtml(s.text)}"${speakerAttr}>` +
+      speakerHtml + escapeHtml(s.text) +
+      `<span class="seg-lt-n">#${s.n}</span></div>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="seg-lt-search-bar">
+      <input type="text" class="seg-lt-search-bar input" placeholder="Rechercher dans le texte…" id="lt-search-input" autocomplete="off">
+      <div class="seg-lt-search-nav">
+        <button id="lt-search-prev" title="Précédent (Shift+Entrée)">▲</button>
+        <button id="lt-search-next" title="Suivant (Entrée)">▼</button>
+      </div>
+      <span class="seg-lt-search-count" id="lt-search-count"></span>
+    </div>
+    <div class="seg-lt-wrap" id="lt-content">${parasHtml}</div>`;
+
+  const input   = container.querySelector<HTMLInputElement>("#lt-search-input")!;
+  const prevBtn = container.querySelector<HTMLButtonElement>("#lt-search-prev")!;
+  const nextBtn = container.querySelector<HTMLButtonElement>("#lt-search-next")!;
+  const countEl = container.querySelector<HTMLElement>("#lt-search-count")!;
+  const paras   = Array.from(container.querySelectorAll<HTMLElement>(".seg-lt-para"));
+
+  let matches: HTMLElement[] = [];
+  let matchIdx = -1;
+
+  function rebuildPara(p: HTMLElement, highlight?: string) {
+    const rawText = p.dataset.rawText ?? "";
+    const speaker = p.dataset.speaker ?? "";
+    const speakerHtml = speaker
+      ? `<span class="seg-lt-speaker">${escapeHtml(speaker)}</span>`
+      : "";
+    const nHtml = `<span class="seg-lt-n">#${p.dataset.n ?? ""}</span>`;
+    if (!highlight) {
+      p.innerHTML = speakerHtml + escapeHtml(rawText) + nHtml;
+      p.classList.remove("matched");
+      return false;
+    }
+    const lower = rawText.toLowerCase();
+    const lq = highlight.toLowerCase();
+    let result = "";
+    let pos = 0;
+    let found = false;
+    let idx: number;
+    while ((idx = lower.indexOf(lq, pos)) !== -1) {
+      result += escapeHtml(rawText.slice(pos, idx));
+      result += `<mark class="conc-highlight">${escapeHtml(rawText.slice(idx, idx + highlight.length))}</mark>`;
+      pos = idx + highlight.length;
+      if (!found) found = true;
+    }
+    result += escapeHtml(rawText.slice(pos));
+    p.innerHTML = speakerHtml + result + nHtml;
+    p.classList.toggle("matched", found);
+    return found;
+  }
+
+  function applySearch(q: string) {
+    matches = [];
+    matchIdx = -1;
+    if (!q) {
+      paras.forEach((p) => rebuildPara(p));
+      countEl.textContent = "";
+      return;
+    }
+    paras.forEach((p) => {
+      const found = rebuildPara(p, q);
+      if (found) matches.push(p);
+    });
+    countEl.textContent = matches.length > 0 ? `1/${matches.length}` : "0 résultat";
+    if (matches.length > 0) {
+      matchIdx = 0;
+      matches[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  function navigate(dir: 1 | -1) {
+    if (matches.length === 0) return;
+    matchIdx = (matchIdx + dir + matches.length) % matches.length;
+    countEl.textContent = `${matchIdx + 1}/${matches.length}`;
+    matches[matchIdx].scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  let debounceTimer: ReturnType<typeof setTimeout>;
+  input.addEventListener("input", () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => applySearch(input.value.trim()), 280);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); navigate(e.shiftKey ? -1 : 1); }
+  });
+  prevBtn.addEventListener("click", () => navigate(-1));
+  nextBtn.addEventListener("click", () => navigate(1));
+}
+
 // ── Sous-vue Alignement ──────────────────────────────────────────────────────
 
 function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
@@ -2607,12 +2801,14 @@ interface AuditState {
   offset: number;
   limit: number;
   total: number;
-  activeTab: "links" | "collisions";
+  activeTab: "links" | "collisions" | "concordance";
 }
 
 const _auditState: AuditState = {
   epId: "", runId: "", statusFilter: "", q: "", offset: 0, limit: 50, total: 0, activeTab: "links",
 };
+
+let _concordanceLoaded = false;
 
 async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, runId: string) {
   _auditState.epId = epId;
@@ -2621,6 +2817,7 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
   _auditState.q = "";
   _auditState.offset = 0;
   _auditState.activeTab = "links";
+  _concordanceLoaded = false;
 
   panel.innerHTML = `
     <div class="audit-panel">
@@ -2635,6 +2832,7 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
       <div class="audit-tabs">
         <button class="audit-tab active" data-tab="links">Liens</button>
         <button class="audit-tab" data-tab="collisions">Collisions <span class="audit-tab-badge" id="audit-collision-badge" style="display:none">0</span></button>
+        <button class="audit-tab" data-tab="concordance">Concordancier</button>
       </div>
       <div class="audit-filter-bar" id="audit-filter-bar">
         <select id="audit-status-filter">
@@ -2658,6 +2856,11 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
             <div style="font-size:0.78rem;color:var(--text-muted)">Chargement collisions…</div>
           </div>
         </div>
+        <div class="audit-pane" data-tab="concordance">
+          <div id="audit-concordance-content" style="display:flex;flex-direction:column;height:100%;overflow:hidden">
+            <div style="padding:12px;font-size:0.78rem;color:var(--text-muted)">Cliquez sur l'onglet pour charger le concordancier…</div>
+          </div>
+        </div>
       </div>
     </div>`;
 
@@ -2666,7 +2869,7 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
     loadAlignmentRunHistory(panel, epId, epTitle);
   });
 
-  // Tab switching
+  // Tab switching (lazy-load concordance on first activation)
   panel.querySelectorAll<HTMLButtonElement>(".audit-tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       panel.querySelectorAll(".audit-tab").forEach((t) => t.classList.remove("active"));
@@ -2674,7 +2877,12 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
       tab.classList.add("active");
       const pane = panel.querySelector<HTMLElement>(`.audit-pane[data-tab="${tab.dataset.tab}"]`);
       if (pane) pane.classList.add("active");
-      _auditState.activeTab = tab.dataset.tab as "links" | "collisions";
+      _auditState.activeTab = tab.dataset.tab as "links" | "collisions" | "concordance";
+      if (_auditState.activeTab === "concordance" && !_concordanceLoaded) {
+        _concordanceLoaded = true;
+        const concContent = panel.querySelector<HTMLElement>("#audit-concordance-content")!;
+        loadConcordanceView(concContent, epId, epTitle, runId);
+      }
     });
   });
 
@@ -2905,6 +3113,116 @@ async function loadAuditCollisions(panel: HTMLElement, epId: string, runId: stri
       </div>`).join("");
   } catch (e) {
     listEl.innerHTML = `<div style="font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
+  }
+}
+
+// ── Concordancier parallèle ───────────────────────────────────────────────────
+
+async function loadConcordanceView(
+  container: HTMLElement,
+  epId: string,
+  epTitle: string,
+  runId: string,
+) {
+  container.innerHTML = `
+    <div class="conc-panel">
+      <div class="conc-toolbar">
+        <span class="conc-toolbar-title">${escapeHtml(epTitle)}</span>
+        <input class="conc-search" id="conc-search" type="search" placeholder="Rechercher…" />
+        <select class="conc-filter-select" id="conc-status-filter">
+          <option value="">Tous</option>
+          <option value="accepted">Acceptés</option>
+          <option value="auto">Auto</option>
+          <option value="rejected">Rejetés</option>
+        </select>
+        <span class="conc-count" id="conc-count">Chargement…</span>
+      </div>
+      <div class="conc-table-wrap" id="conc-table-wrap">
+        <div class="conc-empty">Chargement concordancier…</div>
+      </div>
+    </div>`;
+
+  let _concTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const doLoad = async () => {
+    const q      = (container.querySelector<HTMLInputElement>("#conc-search")?.value ?? "").trim();
+    const status = container.querySelector<HTMLSelectElement>("#conc-status-filter")?.value ?? "";
+    await renderConcordance(container, epId, runId, { q: q || undefined, status: status || undefined });
+  };
+
+  container.querySelector<HTMLInputElement>("#conc-search")?.addEventListener("input", () => {
+    if (_concTimer) clearTimeout(_concTimer);
+    _concTimer = setTimeout(doLoad, 300);
+  });
+  container.querySelector<HTMLSelectElement>("#conc-status-filter")?.addEventListener("change", doLoad);
+
+  await doLoad();
+}
+
+async function renderConcordance(
+  container: HTMLElement,
+  epId: string,
+  runId: string,
+  filters: { q?: string; status?: string } = {},
+) {
+  const wrap    = container.querySelector<HTMLElement>("#conc-table-wrap")!;
+  const countEl = container.querySelector<HTMLElement>("#conc-count");
+  wrap.innerHTML = `<div class="conc-empty">Chargement…</div>`;
+  try {
+    const res = await fetchConcordance(epId, runId, { q: filters.q, status: filters.status });
+    if (countEl) countEl.textContent = `${res.total} ligne(s)`;
+    if (res.rows.length === 0) {
+      wrap.innerHTML = `<div class="conc-empty">Aucun résultat${filters.q ? ` pour « ${escapeHtml(filters.q)} »` : ""}.</div>`;
+      return;
+    }
+    // Determine which target lang columns exist in the data
+    const hasEn = res.rows.some((r) => r.text_en);
+    const hasFr = res.rows.some((r) => r.text_fr);
+    const hasIt = res.rows.some((r) => r.text_it);
+    const hl = filters.q ? filters.q.toLowerCase() : null;
+
+    const highlight = (text: string): string => {
+      if (!hl || !text) return escapeHtml(text);
+      const escaped = escapeHtml(text);
+      const escapedHl = escapeHtml(hl);
+      return escaped.replace(
+        new RegExp(escapedHl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"),
+        (m) => `<mark class="conc-highlight">${escapeHtml(m)}</mark>`,
+      );
+    };
+
+    const confBadge = (conf: number | null) =>
+      conf != null ? `<span class="conc-conf">${Math.round(conf * 100)}%</span>` : "";
+
+    const colHeaders = [
+      `<th>#</th>`,
+      `<th>Personnage</th>`,
+      `<th>Transcript</th>`,
+      hasEn ? `<th>EN (pivot)</th>` : "",
+      hasFr ? `<th>FR</th>` : "",
+      hasIt ? `<th>IT</th>` : "",
+    ].filter(Boolean).join("");
+
+    const rowsHtml = res.rows.map((row: ConcordanceRow, i: number) => {
+      const speakerHtml = row.personnage
+        ? `<span class="conc-speaker">${escapeHtml(row.personnage)}</span>` : "";
+      return `<tr>
+        <td style="font-family:ui-monospace,monospace;font-size:0.68rem;color:var(--text-muted);text-align:right">${i + 1}</td>
+        <td style="font-size:0.72rem;color:var(--accent);white-space:nowrap">${speakerHtml}</td>
+        <td style="max-width:200px">${highlight(row.text_segment)}</td>
+        ${hasEn ? `<td style="max-width:180px">${highlight(row.text_en)}${confBadge(row.confidence_pivot)}</td>` : ""}
+        ${hasFr ? `<td style="max-width:180px">${highlight(row.text_fr)}${confBadge(row.confidence_fr)}</td>` : ""}
+        ${hasIt ? `<td style="max-width:180px">${highlight(row.text_it)}</td>` : ""}
+      </tr>`;
+    }).join("");
+
+    wrap.innerHTML = `
+      <table class="conc-table">
+        <thead><tr>${colHeaders}</tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>`;
+  } catch (e) {
+    wrap.innerHTML = `<div class="conc-empty" style="color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
   }
 }
 
@@ -3661,8 +3979,17 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 </select>
               </div>
             </div>
+            <!-- Vue toggle Table / Texte -->
+            <div style="display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(--surface2);border-bottom:1px solid var(--border);flex-shrink:0">
+              <span style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Vue</span>
+              <div class="seg-mode-toggle">
+                <button class="seg-mode-btn active" data-seg-mode="table" id="seg-mode-table">Table</button>
+                <button class="seg-mode-btn" data-seg-mode="longtext" id="seg-mode-lt">Texte</button>
+              </div>
+            </div>
             <div class="cons-error seg-error" style="display:none"></div>
-            <div class="acts-split">
+            <!-- Vue Table -->
+            <div id="seg-view-table" class="acts-split" style="flex:1;min-height:0;overflow:hidden">
               <div class="acts-ep-list">
                 <div class="seg-table-wrap cons-loading">Chargement…</div>
               </div>
@@ -3670,6 +3997,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 <div class="acts-text-empty">← Sélectionnez un épisode</div>
               </div>
             </div>
+            <!-- Vue Longtext (lazy) -->
+            <div id="seg-view-lt" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden"></div>
           </div>
 
           <!-- Alignement sub-pane -->
@@ -3874,6 +4203,34 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
   container.querySelector<HTMLButtonElement>("#cons-refresh-seg")
     ?.addEventListener("click", () => loadAndRenderSegmentation(container));
+
+  // ── Seg mode toggle (Table / Texte) ─────────────────────────────────────────
+  container.querySelector<HTMLButtonElement>("#seg-mode-table")
+    ?.addEventListener("click", () => {
+      container.querySelector("#seg-mode-table")?.classList.add("active");
+      container.querySelector("#seg-mode-lt")?.classList.remove("active");
+      const tv = container.querySelector<HTMLElement>("#seg-view-table");
+      const lv = container.querySelector<HTMLElement>("#seg-view-lt");
+      if (tv) tv.style.display = "";
+      if (lv) lv.style.display = "none";
+    });
+
+  container.querySelector<HTMLButtonElement>("#seg-mode-lt")
+    ?.addEventListener("click", () => {
+      container.querySelector("#seg-mode-lt")?.classList.add("active");
+      container.querySelector("#seg-mode-table")?.classList.remove("active");
+      const tv = container.querySelector<HTMLElement>("#seg-view-table");
+      const lv = container.querySelector<HTMLElement>("#seg-view-lt");
+      if (tv) tv.style.display = "none";
+      if (lv) {
+        lv.style.display = "flex";
+        const activeRow = tv?.querySelector<HTMLTableRowElement>("tr.active-row");
+        const epId    = activeRow?.dataset.epId ?? null;
+        const epTitle = activeRow?.dataset.epTitle ?? epId ?? "";
+        const kind    = (container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "utterance") as "utterance" | "sentence";
+        loadLongtextView(lv, epId, epTitle, kind);
+      }
+    });
 
   // ── Alignement pane wiring ─────────────────────────────────────────────────
   container.querySelector<HTMLButtonElement>("#cons-refresh-align")

@@ -384,6 +384,66 @@ export async function setAlignLinkStatus(
   return apiPost(`/alignment_links/${linkId}`, { status }, "PATCH");
 }
 
+// ── Concordancier parallèle + Segments longtext (MX-029) ─────────────────────
+
+export interface ConcordanceRow {
+  segment_id: string | null;
+  personnage: string;
+  text_segment: string;
+  text_en: string;
+  confidence_pivot: number | null;
+  text_fr: string;
+  confidence_fr: number | null;
+  text_it: string;
+  confidence_it: number | null;
+}
+
+export interface ConcordanceResponse {
+  episode_id: string;
+  run_id: string;
+  total: number;
+  rows: ConcordanceRow[];
+}
+
+export interface SegmentRow {
+  segment_id: string;
+  n: number;
+  kind: string;
+  text: string;
+  speaker_explicit: string | null;
+}
+
+export interface SegmentsResponse {
+  episode_id: string;
+  kind: string;
+  total: number;
+  segments: SegmentRow[];
+}
+
+export async function fetchConcordance(
+  episodeId: string,
+  runId: string,
+  params: { status?: string; q?: string } = {},
+): Promise<ConcordanceResponse> {
+  const qs = new URLSearchParams();
+  if (params.status) qs.set("status", params.status);
+  if (params.q)      qs.set("q", params.q);
+  const query = qs.toString() ? `?${qs}` : "";
+  return apiGet<ConcordanceResponse>(
+    `/episodes/${episodeId}/alignment_runs/${runId}/concordance${query}`,
+  );
+}
+
+export async function fetchEpisodeSegments(
+  episodeId: string,
+  kind: "sentence" | "utterance" = "sentence",
+  q?: string,
+): Promise<SegmentsResponse> {
+  const qs = new URLSearchParams({ kind });
+  if (q) qs.set("q", q);
+  return apiGet<SegmentsResponse>(`/episodes/${episodeId}/segments?${qs}`);
+}
+
 export async function cancelJob(jobId: string): Promise<{ job_id: string; status: string }> {
   // DELETE via loopback — réutilise _loopbackFetch directement
   const res = await (async () => {
