@@ -1134,6 +1134,7 @@ const CSS = `
 .audit-table tr.accepted td { background: #f0fdf4; }
 .audit-table tr.rejected td { background: #fef2f2; opacity: .7; }
 .audit-table tr.ignored  td { background: #f1f5f9; opacity: .6; }
+.audit-table tr.audit-focused td { outline: 2px solid var(--accent, #0f766e); outline-offset: -2px; }
 .audit-status-badge {
   display: inline-flex; align-items: center;
   padding: 1px 6px; border-radius: 3px;
@@ -3311,6 +3312,7 @@ const _auditState: AuditState = {
 };
 
 let _concordanceLoaded = false;
+let _auditKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
 async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, runId: string) {
   _auditState.epId = epId;
@@ -3521,6 +3523,95 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
         "Remettre TOUS les liens en auto ? Les décisions manuelles seront perdues.",
       ),
     );
+
+  // ── Keyboard shortcuts (G-005 / MX-043) ─────────────────────────────────
+  // A = accept, R = reject, I = ignore, ↓/↑ = row nav, N/P = page nav
+
+  // Remove any previous handler (guard against multiple openAuditView calls)
+  if (_auditKeydownHandler) {
+    document.removeEventListener("keydown", _auditKeydownHandler);
+    _auditKeydownHandler = null;
+  }
+
+  function _auditFocusedRow(): HTMLTableRowElement | null {
+    return panel.querySelector<HTMLTableRowElement>(".audit-table tr.audit-focused");
+  }
+
+  function _auditRows(): HTMLTableRowElement[] {
+    return Array.from(
+      panel.querySelectorAll<HTMLTableRowElement>(".audit-table tbody tr[data-link-id]"),
+    );
+  }
+
+  function _auditFocusRow(row: HTMLTableRowElement | null) {
+    _auditRows().forEach((r) => r.classList.remove("audit-focused"));
+    if (row) {
+      row.classList.add("audit-focused");
+      row.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function _auditClickAction(row: HTMLTableRowElement, action: string) {
+    const btn = row.querySelector<HTMLButtonElement>(`.audit-action-btn[data-action="${action}"]`);
+    btn?.click();
+  }
+
+  function _auditMoveFocus(delta: number) {
+    const rows = _auditRows();
+    if (rows.length === 0) return;
+    const cur = _auditFocusedRow();
+    const idx = cur ? rows.indexOf(cur) : -1;
+    const next = rows[Math.max(0, Math.min(rows.length - 1, idx + delta))];
+    _auditFocusRow(next ?? rows[0]);
+  }
+
+  const _onAuditKeydown = (e: KeyboardEvent) => {
+    // Skip if an input, select or textarea has focus
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+    // Skip if audit panel is not showing links tab
+    if (_auditState.activeTab !== "links") return;
+    // Skip if any modifier key is held (except shift)
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+    const key = e.key.toLowerCase();
+
+    if (key === "arrowdown" || key === "j") {
+      e.preventDefault();
+      _auditMoveFocus(+1);
+    } else if (key === "arrowup" || key === "k") {
+      e.preventDefault();
+      _auditMoveFocus(-1);
+    } else if (key === "a") {
+      const row = _auditFocusedRow();
+      if (row) { e.preventDefault(); _auditClickAction(row, "accepted"); }
+    } else if (key === "r") {
+      const row = _auditFocusedRow();
+      if (row) { e.preventDefault(); _auditClickAction(row, "rejected"); }
+    } else if (key === "i") {
+      const row = _auditFocusedRow();
+      if (row) { e.preventDefault(); _auditClickAction(row, "ignored"); }
+    } else if (key === "n") {
+      e.preventDefault();
+      panel.querySelector<HTMLButtonElement>("#audit-next")?.click();
+    } else if (key === "p") {
+      e.preventDefault();
+      panel.querySelector<HTMLButtonElement>("#audit-prev")?.click();
+    }
+  };
+
+  _auditKeydownHandler = _onAuditKeydown;
+  document.addEventListener("keydown", _onAuditKeydown);
+
+  // Remove the handler when leaving the audit view
+  panel.querySelector<HTMLButtonElement>("#audit-back")!.addEventListener(
+    "click",
+    () => {
+      document.removeEventListener("keydown", _onAuditKeydown);
+      _auditKeydownHandler = null;
+    },
+    { once: true },
+  );
 
   // Load stats + links + collisions in parallel
   loadAuditStats(panel, epId, runId);
