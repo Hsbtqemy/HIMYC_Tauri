@@ -33,6 +33,8 @@ import {
   fetchAlignCollisions,
   setAlignLinkStatus,
   bulkSetAlignLinkStatus,
+  fetchSubtitleCues,
+  retargetAlignLink,
   fetchConcordance,
   fetchEpisodeSegments,
   fetchQaReport,
@@ -43,6 +45,7 @@ import {
   type AlignRunStats,
   type AuditLink,
   type AlignCollision,
+  type SubtitleCue,
   type ConcordanceRow,
   type SegmentRow,
   type AutoAssignResult,
@@ -1155,6 +1158,105 @@ const CSS = `
   display: inline-block; height: 5px; border-radius: 2px;
   background: linear-gradient(90deg, #0f766e, #5eead4);
   vertical-align: middle; margin-right: 4px;
+}
+/* ── Retarget modal (MX-040) ──────────────────────────────────────── */
+.retarget-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.retarget-modal {
+  background: var(--bg, #fff);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.22);
+  width: 560px; max-width: 96vw;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.retarget-modal-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.retarget-modal-title {
+  font-size: 0.85rem; font-weight: 700; color: var(--text); flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.retarget-modal-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 1rem; color: var(--text-muted); padding: 2px 6px;
+}
+.retarget-modal-close:hover { color: var(--text); }
+.retarget-context {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+  background: #fffbeb;
+  flex-shrink: 0;
+}
+.retarget-context-pivot {
+  color: var(--text-muted); margin-bottom: 3px;
+}
+.retarget-context-current {
+  color: #b45309; font-style: italic;
+}
+.retarget-search-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.retarget-search-bar input {
+  flex: 1; padding: 4px 8px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg); color: var(--text);
+}
+.retarget-search-hint {
+  font-size: 0.68rem; color: var(--text-muted); white-space: nowrap;
+}
+.retarget-results {
+  overflow-y: auto; flex: 1;
+  padding: 6px 0;
+}
+.retarget-cue-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 14px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background .1s;
+}
+.retarget-cue-row:hover { background: var(--surface2); }
+.retarget-cue-row.selected { background: #dbeafe; }
+.retarget-cue-n {
+  font-size: 0.68rem; color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+  flex-shrink: 0; padding-top: 2px;
+  min-width: 28px; text-align: right;
+}
+.retarget-cue-time {
+  font-size: 0.65rem; color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+  flex-shrink: 0; padding-top: 3px;
+}
+.retarget-cue-text {
+  flex: 1; font-size: 0.78rem; color: var(--text);
+  line-height: 1.4;
+}
+.retarget-modal-footer {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.retarget-empty {
+  padding: 16px 14px; font-size: 0.78rem; color: var(--text-muted); text-align: center;
 }
 /* Pagination */
 .audit-pager {
@@ -3529,12 +3631,20 @@ async function loadAuditCollisions(panel: HTMLElement, epId: string, runId: stri
         </div>
         ${c.targets.map((t) => `
           <div class="audit-collision-target-row" data-link-id="${escapeHtml(t.link_id)}">
-            <span class="audit-status-badge ${t.status}">${t.status}</span>
+            <span class="audit-status-badge ${t.status}">${_statusLabel(t.status)}</span>
             <span class="audit-collision-target-text" title="${escapeHtml(t.target_text || t.cue_id_target)}">${escapeHtml(t.target_text || t.cue_id_target)}</span>
             ${t.confidence != null ? `<span class="audit-collision-target-conf">${Math.round(t.confidence * 100)}%</span>` : ""}
             <div class="audit-collision-target-btns">
               <button class="audit-action-btn accept col-accept" data-link-id="${escapeHtml(t.link_id)}" title="Accepter">✓</button>
               <button class="audit-action-btn reject col-reject" data-link-id="${escapeHtml(t.link_id)}" title="Rejeter">✗</button>
+              <button class="audit-action-btn col-retarget"
+                data-link-id="${escapeHtml(t.link_id)}"
+                data-pivot-text="${escapeHtml(c.pivot_text || c.pivot_cue_id)}"
+                data-current-text="${escapeHtml(t.target_text || t.cue_id_target)}"
+                data-lang="${escapeHtml(c.lang)}"
+                data-around-cue="${escapeHtml(t.cue_id_target)}"
+                title="Réassigner à un autre cue SRT"
+                style="color:#1d4ed8;border-color:#93c5fd">🔄</button>
             </div>
           </div>`).join("")}
       </div>`).join("");
@@ -3587,9 +3697,212 @@ async function loadAuditCollisions(panel: HTMLElement, epId: string, runId: stri
       }
     });
 
+    // Retarget buttons (MX-040)
+    listEl.querySelectorAll<HTMLButtonElement>(".col-retarget").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const linkId      = btn.dataset.linkId!;
+        const pivotText   = btn.dataset.pivotText  ?? "";
+        const currentText = btn.dataset.currentText ?? "";
+        const lang        = btn.dataset.lang        ?? "";
+        const aroundCue   = btn.dataset.aroundCue   ?? undefined;
+        openRetargetModal({
+          linkId,
+          epId,
+          lang,
+          pivotText,
+          currentTargetText: currentText,
+          aroundCueId: aroundCue,
+          onConfirm: () => {
+            loadAuditCollisions(panel, epId, runId);
+            loadAuditStats(panel, epId, runId);
+          },
+        });
+      });
+    });
+
   } catch (e) {
     listEl.innerHTML = `<div style="padding:14px;font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
   }
+}
+
+// ── Retarget modal (MX-040) ───────────────────────────────────────────────────
+
+/**
+ * Ouvre le modal de retarget pour réassigner la cue cible d'un lien d'alignement.
+ *
+ * Le modal affiche :
+ * - Le texte pivot (contexte)
+ * - La cue cible courante (barrée)
+ * - Une recherche FTS + les N cues voisines (neighbourhood par défaut)
+ * - La sélection d'une nouvelle cue → PATCH /alignment_links/{id}/retarget
+ */
+function openRetargetModal(opts: {
+  linkId: string;
+  epId: string;
+  lang: string;
+  pivotText: string;
+  currentTargetText: string;
+  aroundCueId?: string;
+  onConfirm: () => void;
+}) {
+  const { linkId, epId, lang, pivotText, currentTargetText, aroundCueId, onConfirm } = opts;
+
+  // ── Build modal DOM ────────────────────────────────────────────────────
+  const overlay = document.createElement("div");
+  overlay.className = "retarget-overlay";
+  overlay.innerHTML = `
+    <div class="retarget-modal" role="dialog" aria-modal="true" aria-label="Retarget cue">
+      <div class="retarget-modal-header">
+        <span class="retarget-modal-title">🔄 Réassigner la cue cible</span>
+        <button class="retarget-modal-close" id="retarget-close" title="Fermer">✕</button>
+      </div>
+      <div class="retarget-context">
+        <div class="retarget-context-pivot">
+          <strong>Pivot :</strong> ${escapeHtml(pivotText.slice(0, 160))}
+        </div>
+        <div class="retarget-context-current">
+          <strong>Cible actuelle :</strong> <s>${escapeHtml(currentTargetText.slice(0, 160))}</s>
+        </div>
+      </div>
+      <div class="retarget-search-bar">
+        <input id="retarget-search" type="search"
+          placeholder="Rechercher une cue ${escapeHtml(lang.toUpperCase())}…"
+          autocomplete="off" />
+        <span class="retarget-search-hint">±10 voisins par défaut</span>
+      </div>
+      <div class="retarget-results" id="retarget-results">
+        <div class="retarget-empty">Chargement…</div>
+      </div>
+      <div class="retarget-modal-footer">
+        <span id="retarget-selection-label" style="flex:1;font-size:0.72rem;color:var(--text-muted)">Aucune sélection</span>
+        <button class="audit-action-btn" id="retarget-cancel">Annuler</button>
+        <button class="audit-action-btn accept" id="retarget-confirm" disabled>✓ Confirmer</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  let selectedCueId: string | null = null;
+  let selectedCueText: string     = "";
+  let _searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // ── Helpers ────────────────────────────────────────────────────────────
+
+  function fmtMs(ms: number): string {
+    const totalSec = Math.floor(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+      : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function renderCues(cues: SubtitleCue[]) {
+    const resultsEl = overlay.querySelector<HTMLElement>("#retarget-results")!;
+    if (cues.length === 0) {
+      resultsEl.innerHTML = `<div class="retarget-empty">Aucun cue trouvé.</div>`;
+      return;
+    }
+    resultsEl.innerHTML = cues
+      .map(
+        (cue) => `
+        <div class="retarget-cue-row${cue.cue_id === selectedCueId ? " selected" : ""}"
+             data-cue-id="${escapeHtml(cue.cue_id)}"
+             data-cue-text="${escapeHtml(cue.text_clean)}"
+             title="${escapeHtml(cue.text_clean)}">
+          <span class="retarget-cue-n">#${cue.n}</span>
+          <span class="retarget-cue-time">${fmtMs(cue.start_ms)}</span>
+          <span class="retarget-cue-text">${escapeHtml(cue.text_clean)}</span>
+        </div>`,
+      )
+      .join("");
+
+    // Wire click → select
+    resultsEl.querySelectorAll<HTMLElement>(".retarget-cue-row").forEach((row) => {
+      row.addEventListener("click", () => {
+        resultsEl.querySelectorAll(".retarget-cue-row").forEach((r) => r.classList.remove("selected"));
+        row.classList.add("selected");
+        selectedCueId   = row.dataset.cueId!;
+        selectedCueText = row.dataset.cueText ?? "";
+        const label = overlay.querySelector<HTMLElement>("#retarget-selection-label")!;
+        label.textContent = `Sélectionné : ${selectedCueText.slice(0, 80)}`;
+        const confirmBtn = overlay.querySelector<HTMLButtonElement>("#retarget-confirm")!;
+        confirmBtn.disabled = false;
+      });
+    });
+  }
+
+  async function loadCues(q?: string) {
+    const resultsEl = overlay.querySelector<HTMLElement>("#retarget-results")!;
+    resultsEl.innerHTML = `<div class="retarget-empty">Chargement…</div>`;
+    try {
+      const params: Parameters<typeof fetchSubtitleCues>[1] = { lang, limit: 40 };
+      if (q) {
+        params.q = q;
+      } else if (aroundCueId) {
+        params.around_cue_id = aroundCueId;
+        params.around_window = 10;
+      }
+      const res = await fetchSubtitleCues(epId, params);
+      renderCues(res.cues);
+    } catch (e) {
+      resultsEl.innerHTML = `<div class="retarget-empty" style="color:var(--danger)">${escapeHtml(e instanceof Error ? e.message : String(e))}</div>`;
+    }
+  }
+
+  // ── Events ─────────────────────────────────────────────────────────────
+
+  function close() {
+    overlay.remove();
+  }
+
+  overlay.querySelector<HTMLButtonElement>("#retarget-close")!.addEventListener("click", close);
+  overlay.querySelector<HTMLButtonElement>("#retarget-cancel")!.addEventListener("click", close);
+
+  // Click outside modal → close
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  // Keyboard: Escape → close
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
+  };
+  document.addEventListener("keydown", onKey);
+
+  // Search input with debounce
+  const searchInput = overlay.querySelector<HTMLInputElement>("#retarget-search")!;
+  searchInput.addEventListener("input", () => {
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      const q = searchInput.value.trim();
+      loadCues(q || undefined);
+    }, 300);
+  });
+
+  // Confirm button
+  overlay.querySelector<HTMLButtonElement>("#retarget-confirm")!.addEventListener("click", async () => {
+    if (!selectedCueId) return;
+    const confirmBtn = overlay.querySelector<HTMLButtonElement>("#retarget-confirm")!;
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "…";
+    try {
+      await retargetAlignLink(linkId, selectedCueId);
+      close();
+      onConfirm();
+    } catch (e) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "✓ Confirmer";
+      const label = overlay.querySelector<HTMLElement>("#retarget-selection-label")!;
+      label.style.color = "var(--danger)";
+      label.textContent = `Erreur : ${e instanceof Error ? e.message : String(e)}`;
+    }
+  });
+
+  // Focus search + initial load
+  requestAnimationFrame(() => searchInput.focus());
+  loadCues();
 }
 
 // ── Export rapport de run (MX-038) ────────────────────────────────────────────

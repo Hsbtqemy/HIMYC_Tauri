@@ -406,6 +406,55 @@ export async function bulkSetAlignLinkStatus(
   );
 }
 
+// ── Retarget cues (MX-040) ───────────────────────────────────────────────────
+
+export interface SubtitleCue {
+  cue_id: string;
+  episode_id: string;
+  lang: string;
+  /** Numéro de séquence dans le fichier SRT. */
+  n: number;
+  start_ms: number;
+  end_ms: number;
+  text_clean: string;
+}
+
+export interface SubtitleCuesResponse {
+  episode_id: string;
+  lang: string;
+  total: number;
+  offset: number;
+  limit: number;
+  cues: SubtitleCue[];
+}
+
+export async function fetchSubtitleCues(
+  episodeId: string,
+  params: {
+    lang: string;
+    q?: string;
+    around_cue_id?: string;
+    around_window?: number;
+    limit?: number;
+    offset?: number;
+  },
+): Promise<SubtitleCuesResponse> {
+  const qs = new URLSearchParams({ lang: params.lang });
+  if (params.q)              qs.set("q",              params.q);
+  if (params.around_cue_id)  qs.set("around_cue_id",  params.around_cue_id);
+  if (params.around_window != null) qs.set("around_window", String(params.around_window));
+  if (params.limit  != null) qs.set("limit",  String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  return apiGet<SubtitleCuesResponse>(`/episodes/${episodeId}/subtitle_cues?${qs}`);
+}
+
+export async function retargetAlignLink(
+  linkId: string,
+  cueIdTarget: string,
+): Promise<{ link_id: string; cue_id_target: string; status: string }> {
+  return apiPost(`/alignment_links/${linkId}/retarget`, { cue_id_target: cueIdTarget }, "PATCH");
+}
+
 // ── Concordancier parallèle + Segments longtext (MX-029) ─────────────────────
 
 export interface ConcordanceRow {
