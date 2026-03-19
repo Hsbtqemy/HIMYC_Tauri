@@ -48,6 +48,7 @@ interface QueryRequest {
   speaker?: string | null;
   window?: number;
   limit?: number;
+  case_sensitive?: boolean;
 }
 
 interface QueryResponse {
@@ -208,6 +209,12 @@ const CSS = `
   border-color: #dc2626;
   color: #dc2626;
   background: color-mix(in srgb, #dc2626 8%, var(--surface));
+}
+.kwic-case-btn {
+  font-family: ui-serif, Georgia, serif;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  padding: 4px 8px;
 }
 
 /* Dropdown menus */
@@ -857,6 +864,7 @@ let _builderMode: BuilderMode      = "simple";
 let _nearN                         = 5;
 let _showAligned                   = false;
 let _showParallel                  = false;
+let _caseSensitive                 = false;
 let _unsubscribe: (() => void) | null = null;
 let _closeDropdownsRef: ((e: MouseEvent) => void) | null = null;
 
@@ -1307,6 +1315,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
             </div>
           </div>
           <button class="kwic-toolbar-btn" id="kwic-filter-btn">⚙ Filtres</button>
+          <button class="kwic-toolbar-btn kwic-case-btn" id="kwic-case-btn" title="Respecter la casse">Aa</button>
           <div class="kwic-dd-wrap">
             <button class="kwic-toolbar-btn" id="kwic-hist-btn">⏱ Historique ▾</button>
             <div class="kwic-dd-menu" id="kwic-hist-menu"></div>
@@ -1423,6 +1432,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   const ftsPreview     = container.querySelector<HTMLElement>("#kwic-fts-preview")!;
   const ftsPreviewCode = container.querySelector<HTMLElement>("#kwic-fts-preview-code")!;
   const resetBtn       = container.querySelector<HTMLButtonElement>("#kwic-reset-btn")!;
+  const caseBtn        = container.querySelector<HTMLButtonElement>("#kwic-case-btn")!;
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1559,6 +1569,13 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     filterBtn.classList.toggle("active", _filterOpen);
     if (_filterOpen) _populateEpDatalist();
   });
+
+  caseBtn.addEventListener("click", () => {
+    _caseSensitive = !_caseSensitive;
+    caseBtn.classList.toggle("active", _caseSensitive);
+    caseBtn.title = _caseSensitive ? "Casse respectée — cliquer pour désactiver" : "Respecter la casse";
+    if (_hits.length > 0) runSearch();
+  });
   container.querySelector<HTMLButtonElement>("#kwic-clear-filters")?.addEventListener("click", () => {
     (container.querySelector<HTMLSelectElement>("#kwic-kind")!).value = "";
     (container.querySelector<HTMLInputElement>("#kwic-lang")!).value = "";
@@ -1652,8 +1669,11 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     _facets      = null;
     _showAligned = false;
     _showParallel = false;
-    _builderMode = "simple";
-    _nearN       = 5;
+    _builderMode   = "simple";
+    _nearN         = 5;
+    _caseSensitive = false;
+    caseBtn.classList.remove("active");
+    caseBtn.title = "Respecter la casse";
     refreshAlignedBtn();
     refreshParallelBtn();
     ftsPreview.classList.remove("visible");
@@ -1726,12 +1746,13 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
 
     const req: QueryRequest = {
       term, scope: _scope,
-      kind:       _scope === "segments" ? (container.querySelector<HTMLSelectElement>("#kwic-kind")!.value || null) : null,
-      lang:       _scope === "cues"     ? (container.querySelector<HTMLInputElement>("#kwic-lang")!.value.trim() || null) : null,
-      episode_id: container.querySelector<HTMLInputElement>("#kwic-episode-id")!.value.trim() || null,
-      speaker:    container.querySelector<HTMLInputElement>("#kwic-speaker")!.value.trim() || null,
-      window:     Number(windowRange.value),
-      limit:      500,
+      kind:           _scope === "segments" ? (container.querySelector<HTMLSelectElement>("#kwic-kind")!.value || null) : null,
+      lang:           _scope === "cues"     ? (container.querySelector<HTMLInputElement>("#kwic-lang")!.value.trim() || null) : null,
+      episode_id:     container.querySelector<HTMLInputElement>("#kwic-episode-id")!.value.trim() || null,
+      speaker:        container.querySelector<HTMLInputElement>("#kwic-speaker")!.value.trim() || null,
+      window:         Number(windowRange.value),
+      limit:          500,
+      case_sensitive: _caseSensitive || undefined,
     };
 
     try {
