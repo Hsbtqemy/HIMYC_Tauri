@@ -398,13 +398,37 @@ export interface ExportResult {
   fmt: string;
   episodes?: number;
   segments?: number;
+  jobs?: number;
   path: string;
 }
 
 export async function runExport(
-  scope: "corpus" | "segments",
+  scope: "corpus" | "segments" | "jobs",
   fmt: string,
   use_clean = true,
 ): Promise<ExportResult> {
   return apiPost<ExportResult>("/export", { scope, fmt, use_clean });
+}
+
+export interface QaIssue {
+  level: "blocking" | "warning";
+  code: string;
+  episode?: string;
+  message: string;
+}
+
+export interface QaReport {
+  gate: "ok" | "warnings" | "blocking";
+  policy: "lenient" | "strict";
+  total_episodes: number;
+  n_raw: number;
+  n_normalized: number;
+  n_segmented: number;
+  n_with_srts: number;
+  n_alignment_runs: number;
+  issues: QaIssue[];
+}
+
+export async function fetchQaReport(policy: "lenient" | "strict" = "lenient"): Promise<QaReport> {
+  return apiGet<QaReport>(`/export/qa?policy=${policy}`);
 }

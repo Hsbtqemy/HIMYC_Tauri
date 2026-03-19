@@ -27,9 +27,11 @@ import {
   discoverSubslikescript,
   fetchSubslikescriptTranscript,
   fetchAlignmentRuns,
+  fetchQaReport,
   runExport,
   saveConfig,
   type ExportResult,
+  type QaReport,
   type ConfigUpdate,
   type Episode,
   type EpisodeSource,
@@ -2387,8 +2389,10 @@ async function loadAndRenderAlignement(container: HTMLElement) {
 function renderExporterSection(pane: HTMLElement) {
   pane.innerHTML = `
     <div class="exp-section">
-      <div class="exp-card-grid">
+      <!-- Gate banner QA -->
+      <div id="cons-exp-gate" style="display:none;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--radius);font-size:0.8rem;font-weight:600;border:1px solid;flex-shrink:0;margin-bottom:4px"></div>
 
+      <div class="exp-card-grid">
         <!-- Corpus -->
         <div class="cons-card">
           <div class="cons-card-title">Corpus (texte)</div>
@@ -2424,9 +2428,23 @@ function renderExporterSection(pane: HTMLElement) {
           </div>
         </div>
 
+        <!-- Jobs -->
+        <div class="cons-card">
+          <div class="cons-card-title">Historique jobs</div>
+          <div class="cons-card-body">
+            <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.5">
+              Export de tous les jobs du projet (normalisation, segmentation, alignement…).
+            </div>
+            <div class="exp-fmt-row">
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="jobs" data-fmt="jsonl">JSONL</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="jobs" data-fmt="json">JSON</button>
+            </div>
+            <div class="exp-result" id="exp-jobs-result"></div>
+          </div>
+        </div>
+
       </div>
 
-      <!-- Destination note -->
       <div style="font-size:0.76rem;color:var(--text-muted);line-height:1.6">
         Les fichiers sont écrits dans le dossier <code>exports/</code> du projet.
       </div>
@@ -2434,7 +2452,7 @@ function renderExporterSection(pane: HTMLElement) {
 
   pane.querySelectorAll<HTMLButtonElement>(".exp-export-btn").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const scope = btn.dataset.scope as "corpus" | "segments";
+      const scope = btn.dataset.scope as "corpus" | "segments" | "jobs";
       const fmt   = btn.dataset.fmt!;
       const resultEl = pane.querySelector<HTMLElement>(`#exp-${scope}-result`)!;
 
@@ -2444,7 +2462,11 @@ function renderExporterSection(pane: HTMLElement) {
 
       try {
         const res: ExportResult = await runExport(scope, fmt);
-        const count = res.episodes != null ? `${res.episodes} épisodes` : `${res.segments} segments`;
+        const count = res.episodes != null
+          ? `${res.episodes} épisodes`
+          : res.segments != null
+            ? `${res.segments} segments`
+            : `${res.jobs ?? 0} jobs`;
         resultEl.textContent = `✓ ${count} → ${res.path}`;
         resultEl.className = "exp-result visible ok";
       } catch (e) {
@@ -2455,6 +2477,32 @@ function renderExporterSection(pane: HTMLElement) {
       }
     });
   });
+
+  // Load QA gate async
+  loadConsExportQa(pane);
+}
+
+async function loadConsExportQa(pane: HTMLElement) {
+  const banner = pane.querySelector<HTMLElement>("#cons-exp-gate");
+  if (!banner) return;
+  try {
+    const qa: QaReport = await fetchQaReport("lenient");
+    const colors: Record<string, string> = {
+      ok:       "background:#f0fdf4;border-color:#86efac;color:#166534",
+      warnings: "background:#fefce8;border-color:#fde047;color:#854d0e",
+      blocking: "background:#fef2f2;border-color:#fca5a5;color:#7f1d1d",
+    };
+    const icons: Record<string, string> = { ok: "✅", warnings: "⚠️", blocking: "🔴" };
+    const msgs: Record<string, string> = {
+      ok:       `Corpus OK — ${qa.total_episodes} épisodes, ${qa.n_segmented} segmentés`,
+      warnings: `${qa.issues.filter(i => i.level === "warning").length} avertissement(s) — ${qa.n_segmented}/${qa.total_episodes} segmentés`,
+      blocking: `${qa.issues.filter(i => i.level === "blocking").length} problème(s) bloquant(s) — vérifier la curation`,
+    };
+    banner.style.cssText = `display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--radius);font-size:0.8rem;font-weight:600;border:1px solid;flex-shrink:0;margin-bottom:4px;${colors[qa.gate]}`;
+    banner.innerHTML = `<span>${icons[qa.gate]}</span> ${escapeHtml(msgs[qa.gate])}`;
+  } catch {
+    // Silent fail — QA banner is optional
+  }
 }
 
 // ── Section Personnages ──────────────────────────────────────────────────────
