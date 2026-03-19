@@ -26,6 +26,7 @@ import {
   discoverTvmaze,
   discoverSubslikescript,
   fetchSubslikescriptTranscript,
+  fetchAlignmentRuns,
   runExport,
   saveConfig,
   type ExportResult,
@@ -40,6 +41,7 @@ import {
   type Character,
   type CharacterAssignment,
   type WebEpisodeRef,
+  type AlignmentRun,
   ApiError,
 } from "../api";
 import {
@@ -873,6 +875,103 @@ const CSS = `
 .cur-stat-val { font-weight: 700; font-family: ui-monospace, monospace; }
 .cur-diag-jobs { flex: 1; overflow-y: auto; min-height: 0; }
 
+/* ── Curation diff view ─────────────────────────────────────── */
+.cur-diff-view {
+  font-family: ui-monospace, monospace;
+  font-size: 0.77rem;
+  overflow-y: auto;
+  height: 100%;
+  padding: 0 0 1rem;
+}
+.cur-diff-summary {
+  padding: 6px 12px;
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  font-family: inherit;
+}
+.cur-diff-summary strong { color: var(--accent); }
+.cur-diff-same {
+  padding: 1px 10px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cur-diff-changed { border-left: 3px solid var(--accent); margin: 3px 0; }
+.cur-diff-del {
+  padding: 2px 10px;
+  background: #fef2f2;
+  color: #dc2626;
+  text-decoration: line-through;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cur-diff-ins {
+  padding: 2px 10px;
+  background: #f0fdf4;
+  color: #16a34a;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── Alignment run history ───────────────────────────────────── */
+.align-runs-panel {
+  padding: 10px 14px;
+  overflow-y: auto;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.align-runs-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.align-run-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+}
+.align-run-id {
+  font-family: ui-monospace, monospace;
+  font-size: 0.69rem;
+  color: var(--text-muted);
+}
+.align-run-langs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.align-run-lang-badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: var(--surface2);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  text-transform: uppercase;
+}
+.align-run-date {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.align-run-kind {
+  font-size: 0.69rem;
+  color: var(--text-muted);
+}
+
 /* ── Actions params panel ───────────────────────────────────── */
 .acts-params {
   padding: 8px 16px;
@@ -1547,6 +1646,35 @@ async function loadCurationPreview(
   renderCurationPreviewMode(panes, _curPreviewData, mode, epTitle);
 }
 
+// ── Line-level diff (raw vs clean) ──────────────────────────────────────────
+
+function buildDiffHtml(raw: string, clean: string): { html: string; nChanges: number } {
+  const rawLines   = raw.split("\n");
+  const cleanLines = clean.split("\n");
+  const maxLen = Math.max(rawLines.length, cleanLines.length);
+  let nChanges = 0;
+  const parts: string[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    const r = rawLines[i];
+    const c = cleanLines[i];
+    if (r === undefined) {
+      // inserted line
+      nChanges++;
+      parts.push(`<div class="cur-diff-changed"><div class="cur-diff-ins">+ ${escapeHtml(c)}</div></div>`);
+    } else if (c === undefined) {
+      // deleted line
+      nChanges++;
+      parts.push(`<div class="cur-diff-changed"><div class="cur-diff-del">- ${escapeHtml(r)}</div></div>`);
+    } else if (r === c) {
+      parts.push(`<div class="cur-diff-same">${escapeHtml(r)}</div>`);
+    } else {
+      nChanges++;
+      parts.push(`<div class="cur-diff-changed"><div class="cur-diff-del">- ${escapeHtml(r)}</div><div class="cur-diff-ins">+ ${escapeHtml(c)}</div></div>`);
+    }
+  }
+  return { html: parts.join(""), nChanges };
+}
+
 function renderCurationPreviewMode(
   panes: HTMLElement,
   data: { raw: string; clean: string },
@@ -1568,6 +1696,19 @@ function renderCurationPreviewMode(
       <div class="cur-pane">
         <div class="cur-pane-head">Texte brut (source) — ${escapeHtml(epTitle)}</div>
         <div class="cur-pane-text">${escapeHtml(data.raw)}</div>
+      </div>`;
+  } else if (mode === "diff") {
+    const cleanText = data.clean || data.raw;
+    const { html, nChanges } = buildDiffHtml(data.raw, cleanText);
+    const totalLines = data.raw.split("\n").length;
+    panes.innerHTML = `
+      <div class="cur-pane" style="overflow:hidden;display:flex;flex-direction:column">
+        <div class="cur-pane-head">Diff brut → normalisé — ${escapeHtml(epTitle)}</div>
+        <div class="cur-diff-summary">
+          <strong>${nChanges}</strong> ligne(s) modifiée(s) sur ${totalLines}
+          ${!data.clean ? ' <span style="color:var(--text-muted)">(pas encore normalisé — diff identique)</span>' : ""}
+        </div>
+        <div class="cur-diff-view">${html}</div>
       </div>`;
   } else {
     panes.innerHTML = `
@@ -2167,13 +2308,65 @@ function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
     });
   });
 
-  // Wire text viewer
+  // Wire text viewer + run history on row click
   const alignTextPanel = container.querySelector<HTMLElement>("#align-text-panel");
   if (alignTextPanel) {
-    wireTextPanelRows(wrap, alignTextPanel, [
-      { key: "raw",   label: "Brut" },
-      { key: "clean", label: "Normalisé" },
-    ]);
+    wrap.querySelectorAll<HTMLTableRowElement>("tr[data-ep-id]").forEach((row) => {
+      row.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest("button")) return;
+        wrap.querySelectorAll("tr.active-row").forEach((r) => r.classList.remove("active-row"));
+        row.classList.add("active-row");
+        const epId    = row.dataset.epId!;
+        const epTitle = row.dataset.epTitle ?? epId;
+        loadAlignmentRunHistory(alignTextPanel, epId, epTitle);
+      });
+    });
+  }
+}
+
+async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle: string) {
+  panel.innerHTML = `<div class="align-runs-panel"><div style="font-size:0.78rem;color:var(--text-muted)">Chargement historique…</div></div>`;
+  try {
+    const data = await fetchAlignmentRuns(epId);
+    const runs: AlignmentRun[] = data.runs ?? [];
+    if (runs.length === 0) {
+      panel.innerHTML = `
+        <div class="align-runs-panel">
+          <div class="align-runs-title">${escapeHtml(epTitle)}</div>
+          <div style="font-size:0.78rem;color:var(--text-muted)">Aucun run d'alignement enregistré.</div>
+        </div>`;
+      return;
+    }
+    const cards = runs.map((r) => {
+      const targetBadges = (r.target_langs ?? [])
+        .map((l: string) => `<span class="align-run-lang-badge">${escapeHtml(l)}</span>`)
+        .join(" ");
+      const d = new Date(r.created_at);
+      const dateStr = isNaN(d.getTime()) ? r.created_at : d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+      return `
+        <div class="align-run-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <span class="align-run-id" title="${escapeHtml(r.run_id)}">${escapeHtml(r.run_id.slice(0, 12))}…</span>
+            <span class="align-run-date">${escapeHtml(dateStr)}</span>
+          </div>
+          <div class="align-run-langs">
+            <span class="align-run-lang-badge" style="background:#dbeafe;color:#1d4ed8">${escapeHtml(r.pivot_lang)}</span>
+            <span style="color:var(--text-muted);font-size:0.72rem">→</span>
+            ${targetBadges}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:2px">
+            <span class="align-run-kind">${escapeHtml(r.segment_kind ?? "utterance")}</span>
+          </div>
+        </div>`;
+    }).join("");
+    panel.innerHTML = `
+      <div class="align-runs-panel">
+        <div class="align-runs-title">${escapeHtml(epTitle)} — ${runs.length} run(s)</div>
+        ${cards}
+      </div>`;
+  } catch (e) {
+    const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+    panel.innerHTML = `<div class="align-runs-panel"><div style="color:var(--danger);font-size:0.78rem">${escapeHtml(msg)}</div></div>`;
   }
 }
 
@@ -2686,6 +2879,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                   <button class="cur-preview-tab active" data-mode="side">Côte à côte</button>
                   <button class="cur-preview-tab" data-mode="raw">Brut seul</button>
                   <button class="cur-preview-tab" data-mode="clean">Normalisé seul</button>
+                  <button class="cur-preview-tab" data-mode="diff">Diff</button>
                   <span class="cur-preview-badge" id="cur-preview-badge"></span>
                 </div>
                 <div class="cur-preview-panes" id="cur-preview-panes">
