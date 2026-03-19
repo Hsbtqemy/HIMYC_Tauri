@@ -228,6 +228,13 @@ export async function deleteSrt(
   return apiDelete(`/episodes/${episodeId}/sources/srt_${lang}`);
 }
 
+export async function patchTranscript(
+  episodeId: string,
+  clean: string,
+): Promise<{ episode_id: string; source_key: string; state: string; chars: number }> {
+  return apiPost(`/episodes/${episodeId}/sources/transcript`, { clean }, "PATCH");
+}
+
 export async function importSrt(
   episodeId: string,
   lang: string,

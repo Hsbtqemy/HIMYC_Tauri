@@ -18,6 +18,7 @@ import {
   importSrt,
   deleteTranscript,
   deleteSrt,
+  patchTranscript,
   fetchJobs,
   createJob,
   cancelJob,
@@ -724,6 +725,41 @@ const CSS = `
   text-align: center;
   color: var(--text-muted);
   font-size: 0.82rem;
+}
+.acts-text-edit-btn {
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.acts-text-edit-btn:hover { background: var(--surface2); color: var(--text); }
+.acts-text-edit-bar {
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.acts-text-editor {
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.75;
+  color: var(--text);
+  background: var(--surface2, #f8f8f8);
+  padding: 1rem 1.25rem;
+  box-sizing: border-box;
 }
 /* highlight active row in split list */
 .acts-ep-list tr.active-row td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
@@ -2004,8 +2040,14 @@ async function loadTextPanel(
       <div class="acts-text-tabs">
         ${tabs.map((t, i) => `<button class="acts-text-tab${i === 0 ? " active" : ""}" data-tab="${escapeHtml(t.key)}">${escapeHtml(t.label)}</button>`).join("")}
       </div>
+      <button class="acts-text-edit-btn" title="Modifier le texte normalisé" style="display:none">✏️ Modifier</button>
     </div>
-    <div class="acts-text-body acts-text-loading">Chargement…</div>`;
+    <div class="acts-text-body acts-text-loading">Chargement…</div>
+    <div class="acts-text-edit-bar" style="display:none">
+      <button class="acts-text-save-btn btn btn-primary btn-sm">Sauvegarder</button>
+      <button class="acts-text-cancel-btn btn btn-ghost btn-sm">Annuler</button>
+      <span class="acts-text-edit-status" style="font-size:0.75rem;color:var(--text-muted);margin-left:8px"></span>
+    </div>`;
 
   try {
     const src = await fetchEpisodeSource(epId, "transcript") as TranscriptSourceContent;
@@ -2013,15 +2055,75 @@ async function loadTextPanel(
       raw:   src.raw  ?? "",
       clean: src.clean ?? src.raw ?? "",
     };
-    const bodyEl = panel.querySelector<HTMLElement>(".acts-text-body")!;
+    const bodyEl     = panel.querySelector<HTMLElement>(".acts-text-body")!;
+    const editBtn    = panel.querySelector<HTMLButtonElement>(".acts-text-edit-btn")!;
+    const editBar    = panel.querySelector<HTMLElement>(".acts-text-edit-bar")!;
+    const saveBtn    = panel.querySelector<HTMLButtonElement>(".acts-text-save-btn")!;
+    const cancelBtn  = panel.querySelector<HTMLButtonElement>(".acts-text-cancel-btn")!;
+    const editStatus = panel.querySelector<HTMLElement>(".acts-text-edit-status")!;
+
+    let currentTab = tabs[0].key;
 
     function showTab(key: string) {
+      currentTab = key;
       panel.querySelectorAll<HTMLElement>(".acts-text-tab").forEach((b) =>
         b.classList.toggle("active", b.dataset.tab === key),
       );
+      // Edit button only visible on clean tab
+      editBtn.style.display = key === "clean" ? "" : "none";
+      exitEditMode(false);
       bodyEl.className = "acts-text-body";
       bodyEl.textContent = contentMap[key] ?? contentMap["raw"] ?? "";
     }
+
+    function enterEditMode() {
+      const textarea = document.createElement("textarea");
+      textarea.className = "acts-text-editor";
+      textarea.value = contentMap["clean"];
+      bodyEl.textContent = "";
+      bodyEl.appendChild(textarea);
+      editBar.style.display = "";
+      editBtn.style.display = "none";
+      editStatus.textContent = "";
+      textarea.focus();
+    }
+
+    function exitEditMode(restoreContent: boolean) {
+      editBar.style.display = "none";
+      editBtn.style.display = currentTab === "clean" ? "" : "none";
+      editStatus.textContent = "";
+      if (restoreContent) {
+        bodyEl.className = "acts-text-body";
+        bodyEl.textContent = contentMap["clean"];
+      }
+    }
+
+    editBtn.addEventListener("click", () => enterEditMode());
+
+    cancelBtn.addEventListener("click", () => exitEditMode(true));
+
+    saveBtn.addEventListener("click", async () => {
+      const textarea = bodyEl.querySelector<HTMLTextAreaElement>("textarea");
+      if (!textarea) return;
+      const newClean = textarea.value;
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      editStatus.textContent = "Sauvegarde…";
+      try {
+        await patchTranscript(epId, newClean);
+        contentMap["clean"] = newClean;
+        exitEditMode(true);
+        editStatus.textContent = "";
+      } catch (err: unknown) {
+        editStatus.textContent = err instanceof ApiError
+          ? `${err.errorCode} — ${err.message}`
+          : String(err);
+        editStatus.style.color = "var(--danger)";
+      } finally {
+        saveBtn.disabled = false;
+        cancelBtn.disabled = false;
+      }
+    });
 
     showTab(tabs[0].key);
     panel.querySelectorAll<HTMLButtonElement>(".acts-text-tab").forEach((btn) => {
