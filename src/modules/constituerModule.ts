@@ -18,12 +18,18 @@ import {
   fetchJobs,
   createJob,
   cancelJob,
+  fetchCharacters,
+  saveCharacters,
+  fetchAssignments,
+  saveAssignments,
   type Episode,
   type EpisodeSource,
   type EpisodesResponse,
   type ConfigResponse,
   type JobRecord,
   type JobType,
+  type Character,
+  type CharacterAssignment,
   ApiError,
 } from "../api";
 import {
@@ -165,6 +171,109 @@ const CSS = `
 .cons-job-err   { color: var(--danger); font-size: 0.72rem; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; max-width: 180px; white-space: nowrap; }
 .cons-jobs-actions { display: flex; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--border); }
 .cons-jobs-empty { padding: 10px 16px; color: var(--text-muted); font-size: 0.77rem; font-style: italic; }
+
+/* ── Personnages ────────────────────────────────────────────── */
+.pers-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.pers-toolbar-title { font-size: 0.95rem; font-weight: 700; color: var(--text); flex: 1; }
+.pers-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.pers-list {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pers-list-header {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pers-list-scroll { flex: 1; overflow-y: auto; }
+.pers-char-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+  transition: background 0.12s;
+}
+.pers-char-item:hover { background: var(--surface2); }
+.pers-char-item.active {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-left: 3px solid var(--accent);
+  padding-left: 9px;
+}
+.pers-char-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pers-char-count { font-size: 0.7rem; color: var(--text-muted); }
+.pers-empty-list { padding: 24px 12px; text-align: center; color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
+.pers-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pers-detail-scroll { flex: 1; overflow-y: auto; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+.pers-detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  gap: 0.5rem;
+}
+.pers-field { display: flex; flex-direction: column; gap: 4px; }
+.pers-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.pers-input {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+  outline: none;
+}
+.pers-input:focus { border-color: var(--accent); }
+.pers-textarea { min-height: 60px; resize: vertical; }
+.pers-langs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.pers-lang-item { display: flex; flex-direction: column; gap: 3px; }
+.pers-lang-code { font-size: 0.68rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
+.pers-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.pers-msg { font-size: 0.78rem; margin-left: auto; }
+.pers-msg.ok  { color: var(--success, #16a34a); }
+.pers-msg.err { color: var(--danger, #dc2626); }
 
 /* ── Root layout ───────────────────────────────────────────── */
 .cons-root {
@@ -897,6 +1006,268 @@ function wireImporterButtons(pane: HTMLElement) {
     });
 }
 
+// ── Section Personnages ──────────────────────────────────────────────────────
+
+let _characters: Character[] = [];
+let _assignments: CharacterAssignment[] = [];
+let _selectedCharIdx: number | null = null;
+
+function renderPersonnagesSection(pane: HTMLElement) {
+  pane.innerHTML = `
+    <div class="pers-toolbar">
+      <span class="pers-toolbar-title">Personnages</span>
+      <button class="btn btn-primary" id="pers-add-btn" style="font-size:0.8rem">+ Nouveau</button>
+      <button class="btn btn-ghost" id="pers-refresh" style="font-size:12px;padding:4px 10px">↺</button>
+    </div>
+    <div class="cons-error" id="pers-error" style="display:none;margin:0 16px 0"></div>
+    <div class="pers-body">
+      <div class="pers-list">
+        <div class="pers-list-header">
+          <span>Personnages</span>
+          <span id="pers-count" style="margin-left:auto;font-weight:400"></span>
+        </div>
+        <div class="pers-list-scroll" id="pers-list-scroll">
+          <div class="pers-empty-list">Chargement…</div>
+        </div>
+      </div>
+      <div class="pers-detail" id="pers-detail">
+        <div class="pers-detail-empty">
+          <span style="font-size:1.5rem">🎭</span>
+          Sélectionnez un personnage ou créez-en un.
+        </div>
+      </div>
+    </div>`;
+
+  pane.querySelector<HTMLButtonElement>("#pers-refresh")!
+    .addEventListener("click", () => loadPersonnages(pane));
+
+  pane.querySelector<HTMLButtonElement>("#pers-add-btn")!
+    .addEventListener("click", () => {
+      _selectedCharIdx = null;
+      renderCharDetail(pane, null);
+    });
+
+  loadPersonnages(pane);
+}
+
+async function loadPersonnages(pane: HTMLElement) {
+  try {
+    const [charResp, assignResp] = await Promise.all([fetchCharacters(), fetchAssignments()]);
+    _characters = charResp.characters;
+    _assignments = assignResp.assignments;
+    renderCharList(pane);
+    // Re-render detail if something was selected
+    if (_selectedCharIdx !== null && _selectedCharIdx < _characters.length) {
+      renderCharDetail(pane, _characters[_selectedCharIdx]);
+    } else {
+      _selectedCharIdx = null;
+    }
+  } catch (e) {
+    showPersError(pane, e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e));
+  }
+}
+
+function renderCharList(pane: HTMLElement) {
+  const scroll = pane.querySelector<HTMLElement>("#pers-list-scroll");
+  const countEl = pane.querySelector<HTMLElement>("#pers-count");
+  if (!scroll) return;
+
+  if (countEl) countEl.textContent = String(_characters.length);
+
+  if (_characters.length === 0) {
+    scroll.innerHTML = `<div class="pers-empty-list">Aucun personnage défini.<br>Cliquez « + Nouveau » pour commencer.</div>`;
+    return;
+  }
+
+  // Count assignments per character
+  const assignCount: Record<string, number> = {};
+  for (const a of _assignments) {
+    if (a.character_id) assignCount[a.character_id] = (assignCount[a.character_id] ?? 0) + 1;
+  }
+
+  scroll.innerHTML = _characters
+    .map((ch, idx) => {
+      const count = assignCount[ch.id] ?? 0;
+      const active = idx === _selectedCharIdx;
+      return `
+        <div class="pers-char-item${active ? " active" : ""}" data-idx="${idx}">
+          <span class="pers-char-name" title="${escapeHtml(ch.canonical)}">${escapeHtml(ch.canonical)}</span>
+          ${count > 0 ? `<span class="pers-char-count">${count} assignation${count > 1 ? "s" : ""}</span>` : ""}
+        </div>`;
+    })
+    .join("");
+
+  scroll.querySelectorAll<HTMLElement>(".pers-char-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      const idx = Number(el.dataset.idx);
+      _selectedCharIdx = idx;
+      renderCharList(pane); // update active highlight
+      renderCharDetail(pane, _characters[idx]);
+    });
+  });
+}
+
+function renderCharDetail(pane: HTMLElement, char: Character | null) {
+  const detail = pane.querySelector<HTMLElement>("#pers-detail");
+  if (!detail) return;
+
+  // Collect known languages from project config
+  const langs = (_cachedConfig?.languages ?? []).length > 0
+    ? _cachedConfig!.languages
+    : Object.keys(char?.names_by_lang ?? {}).length > 0
+      ? Object.keys(char!.names_by_lang)
+      : ["en", "fr"];
+
+  const isNew = char === null;
+  const c: Character = char ?? { id: "", canonical: "", names_by_lang: {}, aliases: [] };
+
+  const langFields = langs
+    .map((lang) => `
+      <div class="pers-lang-item">
+        <span class="pers-lang-code">${escapeHtml(lang)}</span>
+        <input class="pers-input pers-name-lang" data-lang="${escapeHtml(lang)}"
+          type="text" value="${escapeHtml(c.names_by_lang[lang] ?? "")}"
+          placeholder="Nom ${escapeHtml(lang.toUpperCase())}…">
+      </div>`)
+    .join("");
+
+  detail.innerHTML = `
+    <div class="pers-detail-scroll">
+      <div class="pers-field">
+        <label class="pers-label">ID interne</label>
+        <input class="pers-input" id="pers-id" type="text"
+          value="${escapeHtml(c.id)}" placeholder="ex: rachel_green"
+          ${isNew ? "" : "readonly style=\"opacity:0.65;background:var(--surface2)\""}>
+        <span style="font-size:0.72rem;color:var(--text-muted)">Identifiant unique, non modifiable après création.</span>
+      </div>
+      <div class="pers-field">
+        <label class="pers-label">Nom canonique</label>
+        <input class="pers-input" id="pers-canonical" type="text"
+          value="${escapeHtml(c.canonical)}" placeholder="ex: Rachel Green">
+      </div>
+      <div class="pers-field">
+        <label class="pers-label">Noms par langue</label>
+        <div class="pers-langs-grid">${langFields}</div>
+      </div>
+      <div class="pers-field">
+        <label class="pers-label">Alias / variantes <span style="font-weight:400;font-style:italic">(une par ligne)</span></label>
+        <textarea class="pers-input pers-textarea" id="pers-aliases"
+          placeholder="RACHEL\nRachel G.\n...">${escapeHtml(c.aliases.join("\n"))}</textarea>
+      </div>
+      ${!isNew ? _renderAssignmentsBlock(c.id) : ""}
+    </div>
+    <div class="pers-detail-actions">
+      <button class="btn btn-primary" id="pers-save-btn">
+        ${isNew ? "Créer personnage" : "Enregistrer"}
+      </button>
+      ${!isNew ? `<button class="btn btn-ghost" id="pers-delete-btn" style="color:var(--danger,#dc2626)">Supprimer</button>` : ""}
+      <span class="pers-msg" id="pers-detail-msg"></span>
+    </div>`;
+
+  const setMsg = (msg: string, ok: boolean) => {
+    const el = detail.querySelector<HTMLElement>("#pers-detail-msg")!;
+    el.textContent = msg;
+    el.className = `pers-msg ${ok ? "ok" : "err"}`;
+  };
+
+  detail.querySelector<HTMLButtonElement>("#pers-save-btn")!
+    .addEventListener("click", async () => {
+      const id       = (detail.querySelector<HTMLInputElement>("#pers-id")!.value).trim();
+      const canonical = (detail.querySelector<HTMLInputElement>("#pers-canonical")!.value).trim();
+      if (!id || !canonical) { setMsg("ID et nom canonique requis.", false); return; }
+
+      const names_by_lang: Record<string, string> = {};
+      detail.querySelectorAll<HTMLInputElement>(".pers-name-lang").forEach((inp) => {
+        const v = inp.value.trim();
+        if (v) names_by_lang[inp.dataset.lang!] = v;
+      });
+
+      const aliasRaw = (detail.querySelector<HTMLTextAreaElement>("#pers-aliases")!.value);
+      const aliases = aliasRaw.split("\n").map((s) => s.trim()).filter(Boolean);
+
+      const updated: Character = { id, canonical, names_by_lang, aliases };
+
+      let newList: Character[];
+      if (isNew) {
+        if (_characters.some((ch) => ch.id.toLowerCase() === id.toLowerCase())) {
+          setMsg(`ID « ${id} » déjà utilisé.`, false); return;
+        }
+        newList = [..._characters, updated];
+      } else {
+        newList = _characters.map((ch) => ch.id === c.id ? updated : ch);
+      }
+
+      try {
+        await saveCharacters(newList);
+        _characters = newList;
+        if (isNew) _selectedCharIdx = _characters.length - 1;
+        else _selectedCharIdx = _characters.findIndex((ch) => ch.id === updated.id);
+        renderCharList(pane);
+        renderCharDetail(pane, updated);
+        setMsg("Sauvegardé.", true);
+      } catch (e) {
+        setMsg(e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e), false);
+      }
+    });
+
+  if (!isNew) {
+    detail.querySelector<HTMLButtonElement>("#pers-delete-btn")?.addEventListener("click", async () => {
+      if (!confirm(`Supprimer « ${c.canonical} » et toutes ses assignations ?`)) return;
+      const newList = _characters.filter((ch) => ch.id !== c.id);
+      const newAssignments = _assignments.filter((a) => a.character_id !== c.id);
+      try {
+        await saveCharacters(newList);
+        await saveAssignments(newAssignments);
+        _characters = newList;
+        _assignments = newAssignments;
+        _selectedCharIdx = null;
+        renderCharList(pane);
+        detail.innerHTML = `<div class="pers-detail-empty"><span style="font-size:1.5rem">🎭</span>Personnage supprimé.</div>`;
+      } catch (e) {
+        setMsg(e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e), false);
+      }
+    });
+  }
+}
+
+function _renderAssignmentsBlock(charId: string): string {
+  const asgns = _assignments.filter((a) => a.character_id === charId);
+  if (asgns.length === 0) {
+    return `
+      <div class="pers-field">
+        <label class="pers-label">Assignations <span style="font-weight:400">(0)</span></label>
+        <div style="font-size:0.8rem;color:var(--text-muted);font-style:italic">
+          Aucune assignation. Les assignations sont créées depuis l'Inspecter ou via le concordancier.
+        </div>
+      </div>`;
+  }
+  const rows = asgns.slice(0, 20).map((a) => {
+    const label = a.speaker_label ?? a.segment_id ?? a.cue_id ?? "—";
+    const ep = a.episode_id ? `<span style="font-family:ui-monospace,monospace;font-size:0.72rem;color:var(--text-muted)">${escapeHtml(a.episode_id)}</span>` : "";
+    return `<tr><td style="padding:3px 8px">${escapeHtml(label)}</td><td style="padding:3px 8px">${ep}</td></tr>`;
+  }).join("");
+  const more = asgns.length > 20 ? `<div style="font-size:0.75rem;color:var(--text-muted);padding:4px 8px">+${asgns.length - 20} autres…</div>` : "";
+  return `
+    <div class="pers-field">
+      <label class="pers-label">Assignations <span style="font-weight:400">(${asgns.length})</span></label>
+      <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;font-size:0.8rem">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:3px 8px;text-align:left;font-weight:600;color:var(--text-muted)">Locuteur</th>
+            <th style="padding:3px 8px;text-align:left;font-weight:600;color:var(--text-muted)">Épisode</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${more}
+      </div>
+    </div>`;
+}
+
+function showPersError(pane: HTMLElement, msg: string) {
+  const el = pane.querySelector<HTMLElement>("#pers-error");
+  if (el) { el.textContent = msg; el.style.display = "block"; }
+}
+
 // ── Mount / Dispose ─────────────────────────────────────────────────────────
 
 export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
@@ -1024,17 +1395,22 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         renderDocumentsSection(pane);
       } else if (sec === "importer" && pane.querySelector(".cons-placeholder")) {
         renderImporterSection(pane);
+      } else if (sec === "personnages" && pane.querySelector(".cons-placeholder")) {
+        renderPersonnagesSection(pane);
       }
     });
   });
 
-  // Si la section active par défaut est Documents ou Importer, la monter immédiatement
+  // Si la section active par défaut n'est pas "actions", la monter immédiatement
   if (_activeSection === "documents") {
     const pane = container.querySelector<HTMLElement>(".cons-section-pane[data-section='documents']")!;
     renderDocumentsSection(pane);
   } else if (_activeSection === "importer") {
     const pane = container.querySelector<HTMLElement>(".cons-section-pane[data-section='importer']")!;
     renderImporterSection(pane);
+  } else if (_activeSection === "personnages") {
+    const pane = container.querySelector<HTMLElement>(".cons-section-pane[data-section='personnages']")!;
+    renderPersonnagesSection(pane);
   }
 
   // Refresh episodes button

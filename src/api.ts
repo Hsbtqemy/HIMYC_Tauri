@@ -71,6 +71,21 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return JSON.parse(res.body) as T;
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await _loopbackFetch(path, "PUT", body);
+  if (!res.ok) {
+    let errorCode = "UNKNOWN";
+    let message = res.body;
+    try {
+      const parsed = JSON.parse(res.body);
+      errorCode = parsed.error ?? errorCode;
+      message = parsed.message ?? message;
+    } catch { /* not JSON */ }
+    throw new ApiError(res.status, errorCode, message);
+  }
+  return JSON.parse(res.body) as T;
+}
+
 // ── Endpoints typés (MX-003) ──────────────────────────────────────────────────
 
 // /health
@@ -277,4 +292,50 @@ export async function cancelJob(jobId: string): Promise<{ job_id: string; status
     throw new ApiError(res.status, errorCode, message);
   }
   return JSON.parse(res.body);
+}
+
+// ── /characters + /assignments (MX-021c) ─────────────────────────────────────
+
+export interface Character {
+  id: string;
+  canonical: string;
+  names_by_lang: Record<string, string>;
+  aliases: string[];
+}
+
+export interface CharactersResponse {
+  characters: Character[];
+}
+
+export interface CharacterAssignment {
+  /** segment_id or cue_id */
+  segment_id?: string;
+  cue_id?: string;
+  character_id: string;
+  /** Raw speaker label from SRT/transcript (for display) */
+  speaker_label?: string;
+  episode_id?: string;
+  source_key?: string;
+}
+
+export interface AssignmentsResponse {
+  assignments: CharacterAssignment[];
+}
+
+export async function fetchCharacters(): Promise<CharactersResponse> {
+  return apiGet<CharactersResponse>("/characters");
+}
+
+export async function saveCharacters(characters: Character[]): Promise<{ saved: number }> {
+  return apiPut<{ saved: number }>("/characters", { characters });
+}
+
+export async function fetchAssignments(): Promise<AssignmentsResponse> {
+  return apiGet<AssignmentsResponse>("/assignments");
+}
+
+export async function saveAssignments(
+  assignments: CharacterAssignment[],
+): Promise<{ saved: number }> {
+  return apiPut<{ saved: number }>("/assignments", { assignments });
 }
