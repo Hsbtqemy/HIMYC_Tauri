@@ -974,6 +974,63 @@ const CSS = `
   color: var(--text-muted);
 }
 
+/* ── Presets nav button + modal ─────────────────────────────── */
+.cons-nav-presets-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  margin-top: auto;
+}
+.cons-nav-presets-btn:hover { background: var(--surface2); border-color: var(--border); }
+dialog.cons-presets-modal {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+  padding: 0;
+  max-width: 480px;
+  width: 90vw;
+  background: var(--surface);
+  color: var(--text);
+}
+dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
+.presets-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.presets-modal-head h3 { margin: 0; font-size: 0.92rem; }
+.presets-modal-body { padding: 12px 16px; max-height: 380px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.presets-modal-foot { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+.preset-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  font-size: 0.8rem;
+}
+.preset-card-info { flex: 1; min-width: 0; }
+.preset-card-name { font-weight: 600; color: var(--text); }
+.preset-card-meta { font-size: 0.72rem; color: var(--text-muted); margin-top: 1px; }
+.preset-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.preset-new-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--surface2); border-radius: var(--radius); border: 1px solid var(--border); }
+.preset-new-form-row { display: flex; gap: 8px; align-items: center; }
+.preset-new-form-row label { font-size: 0.76rem; color: var(--text-muted); min-width: 90px; }
+.preset-new-form-row input, .preset-new-form-row select {
+  flex: 1; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text); font-size: 0.8rem; font-family: inherit;
+}
+
 /* ── Actions params panel ───────────────────────────────────── */
 .acts-params {
   padding: 8px 16px;
@@ -2767,6 +2824,131 @@ function showPersError(pane: HTMLElement, msg: string) {
   if (el) { el.textContent = msg; el.style.display = "block"; }
 }
 
+// ── Presets (shell utility) ──────────────────────────────────────────────────
+
+const PRESETS_KEY = "himyc.presets";
+
+interface ProjectPreset {
+  id: string;
+  name: string;
+  pivot_lang: string;
+  target_langs: string;   // comma-separated
+  seg_lang: string;
+  created_at: string;
+}
+
+const SEED_PRESETS: ProjectPreset[] = [
+  { id: "seed_fr_en", name: "FR → EN",  pivot_lang: "fr", target_langs: "en",    seg_lang: "fr", created_at: "seed" },
+  { id: "seed_en_fr", name: "EN → FR",  pivot_lang: "en", target_langs: "fr",    seg_lang: "en", created_at: "seed" },
+  { id: "seed_de_fr", name: "DE → FR",  pivot_lang: "de", target_langs: "fr",    seg_lang: "de", created_at: "seed" },
+];
+
+function loadPresets(): ProjectPreset[] {
+  try {
+    const raw = localStorage.getItem(PRESETS_KEY);
+    if (raw) return JSON.parse(raw) as ProjectPreset[];
+  } catch { /* */ }
+  return [...SEED_PRESETS];
+}
+
+function savePresets(list: ProjectPreset[]) {
+  localStorage.setItem(PRESETS_KEY, JSON.stringify(list));
+}
+
+function renderPresets(body: HTMLElement) {
+  const list = loadPresets();
+  if (list.length === 0) {
+    body.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Aucun preset. Créez-en un ou restaurez les presets par défaut.</div>`;
+    return;
+  }
+  body.innerHTML = list.map((p) => `
+    <div class="preset-card" data-id="${escapeHtml(p.id)}">
+      <div class="preset-card-info">
+        <div class="preset-card-name">${escapeHtml(p.name)}</div>
+        <div class="preset-card-meta">pivot: <b>${escapeHtml(p.pivot_lang)}</b> → ${escapeHtml(p.target_langs)} · seg: ${escapeHtml(p.seg_lang)}</div>
+      </div>
+      <div class="preset-card-actions">
+        <button class="btn btn-primary btn-sm preset-apply-btn" data-id="${escapeHtml(p.id)}" title="Appliquer">✓</button>
+        <button class="btn btn-ghost btn-sm preset-del-btn" data-id="${escapeHtml(p.id)}" title="Supprimer">✕</button>
+      </div>
+    </div>`).join("");
+
+  body.querySelectorAll<HTMLButtonElement>(".preset-del-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.id!;
+      const updated = loadPresets().filter((p) => p.id !== id);
+      savePresets(updated);
+      renderPresets(body);
+    });
+  });
+
+  body.querySelectorAll<HTMLButtonElement>(".preset-apply-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.id!;
+      const p = loadPresets().find((x) => x.id === id);
+      if (!p) return;
+      localStorage.setItem("himyc.active-preset", JSON.stringify(p));
+      btn.textContent = "✅";
+      setTimeout(() => { btn.textContent = "✓"; }, 1500);
+    });
+  });
+}
+
+function renderPresetsNewForm(body: HTMLElement) {
+  // Only add form if not already showing
+  if (body.querySelector(".preset-new-form")) return;
+  const form = document.createElement("div");
+  form.className = "preset-new-form";
+  form.innerHTML = `
+    <div style="font-size:0.8rem;font-weight:600;color:var(--text);margin-bottom:4px">Nouveau preset</div>
+    <div class="preset-new-form-row">
+      <label>Nom</label>
+      <input id="pnf-name" type="text" placeholder="Ex: FR → EN bilingue" />
+    </div>
+    <div class="preset-new-form-row">
+      <label>Pivot</label>
+      <input id="pnf-pivot" type="text" placeholder="fr" style="max-width:80px" />
+    </div>
+    <div class="preset-new-form-row">
+      <label>Cibles</label>
+      <input id="pnf-targets" type="text" placeholder="en,de" />
+    </div>
+    <div class="preset-new-form-row">
+      <label>Seg. langue</label>
+      <input id="pnf-seglang" type="text" placeholder="fr" style="max-width:80px" />
+    </div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn btn-primary btn-sm" id="pnf-save">Enregistrer</button>
+      <button class="btn btn-ghost btn-sm" id="pnf-cancel">Annuler</button>
+    </div>`;
+
+  body.appendChild(form);
+
+  form.querySelector<HTMLButtonElement>("#pnf-cancel")?.addEventListener("click", () => {
+    form.remove();
+  });
+
+  form.querySelector<HTMLButtonElement>("#pnf-save")?.addEventListener("click", () => {
+    const name    = (form.querySelector<HTMLInputElement>("#pnf-name")?.value ?? "").trim();
+    const pivot   = (form.querySelector<HTMLInputElement>("#pnf-pivot")?.value ?? "").trim();
+    const targets = (form.querySelector<HTMLInputElement>("#pnf-targets")?.value ?? "").trim();
+    const seglang = (form.querySelector<HTMLInputElement>("#pnf-seglang")?.value ?? "").trim();
+    if (!name || !pivot) return;
+    const newPreset: ProjectPreset = {
+      id: `custom_${Date.now()}`,
+      name,
+      pivot_lang:   pivot,
+      target_langs: targets,
+      seg_lang:     seglang || pivot,
+      created_at:   new Date().toISOString(),
+    };
+    const updated = [...loadPresets(), newPreset];
+    savePresets(updated);
+    renderPresets(body);
+    form.remove();
+  });
+}
+
 // ── Mount / Dispose ─────────────────────────────────────────────────────────
 
 export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
@@ -2818,7 +3000,23 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
         <button class="cons-nav-tab${_activeSection === "personnages" ? " active" : ""}" data-section="personnages">Personnages</button>
         <button class="cons-nav-tab${_activeSection === "exporter"    ? " active" : ""}" data-section="exporter">Exporter</button>
+
+        <button class="cons-nav-presets-btn" id="cons-presets-btn" title="Gérer les presets de projet">⚙ Presets</button>
       </nav>
+
+      <!-- Presets modal -->
+      <dialog class="cons-presets-modal" id="cons-presets-modal">
+        <div class="presets-modal-head">
+          <h3>⚙ Presets de projet</h3>
+          <button class="btn btn-ghost btn-sm" id="cons-presets-close">✕</button>
+        </div>
+        <div class="presets-modal-body" id="cons-presets-body">
+          <!-- rendered by renderPresets() -->
+        </div>
+        <div class="presets-modal-foot">
+          <button class="btn btn-primary btn-sm" id="cons-presets-new">+ Nouveau preset</button>
+        </div>
+      </dialog>
 
       <!-- Rail (collapsed state) -->
       <div class="cons-rail">
@@ -3144,6 +3342,23 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       activateSection("actions");
       activateSubView(btn.dataset.subview as "curation" | "segmentation" | "alignement");
     });
+  });
+
+  // ── Presets modal ────────────────────────────────────────────────────────
+  const presetsModal = container.querySelector<HTMLDialogElement>("#cons-presets-modal")!;
+  const presetsBody  = container.querySelector<HTMLElement>("#cons-presets-body")!;
+  container.querySelector<HTMLButtonElement>("#cons-presets-btn")?.addEventListener("click", () => {
+    renderPresets(presetsBody);
+    presetsModal.showModal();
+  });
+  container.querySelector<HTMLButtonElement>("#cons-presets-close")?.addEventListener("click", () => {
+    presetsModal.close();
+  });
+  container.querySelector<HTMLButtonElement>("#cons-presets-new")?.addEventListener("click", () => {
+    renderPresetsNewForm(presetsBody);
+  });
+  presetsModal.addEventListener("click", (e) => {
+    if (e.target === presetsModal) presetsModal.close();
   });
 
   // ── Hub CTA card clicks ───────────────────────────────────────────────────
