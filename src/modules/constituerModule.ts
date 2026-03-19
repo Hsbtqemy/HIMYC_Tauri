@@ -19,6 +19,7 @@ import {
   deleteTranscript,
   deleteSrt,
   patchTranscript,
+  setAlignLinkNote,
   fetchJobs,
   createJob,
   cancelJob,
@@ -1220,6 +1221,15 @@ const CSS = `
   background: linear-gradient(90deg, #0f766e, #5eead4);
   vertical-align: middle; margin-right: 4px;
 }
+.audit-note-input {
+  width: 120px; font-size: 0.72rem;
+  padding: 2px 4px; border-radius: 3px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--text, #111);
+  transition: border-color 0.15s, background 0.15s;
+}
+.audit-note-input:hover { border-color: var(--border, #d1d5db); background: var(--bg-alt, #f9fafb); }
+.audit-note-input:focus { outline: none; border-color: var(--accent, #0f766e); background: var(--bg-alt, #f9fafb); }
 /* ── Retarget modal (MX-040) ──────────────────────────────────────── */
 .retarget-overlay {
   position: fixed; inset: 0;
@@ -3777,7 +3787,7 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
           <tr>
             <th>#</th><th>Transcript</th><th>Pivot</th><th>Cible</th>
             <th>Lang</th><th style="text-align:center">Conf.</th>
-            <th>Statut</th><th></th>
+            <th>Statut</th><th>Note</th><th></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -3813,6 +3823,23 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
       });
     });
 
+    // Wire note inputs — save on blur if value changed
+    wrap.querySelectorAll<HTMLInputElement>(".audit-note-input").forEach((inp) => {
+      inp.addEventListener("blur", async () => {
+        const newNote = inp.value.trim();
+        if (newNote === inp.dataset.noteOrig) return;
+        inp.disabled = true;
+        try {
+          await setAlignLinkNote(inp.dataset.linkId!, newNote || "");
+          inp.dataset.noteOrig = newNote;
+        } catch (_e) {
+          inp.value = inp.dataset.noteOrig!;
+        } finally {
+          inp.disabled = false;
+        }
+      });
+    });
+
     // Pagination
     if (pager) renderAuditPager(pager, panel, epId, runId);
   } catch (e) {
@@ -3839,6 +3866,7 @@ function renderAuditLinkRow(lnk: AuditLink): string {
       <td><span class="align-run-lang-badge">${escapeHtml(lnk.lang || "—")}</span></td>
       <td style="text-align:center;white-space:nowrap">${confBar}</td>
       <td><span class="audit-status-badge ${lnk.status}">${_statusLabel(lnk.status)}</span></td>
+      <td><input class="audit-note-input" type="text" placeholder="Note…" value="${escapeHtml(lnk.note || "")}" data-link-id="${escapeHtml(lnk.link_id)}" data-note-orig="${escapeHtml(lnk.note || "")}"></td>
       <td class="audit-row-actions">${renderAuditActions(lnk.link_id, lnk.status)}</td>
     </tr>`;
 }

@@ -345,6 +345,7 @@ export interface AuditLink {
   segment_n: number | null;
   text_pivot: string | null;
   text_target: string | null;
+  note: string | null;
 }
 
 export interface AuditLinksResponse {
@@ -417,6 +418,13 @@ export async function setAlignLinkStatus(
   status: "accepted" | "rejected" | "auto" | "ignored",
 ): Promise<{ link_id: string; status: string }> {
   return apiPost(`/alignment_links/${linkId}`, { status }, "PATCH");
+}
+
+export async function setAlignLinkNote(
+  linkId: string,
+  note: string,
+): Promise<{ link_id: string; note: string }> {
+  return apiPost(`/alignment_links/${linkId}`, { note }, "PATCH");
 }
 
 export interface BulkAlignStatusParams {
