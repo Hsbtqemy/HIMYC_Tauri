@@ -46,43 +46,211 @@ import { measureAsync } from "../perf";
 // ── CSS module ─────────────────────────────────────────────────────────────
 
 const CSS = `
-/* ── Section nav ───────────────────────────────────────────── */
-.cons-section-nav {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  flex-shrink: 0;
-  overflow-x: auto;
+/* ── Sidebar shell (AGRAFES port) ───────────────────────────── */
+:root { --cons-nav-w: 220px; }
+.cons-shell {
+  display: grid;
+  grid-template-columns: var(--cons-nav-w) 1fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
-.cons-section-tab {
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-  font-weight: 500;
-  padding: 0 1.1rem;
-  height: 36px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.13s, border-color 0.13s;
+.cons-shell.nav-hidden { grid-template-columns: 28px 1fr; }
+.cons-shell.nav-hidden .cons-nav  { display: none; }
+.cons-shell.nav-hidden .cons-rail { display: flex; }
+
+.cons-nav {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cons-nav-head {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0 4px;
 }
-.cons-section-tab:hover { color: var(--text); }
-.cons-section-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+.cons-nav-head h2 {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--text-muted);
   font-weight: 700;
 }
-.cons-section-tab .cons-tab-badge {
-  font-size: 0.68rem;
-  opacity: 0.55;
+.cons-nav-collapse-btn {
+  border: 1px solid rgba(30,74,128,0.3);
+  border-radius: 6px;
+  color: #1e4a80;
+  background: #eaf1fb;
+  width: 24px; height: 24px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+  flex-shrink: 0;
+  transition: background .12s;
+  font-family: inherit;
 }
+.cons-nav-collapse-btn:hover { background: #d8e8f8; }
+
+.cons-nav-tab {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+  font-family: inherit;
+  display: block;
+}
+.cons-nav-tab:hover { background: #f0faf8; border-color: #cfe8e3; }
+.cons-nav-tab.active {
+  background: #e8f5f3;
+  border-color: #9fd3cc;
+  color: #0c4a46;
+  font-weight: 700;
+}
+
+.cons-rail {
+  display: none;
+  width: 28px;
+  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, #f3f8f7, #eef3f2);
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8px;
+}
+.cons-rail-expand-btn {
+  border: 1px solid rgba(30,74,128,0.3);
+  border-radius: 6px;
+  color: #1e4a80;
+  background: #eaf1fb;
+  width: 20px; height: 20px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: inherit;
+}
+
+/* Actions nav tree */
+.cons-nav-tree { margin: 2px 0 4px 2px; }
+.cons-nav-tree-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between;
+  border: 1px solid #cfe8e3;
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #0c4a46;
+  background: #edf7f5;
+  user-select: none;
+}
+.cons-nav-tree-summary::-webkit-details-marker { display: none; }
+.cons-nav-tree-caret { font-size: 10px; color: var(--text-muted); transition: transform .15s ease; }
+.cons-nav-tree[open] .cons-nav-tree-caret { transform: rotate(180deg); }
+.cons-nav-tree-body {
+  margin: 2px 0 0 6px;
+  padding: 3px 0 0 8px;
+  border-left: 2px solid #cfe8e3;
+  display: grid;
+  gap: 2px;
+}
+.cons-nav-tree-link {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background .1s, border-color .1s;
+  font-family: inherit;
+}
+.cons-nav-tree-link:hover { border-color: #cfe8e3; background: #f6fbfa; }
+.cons-nav-tree-link.active {
+  border-color: #9fd3cc;
+  background: #e8f5f3;
+  color: #0c4a46;
+  font-weight: 700;
+}
+
+.cons-main {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .cons-section-pane { display: none; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
 .cons-section-pane.active { display: flex; }
+
+/* ── Actions sub-views ──────────────────────────────────────── */
+.cons-actions-pane { display: none; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
+.cons-actions-pane.active { display: flex; }
+
+.acts-hub {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.acts-hub-title { font-size: 1rem; font-weight: 700; color: var(--text); margin-bottom: 0.2rem; }
+.acts-hub-desc { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+.acts-hub-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+.acts-hub-card {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.5);
+  padding: 1rem;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+  text-align: left;
+  font-family: inherit;
+}
+.acts-hub-card:hover { border-color: #9fd3cc; background: #f6fbfa; box-shadow: 0 2px 8px rgba(15,118,110,0.08); }
+.acts-hub-card-icon { font-size: 1.4rem; margin-bottom: 0.5rem; }
+.acts-hub-card-title { font-size: 0.88rem; font-weight: 700; color: var(--text); margin-bottom: 0.2rem; }
+.acts-hub-card-desc { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; }
+
+.acts-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: var(--radius);
+  transition: color .12s, background .12s;
+  font-family: inherit;
+  margin-right: 4px;
+}
+.acts-back-btn:hover { color: var(--text); background: var(--surface2); }
 
 .cons-placeholder {
   display: flex;
@@ -407,6 +575,8 @@ let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _jobsExpanded = true;
 let _activeSection = "actions";
+let _activeActionsSubView: "hub" | "curation" | "segmentation" | "alignement" = "hub";
+let _navCollapsed = false;
 let _page = 0;
 /** Données épisodes en cache pour Documents (rechargées à chaque mount section) */
 let _cachedEpisodes: EpisodesResponse | null = null;
@@ -1283,142 +1453,275 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   _container = container;
   _ctx = ctx;
 
-  const sections: Array<{ id: string; label: string; badge: string }> = [
-    { id: "importer",    label: "Importer",    badge: "sources" },
-    { id: "documents",   label: "Documents",   badge: "épisodes" },
-    { id: "actions",     label: "Actions",     badge: "pipeline" },
-    { id: "personnages", label: "Personnages", badge: "locuteurs" },
-    { id: "exporter",    label: "Exporter",    badge: "formats" },
-  ];
+  // Restore persisted nav state
+  _navCollapsed = localStorage.getItem("cons-nav-collapsed") === "1";
+  const _savedSubView = localStorage.getItem("cons-active-subview") as typeof _activeActionsSubView | null;
+  if (_savedSubView) _activeActionsSubView = _savedSubView;
+  const _savedSection = localStorage.getItem("cons-active-section");
+  if (_savedSection) _activeSection = _savedSection;
 
   container.innerHTML = `
-    <div class="cons-root">
-      <nav class="cons-section-nav">
-        ${sections.map((s) => `
-          <button class="cons-section-tab${s.id === _activeSection ? " active" : ""}" data-section="${s.id}">
-            ${s.label}
-            <span class="cons-tab-badge">${s.badge}</span>
-          </button>`).join("")}
+    <div class="cons-root cons-shell${_navCollapsed ? " nav-hidden" : ""}" id="cons-shell">
+
+      <!-- Sidebar -->
+      <nav class="cons-nav" id="cons-nav">
+        <div class="cons-nav-head">
+          <h2>Sections</h2>
+          <button class="cons-nav-collapse-btn" id="cons-nav-collapse" title="Réduire">◀</button>
+        </div>
+
+        <button class="cons-nav-tab${_activeSection === "importer"    ? " active" : ""}" data-section="importer">Importer</button>
+        <button class="cons-nav-tab${_activeSection === "documents"   ? " active" : ""}" data-section="documents">Documents</button>
+        <button class="cons-nav-tab${_activeSection === "actions"     ? " active" : ""}" data-section="actions">Actions</button>
+
+        <details class="cons-nav-tree" ${_activeSection === "actions" ? "open" : ""}>
+          <summary class="cons-nav-tree-summary">
+            Actions disponibles
+            <span class="cons-nav-tree-caret">▾</span>
+          </summary>
+          <div class="cons-nav-tree-body">
+            <button class="cons-nav-tree-link${_activeActionsSubView === "curation"     ? " active" : ""}" data-subview="curation">Curation</button>
+            <button class="cons-nav-tree-link${_activeActionsSubView === "segmentation" ? " active" : ""}" data-subview="segmentation">Segmentation</button>
+            <button class="cons-nav-tree-link${_activeActionsSubView === "alignement"   ? " active" : ""}" data-subview="alignement">Alignement</button>
+          </div>
+        </details>
+
+        <button class="cons-nav-tab${_activeSection === "personnages" ? " active" : ""}" data-section="personnages">Personnages</button>
+        <button class="cons-nav-tab${_activeSection === "exporter"    ? " active" : ""}" data-section="exporter">Exporter</button>
       </nav>
 
-      <!-- Section : Importer -->
-      <div class="cons-section-pane${_activeSection === "importer" ? " active" : ""}" data-section="importer">
-        <div class="cons-placeholder">
-          <div class="cons-placeholder-icon">📥</div>
-          <div class="cons-placeholder-title">Importer</div>
-          <div class="cons-placeholder-desc">
-            Configuration projet (série, source, profil, langues) +<br>
-            import depuis subslikescript · TVMaze · OpenSubtitles · fichiers locaux.<br>
-            <em style="opacity:0.6">En développement — MX-021.</em>
-          </div>
-        </div>
+      <!-- Rail (collapsed state) -->
+      <div class="cons-rail">
+        <button class="cons-rail-expand-btn" id="cons-rail-expand" title="Développer">▶</button>
       </div>
 
-      <!-- Section : Documents -->
-      <div class="cons-section-pane${_activeSection === "documents" ? " active" : ""}" data-section="documents">
-        <div class="cons-placeholder">
-          <div class="cons-placeholder-icon">📄</div>
-          <div class="cons-placeholder-title">Documents</div>
-          <div class="cons-placeholder-desc">
-            Table des épisodes avec sources et états — gestion gros corpus,<br>
-            virtualisation, filtres, accès à l'Inspecter par épisode.<br>
-            <em style="opacity:0.6">En développement — MX-021.</em>
-          </div>
-        </div>
-      </div>
+      <!-- Main content -->
+      <div class="cons-main">
 
-      <!-- Section : Actions (contenu pipeline actuel) -->
-      <div class="cons-section-pane${_activeSection === "actions" ? " active" : ""}" data-section="actions">
-        <div class="cons-toolbar">
-          <span class="cons-toolbar-title">Actions</span>
-          <span class="cons-toolbar-series"></span>
-          <button class="btn btn-secondary" id="cons-batch-normalize" style="font-size:11px;padding:3px 9px">⚡ Normaliser tout</button>
-          <button class="btn btn-ghost" id="cons-refresh" style="font-size:12px;padding:4px 10px">↺ Actualiser</button>
-          <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
-        </div>
-        <div class="cons-error" style="display:none"></div>
-        <div class="cons-table-wrap"></div>
-        <div class="cons-jobs">
-          <div class="cons-jobs-header" id="cons-jobs-toggle">
-            ▾ File de jobs
-            <span class="cons-jobs-count">0 total</span>
-          </div>
-          <div id="cons-jobs-body" style="display:block">
-            <div class="cons-jobs-actions">
-              <button class="btn btn-ghost" id="cons-refresh-jobs" style="font-size:11px;padding:2px 8px">↺ Rafraîchir</button>
+        <!-- Section : Importer -->
+        <div class="cons-section-pane${_activeSection === "importer" ? " active" : ""}" data-section="importer">
+          <div class="cons-placeholder">
+            <div class="cons-placeholder-icon">📥</div>
+            <div class="cons-placeholder-title">Importer</div>
+            <div class="cons-placeholder-desc">
+              Configuration projet (série, source, profil, langues) +<br>
+              import depuis subslikescript · TVMaze · OpenSubtitles · fichiers locaux.<br>
+              <em style="opacity:0.6">En développement — MX-021.</em>
             </div>
-            <div class="cons-jobs-list"></div>
           </div>
         </div>
-      </div>
 
-      <!-- Section : Personnages -->
-      <div class="cons-section-pane${_activeSection === "personnages" ? " active" : ""}" data-section="personnages">
-        <div class="cons-placeholder">
-          <div class="cons-placeholder-icon">🎭</div>
-          <div class="cons-placeholder-title">Personnages</div>
-          <div class="cons-placeholder-desc">
-            Définition des personnages (canonical + noms par langue + alias),<br>
-            assignation segment/cue → personnage, propagation via alignement,<br>
-            réécriture SRT avec noms de locuteurs.<br>
-            <em style="opacity:0.6">En développement — MX-021c.</em>
+        <!-- Section : Documents -->
+        <div class="cons-section-pane${_activeSection === "documents" ? " active" : ""}" data-section="documents">
+          <div class="cons-placeholder">
+            <div class="cons-placeholder-icon">📄</div>
+            <div class="cons-placeholder-title">Documents</div>
+            <div class="cons-placeholder-desc">
+              Table des épisodes avec sources et états — gestion gros corpus,<br>
+              virtualisation, filtres, accès à l'Inspecter par épisode.<br>
+              <em style="opacity:0.6">En développement — MX-021.</em>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Section : Exporter -->
-      <div class="cons-section-pane${_activeSection === "exporter" ? " active" : ""}" data-section="exporter">
-        <div class="cons-placeholder">
-          <div class="cons-placeholder-icon">📤</div>
-          <div class="cons-placeholder-title">Exporter</div>
-          <div class="cons-placeholder-desc">
-            Export corpus, alignements et SRT final avec noms de personnages.<br>
-            Formats : TXT, CSV, TSV, DOCX, JSON.<br>
-            <em style="opacity:0.6">En développement.</em>
+        <!-- Section : Actions -->
+        <div class="cons-section-pane${_activeSection === "actions" ? " active" : ""}" data-section="actions">
+
+          <!-- Hub sub-pane -->
+          <div class="cons-actions-pane${_activeActionsSubView === "hub" ? " active" : ""}" data-subview="hub">
+            <div class="acts-hub">
+              <div class="acts-hub-title">Actions pipeline</div>
+              <div class="acts-hub-desc">Choisissez une étape à appliquer sur vos épisodes.</div>
+              <div class="acts-hub-cards">
+                <button class="acts-hub-card" data-subview="curation">
+                  <div class="acts-hub-card-icon">✂️</div>
+                  <div class="acts-hub-card-title">Curation</div>
+                  <div class="acts-hub-card-desc">Normaliser les transcripts et SRT bruts.</div>
+                </button>
+                <button class="acts-hub-card" data-subview="segmentation">
+                  <div class="acts-hub-card-icon">🔤</div>
+                  <div class="acts-hub-card-title">Segmentation</div>
+                  <div class="acts-hub-card-desc">Découper en segments prêts pour l'alignement.</div>
+                </button>
+                <button class="acts-hub-card" data-subview="alignement">
+                  <div class="acts-hub-card-icon">⚡</div>
+                  <div class="acts-hub-card-title">Alignement</div>
+                  <div class="acts-hub-card-desc">Lancer ou consulter les runs d'alignement.</div>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Curation sub-pane -->
+          <div class="cons-actions-pane${_activeActionsSubView === "curation" ? " active" : ""}" data-subview="curation">
+            <div class="cons-toolbar">
+              <button class="acts-back-btn" id="cons-back-curation">← Actions</button>
+              <span class="cons-toolbar-title">Curation</span>
+              <span class="cons-toolbar-series"></span>
+              <button class="btn btn-secondary" id="cons-batch-normalize" style="font-size:11px;padding:3px 9px">⚡ Normaliser tout</button>
+              <button class="btn btn-ghost" id="cons-refresh" style="font-size:12px;padding:4px 10px">↺ Actualiser</button>
+              <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
+            </div>
+            <div class="cons-error" style="display:none"></div>
+            <div class="cons-table-wrap"></div>
+            <div class="cons-jobs">
+              <div class="cons-jobs-header" id="cons-jobs-toggle">
+                ▾ File de jobs
+                <span class="cons-jobs-count">0 total</span>
+              </div>
+              <div id="cons-jobs-body" style="display:block">
+                <div class="cons-jobs-actions">
+                  <button class="btn btn-ghost" id="cons-refresh-jobs" style="font-size:11px;padding:2px 8px">↺ Rafraîchir</button>
+                </div>
+                <div class="cons-jobs-list"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Segmentation sub-pane -->
+          <div class="cons-actions-pane${_activeActionsSubView === "segmentation" ? " active" : ""}" data-subview="segmentation">
+            <div class="cons-toolbar">
+              <button class="acts-back-btn" id="cons-back-segmentation">← Actions</button>
+              <span class="cons-toolbar-title">Segmentation</span>
+            </div>
+            <div class="cons-placeholder">
+              <div class="cons-placeholder-icon">🔤</div>
+              <div class="cons-placeholder-title">Segmentation</div>
+              <div class="cons-placeholder-desc">
+                Découper les transcripts normalisés en segments.<br>
+                <em style="opacity:0.6">En développement.</em>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alignement sub-pane -->
+          <div class="cons-actions-pane${_activeActionsSubView === "alignement" ? " active" : ""}" data-subview="alignement">
+            <div class="cons-toolbar">
+              <button class="acts-back-btn" id="cons-back-alignement">← Actions</button>
+              <span class="cons-toolbar-title">Alignement</span>
+            </div>
+            <div class="cons-placeholder">
+              <div class="cons-placeholder-icon">⚡</div>
+              <div class="cons-placeholder-title">Alignement</div>
+              <div class="cons-placeholder-desc">
+                Lancer et consulter les runs d'alignement par épisode.<br>
+                <em style="opacity:0.6">En développement.</em>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /section actions -->
+
+        <!-- Section : Personnages -->
+        <div class="cons-section-pane${_activeSection === "personnages" ? " active" : ""}" data-section="personnages">
+          <div class="cons-placeholder">
+            <div class="cons-placeholder-icon">🎭</div>
+            <div class="cons-placeholder-title">Personnages</div>
+            <div class="cons-placeholder-desc">
+              Définition des personnages (canonical + noms par langue + alias),<br>
+              assignation segment/cue → personnage, propagation via alignement,<br>
+              réécriture SRT avec noms de locuteurs.<br>
+              <em style="opacity:0.6">En développement — MX-021c.</em>
+            </div>
           </div>
         </div>
-      </div>
+
+        <!-- Section : Exporter -->
+        <div class="cons-section-pane${_activeSection === "exporter" ? " active" : ""}" data-section="exporter">
+          <div class="cons-placeholder">
+            <div class="cons-placeholder-icon">📤</div>
+            <div class="cons-placeholder-title">Exporter</div>
+            <div class="cons-placeholder-desc">
+              Export corpus, alignements et SRT final avec noms de personnages.<br>
+              Formats : TXT, CSV, TSV, DOCX, JSON.<br>
+              <em style="opacity:0.6">En développement.</em>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /cons-main -->
     </div>`;
 
-  // Section nav switching
-  container.querySelectorAll<HTMLButtonElement>(".cons-section-tab").forEach((btn) => {
+  // ── Helper: switch section ────────────────────────────────────────────────
+  function activateSection(sec: string) {
+    _activeSection = sec;
+    localStorage.setItem("cons-active-section", sec);
+    container.querySelectorAll<HTMLButtonElement>(".cons-nav-tab")
+      .forEach((b) => b.classList.toggle("active", b.dataset.section === sec));
+    container.querySelectorAll<HTMLElement>(".cons-section-pane")
+      .forEach((p) => p.classList.toggle("active", p.dataset.section === sec));
+    // Lazy-mount dynamic sections
+    const pane = container.querySelector<HTMLElement>(`.cons-section-pane[data-section="${sec}"]`)!;
+    if (sec === "documents"   && pane.querySelector(".cons-placeholder")) renderDocumentsSection(pane);
+    if (sec === "importer"    && pane.querySelector(".cons-placeholder")) renderImporterSection(pane);
+    if (sec === "personnages" && pane.querySelector(".cons-placeholder")) renderPersonnagesSection(pane);
+  }
+
+  // ── Helper: switch Actions sub-view ──────────────────────────────────────
+  function activateSubView(subview: "hub" | "curation" | "segmentation" | "alignement") {
+    _activeActionsSubView = subview;
+    localStorage.setItem("cons-active-subview", subview);
+    container.querySelectorAll<HTMLElement>(".cons-actions-pane")
+      .forEach((p) => p.classList.toggle("active", p.dataset.subview === subview));
+    container.querySelectorAll<HTMLButtonElement>(".cons-nav-tree-link")
+      .forEach((b) => b.classList.toggle("active", b.dataset.subview === subview));
+  }
+
+  // ── Sidebar nav tab clicks ────────────────────────────────────────────────
+  container.querySelectorAll<HTMLButtonElement>(".cons-nav-tab").forEach((btn) => {
+    btn.addEventListener("click", () => activateSection(btn.dataset.section!));
+  });
+
+  // ── Actions tree link clicks ──────────────────────────────────────────────
+  container.querySelectorAll<HTMLButtonElement>(".cons-nav-tree-link").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const sec = btn.dataset.section!;
-      _activeSection = sec;
-      container.querySelectorAll<HTMLButtonElement>(".cons-section-tab")
-        .forEach((b) => b.classList.toggle("active", b.dataset.section === sec));
-      container.querySelectorAll<HTMLElement>(".cons-section-pane")
-        .forEach((p) => p.classList.toggle("active", p.dataset.section === sec));
-      // Monter les sections dynamiques à la première activation
-      const pane = container.querySelector<HTMLElement>(`.cons-section-pane[data-section="${sec}"]`)!;
-      if (sec === "documents" && pane.querySelector(".cons-placeholder")) {
-        renderDocumentsSection(pane);
-      } else if (sec === "importer" && pane.querySelector(".cons-placeholder")) {
-        renderImporterSection(pane);
-      } else if (sec === "personnages" && pane.querySelector(".cons-placeholder")) {
-        renderPersonnagesSection(pane);
-      }
+      activateSection("actions");
+      activateSubView(btn.dataset.subview as "curation" | "segmentation" | "alignement");
     });
   });
 
-  // Si la section active par défaut n'est pas "actions", la monter immédiatement
-  if (_activeSection === "documents") {
-    const pane = container.querySelector<HTMLElement>(".cons-section-pane[data-section='documents']")!;
-    renderDocumentsSection(pane);
-  } else if (_activeSection === "importer") {
-    const pane = container.querySelector<HTMLElement>(".cons-section-pane[data-section='importer']")!;
-    renderImporterSection(pane);
-  } else if (_activeSection === "personnages") {
-    const pane = container.querySelector<HTMLElement>(".cons-section-pane[data-section='personnages']")!;
-    renderPersonnagesSection(pane);
+  // ── Hub CTA card clicks ───────────────────────────────────────────────────
+  container.querySelectorAll<HTMLButtonElement>(".acts-hub-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      activateSubView(card.dataset.subview as "curation" | "segmentation" | "alignement");
+    });
+  });
+
+  // ── Back buttons ──────────────────────────────────────────────────────────
+  ["curation", "segmentation", "alignement"].forEach((sv) => {
+    const btn = container.querySelector<HTMLButtonElement>(`#cons-back-${sv}`);
+    if (btn) btn.addEventListener("click", () => activateSubView("hub"));
+  });
+
+  // ── Collapse / expand ─────────────────────────────────────────────────────
+  function setNavCollapsed(collapsed: boolean) {
+    _navCollapsed = collapsed;
+    localStorage.setItem("cons-nav-collapsed", collapsed ? "1" : "0");
+    const shell = container.querySelector<HTMLElement>("#cons-shell")!;
+    shell.classList.toggle("nav-hidden", collapsed);
   }
 
-  // Refresh episodes button
+  container.querySelector<HTMLButtonElement>("#cons-nav-collapse")!
+    .addEventListener("click", () => setNavCollapsed(true));
+  container.querySelector<HTMLButtonElement>("#cons-rail-expand")!
+    .addEventListener("click", () => setNavCollapsed(false));
+
+  // ── Lazy-mount on initial load ────────────────────────────────────────────
+  {
+    const pane = container.querySelector<HTMLElement>(`.cons-section-pane[data-section="${_activeSection}"]`);
+    if (pane?.querySelector(".cons-placeholder")) {
+      if (_activeSection === "documents")   renderDocumentsSection(pane);
+      if (_activeSection === "importer")    renderImporterSection(pane);
+      if (_activeSection === "personnages") renderPersonnagesSection(pane);
+    }
+  }
+
+  // ── Refresh episodes button ───────────────────────────────────────────────
   container
     .querySelector<HTMLButtonElement>("#cons-refresh")!
     .addEventListener("click", () => loadAndRender(container));
 
-  // Batch normalize button — épisodes chargés au clic
+  // ── Batch normalize button ────────────────────────────────────────────────
   container
     .querySelector<HTMLButtonElement>("#cons-batch-normalize")!
     .addEventListener("click", async () => {
@@ -1431,7 +1734,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       }
     });
 
-  // Jobs toggle
+  // ── Jobs toggle ───────────────────────────────────────────────────────────
   container
     .querySelector<HTMLElement>("#cons-jobs-toggle")!
     .addEventListener("click", () => {
@@ -1440,7 +1743,6 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       const hdr  = container.querySelector<HTMLElement>("#cons-jobs-toggle");
       if (body) body.style.display = _jobsExpanded ? "block" : "none";
       if (hdr) hdr.textContent = (_jobsExpanded ? "▾" : "▸") + " File de jobs";
-      // Recréer le compteur (effacé par textContent)
       if (hdr) {
         const span = document.createElement("span");
         span.className = "cons-jobs-count";
@@ -1449,18 +1751,18 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       }
     });
 
-  // Refresh jobs button
+  // ── Refresh jobs button ───────────────────────────────────────────────────
   container
     .querySelector<HTMLButtonElement>("#cons-refresh-jobs")!
     .addEventListener("click", () => refreshJobs(container));
 
-  // Backend status dot
+  // ── Backend status dot ────────────────────────────────────────────────────
   const dotEl = container.querySelector<HTMLElement>("#cons-api-dot")!;
   _unsubscribe = ctx.onStatusChange((s) => {
     dotEl.className = "cons-api-dot " + (s.online ? "online" : "offline");
   });
 
-  // Initial load
+  // ── Initial load ──────────────────────────────────────────────────────────
   if (ctx.getBackendStatus().online) {
     loadAndRender(container);
     refreshJobs(container).then(() => startJobPoll(container));
