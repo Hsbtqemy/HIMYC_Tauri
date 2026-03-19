@@ -414,6 +414,28 @@ const CSS = `
 .cons-job-label { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cons-job-ep    { font-family: ui-monospace, monospace; font-size: 0.72rem; color: var(--text-muted); }
 .cons-job-err   { color: var(--danger); font-size: 0.72rem; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; max-width: 180px; white-space: nowrap; }
+.cons-job-progress-wrap {
+  flex: 1;
+  max-width: 120px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.cons-job-progress-bar {
+  height: 100%;
+  background: var(--brand, #0f766e);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.cons-job-progress-label {
+  font-family: ui-monospace, monospace;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .cons-jobs-actions { display: flex; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--border); }
 .cons-jobs-empty { padding: 10px 16px; color: var(--text-muted); font-size: 0.77rem; font-style: italic; }
 
@@ -1730,11 +1752,32 @@ function renderJobsPanel(container: HTMLElement, jobs: JobRecord[]) {
         j.status === "pending"
           ? `<button class="btn btn-ghost btn-sm" data-cancel="${escapeHtml(j.job_id)}">✕</button>`
           : "";
+
+      // Barre de progression pour les jobs align en cours (G-007 / MX-048)
+      let progressHtml = "";
+      if (j.status === "running" && j.job_type === "align") {
+        const prog = j.result._progress as { progress_pct?: number; segments_done?: number; segments_total?: number } | undefined;
+        if (prog && prog.progress_pct != null) {
+          const pct  = Math.min(100, Math.max(0, prog.progress_pct));
+          const info = prog.segments_total
+            ? `${prog.segments_done ?? 0} / ${prog.segments_total} seg.`
+            : `${pct}%`;
+          progressHtml = `
+            <div class="cons-job-progress-wrap" title="${info}">
+              <div class="cons-job-progress-bar" style="width:${pct}%"></div>
+            </div>
+            <span class="cons-job-progress-label">${escapeHtml(info)}</span>`;
+        } else {
+          progressHtml = `<span class="cons-job-progress-label" style="font-style:italic;color:var(--text-muted)">En cours…</span>`;
+        }
+      }
+
       return `
         <div class="cons-job-row">
           <span class="cons-job-status ${escapeHtml(j.status)}"></span>
           <span class="cons-job-label">${label}</span>
           <span class="cons-job-ep">${ep}${sk}</span>
+          ${progressHtml}
           ${err}
           ${cancelBtn}
         </div>`;
