@@ -18,7 +18,7 @@
 
 import type { ShellContext } from "../context";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
-import { apiPost, ApiError } from "../api";
+import { apiPost, apiGet, ApiError } from "../api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1366,7 +1366,8 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
         </div>
         <div class="kwic-filter-group">
           <span class="kwic-filter-label">Épisode</span>
-          <input class="kwic-filter-input" id="kwic-episode-id" placeholder="S01E01…">
+          <input class="kwic-filter-input" id="kwic-episode-id" placeholder="S01E01…" list="kwic-ep-datalist" autocomplete="off">
+          <datalist id="kwic-ep-datalist"></datalist>
         </div>
         <div class="kwic-filter-group">
           <span class="kwic-filter-label">Locuteur</span>
@@ -1537,10 +1538,26 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   });
 
   // ── Filter drawer ───────────────────────────────────────────────────────────
+  let _episodesLoaded = false;
+
+  async function _populateEpDatalist() {
+    if (_episodesLoaded) return;
+    try {
+      const data = await apiGet<{ episodes: { episode_id: string; title: string }[] }>("/episodes");
+      const dl = container.querySelector<HTMLDataListElement>("#kwic-ep-datalist");
+      if (!dl) return;
+      dl.innerHTML = data.episodes
+        .map((ep) => `<option value="${escapeHtml(ep.episode_id)}" label="${escapeHtml(ep.title)}">`)
+        .join("");
+      _episodesLoaded = true;
+    } catch { /* silently ignore — user can still type manually */ }
+  }
+
   filterBtn.addEventListener("click", () => {
     _filterOpen = !_filterOpen;
     filterDrawer.classList.toggle("hidden", !_filterOpen);
     filterBtn.classList.toggle("active", _filterOpen);
+    if (_filterOpen) _populateEpDatalist();
   });
   container.querySelector<HTMLButtonElement>("#kwic-clear-filters")?.addEventListener("click", () => {
     (container.querySelector<HTMLSelectElement>("#kwic-kind")!).value = "";
