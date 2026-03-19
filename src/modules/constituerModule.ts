@@ -4058,6 +4058,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             <div class="cons-toolbar">
               <button class="acts-back-btn" id="cons-back-alignement">← Actions</button>
               <span class="cons-toolbar-title">Alignement</span>
+              <button class="btn btn-secondary btn-sm" id="cons-batch-align">⚡ Aligner tout</button>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-align">↺ Actualiser</button>
             </div>
             <!-- Params panel -->
@@ -4287,6 +4288,34 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   // ── Alignement pane wiring ─────────────────────────────────────────────────
   container.querySelector<HTMLButtonElement>("#cons-refresh-align")
     ?.addEventListener("click", () => loadAndRenderAlignement(container));
+
+  container.querySelector<HTMLButtonElement>("#cons-batch-align")
+    ?.addEventListener("click", async () => {
+      const episodes = _cachedEpisodes?.episodes ?? [];
+      const segKind = (container.querySelector<HTMLSelectElement>("#align-segment-kind-pre")?.value ?? "utterance") as "utterance" | "sentence";
+      const toAlign = episodes.filter((ep) => {
+        const t = ep.sources.find((s) => s.source_key === "transcript");
+        const srts = ep.sources.filter((s) => s.source_key.startsWith("srt_") && s.available);
+        return t?.state === "segmented" && srts.length > 0;
+      });
+      if (toAlign.length === 0) return;
+      const btn = container.querySelector<HTMLButtonElement>("#cons-batch-align")!;
+      btn.disabled = true; btn.textContent = "…";
+      for (const ep of toAlign) {
+        const srts = ep.sources.filter((s) => s.source_key.startsWith("srt_") && s.available).map((s) => s.source_key);
+        try {
+          await createJob("align", ep.episode_id, "", {
+            pivot_key: "transcript",
+            target_keys: srts,
+            mode: "transcript_first",
+            segment_kind: segKind,
+          });
+        } catch { /* skip */ }
+      }
+      btn.disabled = false; btn.textContent = "⚡ Aligner tout";
+      startJobPoll(container);
+      await loadAndRenderAlignement(container);
+    });
 
   // ── Collapse / expand ─────────────────────────────────────────────────────
   function setNavCollapsed(collapsed: boolean) {

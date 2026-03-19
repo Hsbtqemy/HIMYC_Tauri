@@ -7,7 +7,7 @@
 
 import type { ShellContext } from "../context";
 import { injectGlobalCss } from "../ui/dom";
-import { fetchConfig } from "../api";
+import { fetchConfig, fetchQaReport, fetchCharacters } from "../api";
 
 const CSS = `
 .hub-root {
@@ -134,6 +134,39 @@ const CSS = `
   flex-shrink: 0;
 }
 .hub-onboard-btn:hover { background: #15803d; }
+/* KPI strip */
+.hub-kpi-strip {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 520px;
+  width: 100%;
+}
+.hub-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  min-width: 72px;
+}
+.hub-kpi-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  line-height: 1.2;
+}
+.hub-kpi-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 1px; }
+.hub-gate-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; vertical-align: middle;
+}
+.hub-gate-dot.ok       { background: #34d399; }
+.hub-gate-dot.warnings { background: #fbbf24; }
+.hub-gate-dot.blocking { background: #f87171; }
 `;
 
 let _styleInjected = false;
@@ -180,6 +213,14 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
         <div class="hub-project-name" id="hub-project-name"></div>
       </div>
       <div id="hub-onboard-zone"></div>
+      <div class="hub-kpi-strip" id="hub-kpi-strip" style="display:none">
+        <div class="hub-kpi"><span class="hub-kpi-val" id="hkpi-ep">—</span><span class="hub-kpi-label">Épisodes</span></div>
+        <div class="hub-kpi"><span class="hub-kpi-val" id="hkpi-seg">—</span><span class="hub-kpi-label">Segmentés</span></div>
+        <div class="hub-kpi"><span class="hub-kpi-val" id="hkpi-srt">—</span><span class="hub-kpi-label">Avec SRT</span></div>
+        <div class="hub-kpi"><span class="hub-kpi-val" id="hkpi-run">—</span><span class="hub-kpi-label">Alignements</span></div>
+        <div class="hub-kpi"><span class="hub-kpi-val" id="hkpi-chr">—</span><span class="hub-kpi-label">Personnages</span></div>
+        <div class="hub-kpi"><span class="hub-kpi-val" id="hkpi-gate">—</span><span class="hub-kpi-label">QA</span></div>
+      </div>
       <div class="hub-tiles">
         ${TILES.map((t) => `
           <div class="hub-tile" data-mode="${t.mode}">
@@ -228,6 +269,37 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
         onboardZone.innerHTML = "";
       }
     }).catch(() => { /* backend down — ignore */ });
+
+    loadHubKpis(container);
+  }
+
+  function loadHubKpis(root: HTMLElement) {
+    const strip = root.querySelector<HTMLElement>("#hub-kpi-strip");
+    if (!strip) return;
+
+    const set = (id: string, val: string | number) => {
+      const el = root.querySelector<HTMLElement>(`#${id}`);
+      if (el) el.textContent = String(val);
+    };
+
+    Promise.all([fetchQaReport("lenient"), fetchCharacters()])
+      .then(([qa, chars]) => {
+        set("hkpi-ep",  qa.total_episodes);
+        set("hkpi-seg", qa.n_segmented);
+        set("hkpi-srt", qa.n_with_srts);
+        set("hkpi-run", qa.n_alignment_runs);
+        set("hkpi-chr", chars.characters.length);
+
+        const gateEl = root.querySelector<HTMLElement>("#hkpi-gate");
+        if (gateEl) {
+          const dotClass = qa.gate === "ok" ? "ok" : qa.gate === "warnings" ? "warnings" : "blocking";
+          const label = qa.gate === "ok" ? "OK" : qa.gate === "warnings" ? "⚠" : "🔴";
+          gateEl.innerHTML = `<span class="hub-gate-dot ${dotClass}"></span>${label}`;
+        }
+
+        strip.style.display = "flex";
+      })
+      .catch(() => { /* KPIs non critiques */ });
   }
 
   if (status.online) loadProjectInfo();
