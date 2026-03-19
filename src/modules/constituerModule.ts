@@ -23,6 +23,7 @@ import {
   saveCharacters,
   fetchAssignments,
   saveAssignments,
+  autoAssignCharacters,
   discoverTvmaze,
   discoverSubslikescript,
   fetchSubslikescriptTranscript,
@@ -43,6 +44,7 @@ import {
   type AlignCollision,
   type ConcordanceRow,
   type SegmentRow,
+  type AutoAssignResult,
   type ConfigUpdate,
   type Episode,
   type EpisodeSource,
@@ -3370,9 +3372,11 @@ function renderPersonnagesSection(pane: HTMLElement) {
     <div class="pers-toolbar">
       <span class="pers-toolbar-title">Personnages</span>
       <button class="btn btn-primary" id="pers-add-btn" style="font-size:0.8rem">+ Nouveau</button>
+      <button class="btn btn-secondary btn-sm" id="pers-auto-btn" title="Assigner automatiquement les locuteurs aux personnages par correspondance d'alias">⚡ Auto-assigner</button>
       <button class="btn btn-ghost btn-sm" id="pers-refresh">↺</button>
     </div>
     <div class="cons-error" id="pers-error" style="display:none;margin:0 16px 0"></div>
+    <div id="pers-auto-result" style="display:none;margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)"></div>
     <div class="pers-body">
       <div class="pers-list">
         <div class="pers-list-header">
@@ -3393,6 +3397,54 @@ function renderPersonnagesSection(pane: HTMLElement) {
 
   pane.querySelector<HTMLButtonElement>("#pers-refresh")!
     .addEventListener("click", () => loadPersonnages(pane));
+
+  pane.querySelector<HTMLButtonElement>("#pers-auto-btn")!
+    .addEventListener("click", async () => {
+      const btn = pane.querySelector<HTMLButtonElement>("#pers-auto-btn")!;
+      const resultEl = pane.querySelector<HTMLElement>("#pers-auto-result")!;
+      btn.disabled = true;
+      btn.textContent = "…";
+      resultEl.style.display = "none";
+
+      // Dry-run first to show a preview
+      try {
+        const preview: AutoAssignResult = await autoAssignCharacters(true);
+        if (preview.created === 0 && preview.unmatched_labels.length === 0) {
+          resultEl.textContent = "✓ Toutes les assignations sont déjà à jour.";
+          resultEl.style.cssText = "display:block;background:#f0fdf4;color:#166534;margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)";
+          btn.disabled = false; btn.textContent = "⚡ Auto-assigner";
+          return;
+        }
+        let msg = preview.created > 0
+          ? `${preview.created} nouvelle${preview.created > 1 ? "s" : ""} assignation${preview.created > 1 ? "s" : ""} détectée${preview.created > 1 ? "s" : ""}.`
+          : "Aucune nouvelle assignation à créer.";
+        if (preview.unmatched_labels.length > 0) {
+          const sample = preview.unmatched_labels.slice(0, 5).join(", ");
+          const more = preview.unmatched_labels.length > 5 ? ` +${preview.unmatched_labels.length - 5} autres` : "";
+          msg += ` Locuteurs non reconnus : ${sample}${more}.`;
+        }
+        if (preview.created === 0) {
+          resultEl.textContent = msg;
+          resultEl.style.cssText = "display:block;background:var(--surface2);color:var(--text-muted);margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)";
+          btn.disabled = false; btn.textContent = "⚡ Auto-assigner";
+          return;
+        }
+        if (!confirm(`${msg}\n\nConfirmer la création de ${preview.created} assignation${preview.created > 1 ? "s" : ""} ?`)) {
+          btn.disabled = false; btn.textContent = "⚡ Auto-assigner";
+          return;
+        }
+        // Apply
+        const result: AutoAssignResult = await autoAssignCharacters(false);
+        resultEl.textContent = `✓ ${result.created} assignation${result.created > 1 ? "s" : ""} créée${result.created > 1 ? "s" : ""} (total : ${result.total_after}).`;
+        resultEl.style.cssText = "display:block;background:#f0fdf4;color:#166534;margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)";
+        await loadPersonnages(pane);
+      } catch (e) {
+        resultEl.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+        resultEl.style.cssText = "display:block;background:#fef2f2;color:#7f1d1d;margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)";
+      } finally {
+        btn.disabled = false; btn.textContent = "⚡ Auto-assigner";
+      }
+    });
 
   pane.querySelector<HTMLButtonElement>("#pers-add-btn")!
     .addEventListener("click", () => {

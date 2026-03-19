@@ -595,6 +595,19 @@ export async function fetchQaReport(policy: "lenient" | "strict" = "lenient"): P
   return apiGet<QaReport>(`/export/qa?policy=${policy}`);
 }
 
+// ── /assignments/auto (MX-032) ───────────────────────────────────────────────
+
+export interface AutoAssignResult {
+  created: number;
+  total_after: number;
+  unmatched_labels: string[];
+  dry_run: boolean;
+}
+
+export async function autoAssignCharacters(dryRun = false): Promise<AutoAssignResult> {
+  return apiPost<AutoAssignResult>(`/assignments/auto${dryRun ? "?dry_run=true" : ""}`, {});
+}
+
 // ── /episodes/{id}/propagate_characters (MX-031) ─────────────────────────────
 
 export interface PropagateResult {
