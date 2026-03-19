@@ -1,59 +1,71 @@
 /**
- * shell.ts — HIMYC Shell V0.1
+ * shell.ts — HIMYC Shell V0.2 (MX-020)
  *
- * Shell Tauri HIMYC inspire de AGRAFES tauri-shell.
- *
- * - Header fixe 44px : brand + onglets (Constituer / Inspecter / Aligner) + statut API
- * - Couleurs d accent par mode (body[data-mode="..."])
- * - Lifecycle modules : mount / dispose par onglet actif
- * - Persistence localStorage : last_mode
- * - Healthcheck backend au demarrage + polling toutes les 30s
- * - Toast notification
- *
- * Layout (index.html) :
- *   #shell-header  fixe 44px
- *   #app           padding-top:44px — point de montage des modules
+ * Navigation restructurée AGRAFES x HIMYC :
+ * - Hub (landing) → Concordancier · Constituer · Exporter
+ * - Inspecter / Aligner = sous-vues (pas d'onglet top-level)
+ * - Header : brand + [Concordancier | Constituer | Exporter] + [← Retour] (si sous-vue) + statut API
+ * - Couleurs d'accent par mode
+ * - Lifecycle modules : mount / dispose
+ * - Persistence localStorage : last_mode (hors hub)
+ * - Healthcheck + polling 30s
  */
 
 import type { ShellContext, BackendStatus, AlignerHandoff } from "./context.ts";
 import { fetchHealth, API_BASE } from "./api.ts";
-import { mountConstituer, disposeConstituer } from "./modules/constituerModule.ts";
-import { mountInspecter, disposeInspecter } from "./modules/inspecterModule.ts";
-import { mountAligner, disposeAligner } from "./modules/alignerModule.ts";
+import { mountHub,           disposeHub }           from "./modules/hubModule.ts";
+import { mountConcordancier, disposeConcordancier } from "./modules/concordancierModule.ts";
+import { mountConstituer,    disposeConstituer }    from "./modules/constituerModule.ts";
+import { mountExporter,      disposeExporter }      from "./modules/exporterModule.ts";
+import { mountInspecter,     disposeInspecter }     from "./modules/inspecterModule.ts";
+import { mountAligner,       disposeAligner }       from "./modules/alignerModule.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Mode = "constituer" | "inspecter" | "aligner";
+/** Modes top-level affichés dans la nav */
+type NavMode = "concordancier" | "constituer" | "exporter";
+/** Tous les modes possibles (hub + nav + sous-vues) */
+type Mode = "hub" | NavMode | "inspecter" | "aligner";
 
 interface ModeConfig {
-  label: string;
-  badge: string;
-  mount: (el: HTMLElement, ctx: ShellContext) => void;
+  mount:   (el: HTMLElement, ctx: ShellContext) => void;
   dispose: () => void;
 }
 
-const MODES: Record<Mode, ModeConfig> = {
-  constituer: {
-    label: "Constituer",
-    badge: "corpus",
-    mount: mountConstituer,
-    dispose: disposeConstituer,
-  },
-  inspecter: {
-    label: "Inspecter",
-    badge: "source",
-    mount: mountInspecter,
-    dispose: disposeInspecter,
-  },
-  aligner: {
-    label: "Aligner",
-    badge: "alignement",
-    mount: mountAligner,
-    dispose: disposeAligner,
-  },
+const MODE_CONFIGS: Record<Mode, ModeConfig> = {
+  hub:           { mount: mountHub,           dispose: disposeHub },
+  concordancier: { mount: mountConcordancier, dispose: disposeConcordancier },
+  constituer:    { mount: mountConstituer,    dispose: disposeConstituer },
+  exporter:      { mount: mountExporter,      dispose: disposeExporter },
+  inspecter:     { mount: mountInspecter,     dispose: disposeInspecter },
+  aligner:       { mount: mountAligner,       dispose: disposeAligner },
 };
 
-const DEFAULT_MODE: Mode = "constituer";
+const NAV_MODES: Array<{ mode: NavMode; label: string; badge: string }> = [
+  { mode: "concordancier", label: "Concordancier", badge: "KWIC" },
+  { mode: "constituer",    label: "Constituer",    badge: "corpus" },
+  { mode: "exporter",      label: "Exporter",      badge: "export" },
+];
+
+// Modes de sous-vue : pas d'onglet, retour vers constituer
+const SUB_VIEWS = new Set<Mode>(["inspecter", "aligner"]);
+// Accent couleur par mode
+const MODE_ACCENT: Partial<Record<Mode, string>> = {
+  hub:           "#1a1a2e",
+  concordancier: "#2c5f9e",
+  constituer:    "#1a7f4e",
+  exporter:      "#b45309",
+  inspecter:     "#2c5f9e",
+  aligner:       "#7c3aed",
+};
+const MODE_ACCENT_HEADER: Partial<Record<Mode, string>> = {
+  hub:           "#1a1a2e",
+  concordancier: "#1e4a80",
+  constituer:    "#145a38",
+  exporter:      "#92400e",
+  inspecter:     "#1e4a80",
+  aligner:       "#4c1d95",
+};
 
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 
@@ -61,18 +73,6 @@ const SHELL_CSS = `
   :root {
     --accent:            #2c5f9e;
     --accent-header-bg:  #1a1a2e;
-  }
-  body[data-mode="constituer"] {
-    --accent:            #1a7f4e;
-    --accent-header-bg:  #145a38;
-  }
-  body[data-mode="inspecter"] {
-    --accent:            #2c5f9e;
-    --accent-header-bg:  #1e4a80;
-  }
-  body[data-mode="aligner"] {
-    --accent:            #7c3aed;
-    --accent-header-bg:  #4c1d95;
   }
 
   #shell-header {
@@ -136,6 +136,38 @@ const SHELL_CSS = `
     opacity: 0.5;
   }
 
+  /* Bouton retour (sous-vues) */
+  .shell-back-btn {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.75);
+    font-size: 0.8rem;
+    padding: 0 0.9rem;
+    height: 44px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    transition: color 0.15s;
+    border-right: 1px solid rgba(255,255,255,0.12);
+    margin-right: 0.25rem;
+  }
+  .shell-back-btn:hover { color: #fff; }
+
+  /* Breadcrumb sous-vue */
+  .shell-breadcrumb {
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.5);
+    padding: 0 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+  .shell-breadcrumb-current {
+    color: rgba(255,255,255,0.9);
+    font-weight: 600;
+  }
+
   /* Statut API (droite du header) */
   .shell-api-zone {
     margin-left: auto;
@@ -192,17 +224,17 @@ const SHELL_CSS = `
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-let _currentMode: Mode = DEFAULT_MODE;
+let _currentMode: Mode = "hub";
+let _prevNavMode: NavMode = "constituer"; // mode nav à restaurer au retour d'une sous-vue
 let _backendStatus: BackendStatus = { online: false };
 const _statusListeners: Array<(s: BackendStatus) => void> = [];
 let _pollInterval: ReturnType<typeof setInterval> | null = null;
-/** Données de handoff Inspecter → Aligner (MX-009). Effacées après lecture. */
 let _handoff: AlignerHandoff | null = null;
 
 // ─── ShellContext ─────────────────────────────────────────────────────────────
 
 const shellContext: ShellContext = {
-  getApiBase: () => API_BASE,
+  getApiBase:       () => API_BASE,
   getBackendStatus: () => ({ ..._backendStatus }),
   onStatusChange(cb) {
     _statusListeners.push(cb);
@@ -211,17 +243,9 @@ const shellContext: ShellContext = {
       if (i !== -1) _statusListeners.splice(i, 1);
     };
   },
-  navigateTo(mode) {
-    _navigateTo(mode as Mode);
-  },
-  setHandoff(data) {
-    _handoff = data;
-  },
-  getHandoff() {
-    const h = _handoff;
-    _handoff = null; // consommé une seule fois
-    return h;
-  },
+  navigateTo(mode) { _navigateTo(mode as Mode); },
+  setHandoff(data)  { _handoff = data; },
+  getHandoff()      { const h = _handoff; _handoff = null; return h; },
 };
 
 function _setBackendStatus(status: BackendStatus) {
@@ -244,27 +268,80 @@ let _toastTimer: ReturnType<typeof setTimeout> | null = null;
 function _navigateTo(mode: Mode) {
   if (mode === _currentMode && _appEl.childElementCount > 0) return;
 
-  // Dispose module precedent
-  MODES[_currentMode].dispose();
+  MODE_CONFIGS[_currentMode].dispose();
+
+  // Mémoriser le mode nav précédent avant d'entrer en sous-vue
+  if (!SUB_VIEWS.has(mode) && mode !== "hub") {
+    _prevNavMode = mode as NavMode;
+  }
 
   _currentMode = mode;
-  localStorage.setItem("himyc_last_mode", mode);
-  document.body.dataset.mode = mode;
+  if (mode !== "hub") {
+    // Ne pas sauvegarder "hub" — on y revient rarement via localStorage
+    localStorage.setItem("himyc_last_mode", mode);
+  }
 
-  // Mettre a jour les onglets
-  _headerEl.querySelectorAll<HTMLButtonElement>(".shell-tab").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.mode === mode);
-  });
+  // Accent couleur
+  const accent       = MODE_ACCENT[mode]       ?? "#2c5f9e";
+  const accentHeader = MODE_ACCENT_HEADER[mode] ?? "#1a1a2e";
+  document.documentElement.style.setProperty("--accent",           accent);
+  document.documentElement.style.setProperty("--accent-header-bg", accentHeader);
+  if (_headerEl) _headerEl.style.background = accentHeader;
 
-  // Vider et monter le nouveau module
+  _rebuildNav();
   _appEl.innerHTML = "";
-  MODES[mode].mount(_appEl, shellContext);
+  MODE_CONFIGS[mode].mount(_appEl, shellContext);
 }
 
 // ─── Header ───────────────────────────────────────────────────────────────────
 
+function _rebuildNav() {
+  // Vider la zone nav (entre brand et api-zone)
+  const brand   = _headerEl.querySelector<HTMLElement>(".shell-brand")!;
+  const apiZone = _headerEl.querySelector<HTMLElement>(".shell-api-zone")!;
+
+  // Supprimer les éléments de nav existants
+  Array.from(_headerEl.children).forEach((child) => {
+    if (child !== brand && child !== apiZone) child.remove();
+  });
+
+  if (_currentMode === "hub") {
+    // Hub : pas de tabs, juste brand + api
+    return;
+  }
+
+  if (SUB_VIEWS.has(_currentMode)) {
+    // Sous-vue (inspecter / aligner) : bouton retour + breadcrumb
+    const backBtn = document.createElement("button");
+    backBtn.className = "shell-back-btn";
+    backBtn.innerHTML = "← Retour";
+    backBtn.addEventListener("click", () => _navigateTo(_prevNavMode));
+    _headerEl.insertBefore(backBtn, apiZone);
+
+    const breadcrumb = document.createElement("div");
+    breadcrumb.className = "shell-breadcrumb";
+    const modeLabel = _currentMode === "inspecter" ? "Inspecter" : "Aligner";
+    const parentLabel = _prevNavMode.charAt(0).toUpperCase() + _prevNavMode.slice(1);
+    breadcrumb.innerHTML = `${parentLabel} <span style="opacity:0.4">›</span> <span class="shell-breadcrumb-current">${modeLabel}</span>`;
+    _headerEl.insertBefore(breadcrumb, apiZone);
+    return;
+  }
+
+  // Modes nav normaux (concordancier / constituer / exporter)
+  const tabs = document.createElement("div");
+  tabs.className = "shell-tabs";
+  NAV_MODES.forEach(({ mode, label, badge }) => {
+    const btn = document.createElement("button");
+    btn.className = "shell-tab" + (mode === _currentMode ? " active" : "");
+    btn.dataset.mode = mode;
+    btn.innerHTML = `${label} <span class="shell-tab-badge">${badge}</span>`;
+    btn.addEventListener("click", () => _navigateTo(mode));
+    tabs.appendChild(btn);
+  });
+  _headerEl.insertBefore(tabs, apiZone);
+}
+
 function _buildHeader() {
-  // CSS
   const style = document.createElement("style");
   style.textContent = SHELL_CSS;
   document.head.appendChild(style);
@@ -275,20 +352,7 @@ function _buildHeader() {
   brand.textContent = "HIMYC";
   _headerEl.appendChild(brand);
 
-  // Onglets
-  const tabs = document.createElement("div");
-  tabs.className = "shell-tabs";
-  (Object.entries(MODES) as [Mode, ModeConfig][]).forEach(([key, cfg]) => {
-    const btn = document.createElement("button");
-    btn.className = "shell-tab" + (key === _currentMode ? " active" : "");
-    btn.dataset.mode = key;
-    btn.innerHTML = `${cfg.label} <span class="shell-tab-badge">${cfg.badge}</span>`;
-    btn.addEventListener("click", () => _navigateTo(key));
-    tabs.appendChild(btn);
-  });
-  _headerEl.appendChild(tabs);
-
-  // Zone statut API
+  // Zone statut API (toujours à droite)
   const apiZone = document.createElement("div");
   apiZone.className = "shell-api-zone";
   _apiDot = document.createElement("div");
@@ -304,6 +368,9 @@ function _buildHeader() {
   _toastEl = document.createElement("div");
   _toastEl.className = "shell-toast";
   document.body.appendChild(_toastEl);
+
+  // Nav initiale
+  _rebuildNav();
 }
 
 function _updateApiDot() {
@@ -330,11 +397,11 @@ async function _checkHealth() {
     const h = await fetchHealth();
     const wasOnline = _backendStatus.online;
     _setBackendStatus({ online: true, version: h.version });
-    if (!wasOnline) _toast("Backend HIMYC connecte");
+    if (!wasOnline) _toast("Backend HIMYC connecté");
   } catch {
     const wasOnline = _backendStatus.online;
     _setBackendStatus({ online: false });
-    if (wasOnline) _toast("Backend HIMYC deconnecte");
+    if (wasOnline) _toast("Backend HIMYC déconnecté");
   }
 }
 
@@ -342,20 +409,18 @@ async function _checkHealth() {
 
 export async function initShell() {
   _headerEl = document.getElementById("shell-header")!;
-  _appEl = document.getElementById("app")!;
+  _appEl    = document.getElementById("app")!;
 
-  // Restaurer le dernier mode
+  // Restaurer le dernier mode (hors hub et hors sous-vues)
   const saved = localStorage.getItem("himyc_last_mode");
-  if (saved && saved in MODES) _currentMode = saved as Mode;
-
-  document.body.dataset.mode = _currentMode;
+  if (saved && saved in MODE_CONFIGS && saved !== "hub" && !SUB_VIEWS.has(saved as Mode)) {
+    _currentMode = saved as Mode;
+    _prevNavMode = saved as NavMode;
+  }
 
   _buildHeader();
+  MODE_CONFIGS[_currentMode].mount(_appEl, shellContext);
 
-  // Monter le module initial
-  MODES[_currentMode].mount(_appEl, shellContext);
-
-  // Healthcheck initial + polling 30s
   await _checkHealth();
   _pollInterval = setInterval(_checkHealth, 30_000);
 }

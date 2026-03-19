@@ -38,6 +38,59 @@ import { measureAsync } from "../perf";
 // ── CSS module ─────────────────────────────────────────────────────────────
 
 const CSS = `
+/* ── Section nav ───────────────────────────────────────────── */
+.cons-section-nav {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+.cons-section-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0 1.1rem;
+  height: 36px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.13s, border-color 0.13s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.cons-section-tab:hover { color: var(--text); }
+.cons-section-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+.cons-section-tab .cons-tab-badge {
+  font-size: 0.68rem;
+  opacity: 0.55;
+}
+.cons-section-pane { display: none; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
+.cons-section-pane.active { display: flex; }
+
+.cons-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 0.75rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2rem;
+}
+.cons-placeholder-icon { font-size: 2rem; }
+.cons-placeholder-title { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+.cons-placeholder-desc { font-size: 0.8rem; line-height: 1.5; max-width: 320px; }
+
 /* ── Jobs panel ────────────────────────────────────────────── */
 .cons-jobs {
   border-top: 1px solid var(--border);
@@ -221,6 +274,7 @@ let _unsubscribe: (() => void) | null = null;
 let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _jobsExpanded = true;
+let _activeSection = "actions";
 let _page = 0;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -610,30 +664,114 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
   _container = container;
 
+  const sections: Array<{ id: string; label: string; badge: string }> = [
+    { id: "importer",    label: "Importer",    badge: "sources" },
+    { id: "documents",   label: "Documents",   badge: "épisodes" },
+    { id: "actions",     label: "Actions",     badge: "pipeline" },
+    { id: "personnages", label: "Personnages", badge: "locuteurs" },
+    { id: "exporter",    label: "Exporter",    badge: "formats" },
+  ];
+
   container.innerHTML = `
     <div class="cons-root">
-      <div class="cons-toolbar">
-        <span class="cons-toolbar-title">Constituer</span>
-        <span class="cons-toolbar-series"></span>
-        <button class="btn btn-secondary" id="cons-batch-normalize" style="font-size:11px;padding:3px 9px">⚡ Normaliser tout</button>
-        <button class="btn btn-ghost" id="cons-refresh" style="font-size:12px;padding:4px 10px">↺ Actualiser</button>
-        <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
-      </div>
-      <div class="cons-error" style="display:none"></div>
-      <div class="cons-table-wrap"></div>
-      <div class="cons-jobs">
-        <div class="cons-jobs-header" id="cons-jobs-toggle">
-          ▾ File de jobs
-          <span class="cons-jobs-count">0 total</span>
-        </div>
-        <div id="cons-jobs-body" style="display:block">
-          <div class="cons-jobs-actions">
-            <button class="btn btn-ghost" id="cons-refresh-jobs" style="font-size:11px;padding:2px 8px">↺ Rafraîchir</button>
+      <nav class="cons-section-nav">
+        ${sections.map((s) => `
+          <button class="cons-section-tab${s.id === _activeSection ? " active" : ""}" data-section="${s.id}">
+            ${s.label}
+            <span class="cons-tab-badge">${s.badge}</span>
+          </button>`).join("")}
+      </nav>
+
+      <!-- Section : Importer -->
+      <div class="cons-section-pane${_activeSection === "importer" ? " active" : ""}" data-section="importer">
+        <div class="cons-placeholder">
+          <div class="cons-placeholder-icon">📥</div>
+          <div class="cons-placeholder-title">Importer</div>
+          <div class="cons-placeholder-desc">
+            Configuration projet (série, source, profil, langues) +<br>
+            import depuis subslikescript · TVMaze · OpenSubtitles · fichiers locaux.<br>
+            <em style="opacity:0.6">En développement — MX-021.</em>
           </div>
-          <div class="cons-jobs-list"></div>
+        </div>
+      </div>
+
+      <!-- Section : Documents -->
+      <div class="cons-section-pane${_activeSection === "documents" ? " active" : ""}" data-section="documents">
+        <div class="cons-placeholder">
+          <div class="cons-placeholder-icon">📄</div>
+          <div class="cons-placeholder-title">Documents</div>
+          <div class="cons-placeholder-desc">
+            Table des épisodes avec sources et états — gestion gros corpus,<br>
+            virtualisation, filtres, accès à l'Inspecter par épisode.<br>
+            <em style="opacity:0.6">En développement — MX-021.</em>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section : Actions (contenu pipeline actuel) -->
+      <div class="cons-section-pane${_activeSection === "actions" ? " active" : ""}" data-section="actions">
+        <div class="cons-toolbar">
+          <span class="cons-toolbar-title">Actions</span>
+          <span class="cons-toolbar-series"></span>
+          <button class="btn btn-secondary" id="cons-batch-normalize" style="font-size:11px;padding:3px 9px">⚡ Normaliser tout</button>
+          <button class="btn btn-ghost" id="cons-refresh" style="font-size:12px;padding:4px 10px">↺ Actualiser</button>
+          <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
+        </div>
+        <div class="cons-error" style="display:none"></div>
+        <div class="cons-table-wrap"></div>
+        <div class="cons-jobs">
+          <div class="cons-jobs-header" id="cons-jobs-toggle">
+            ▾ File de jobs
+            <span class="cons-jobs-count">0 total</span>
+          </div>
+          <div id="cons-jobs-body" style="display:block">
+            <div class="cons-jobs-actions">
+              <button class="btn btn-ghost" id="cons-refresh-jobs" style="font-size:11px;padding:2px 8px">↺ Rafraîchir</button>
+            </div>
+            <div class="cons-jobs-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section : Personnages -->
+      <div class="cons-section-pane${_activeSection === "personnages" ? " active" : ""}" data-section="personnages">
+        <div class="cons-placeholder">
+          <div class="cons-placeholder-icon">🎭</div>
+          <div class="cons-placeholder-title">Personnages</div>
+          <div class="cons-placeholder-desc">
+            Définition des personnages (canonical + noms par langue + alias),<br>
+            assignation segment/cue → personnage, propagation via alignement,<br>
+            réécriture SRT avec noms de locuteurs.<br>
+            <em style="opacity:0.6">En développement — MX-021c.</em>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section : Exporter -->
+      <div class="cons-section-pane${_activeSection === "exporter" ? " active" : ""}" data-section="exporter">
+        <div class="cons-placeholder">
+          <div class="cons-placeholder-icon">📤</div>
+          <div class="cons-placeholder-title">Exporter</div>
+          <div class="cons-placeholder-desc">
+            Export corpus, alignements et SRT final avec noms de personnages.<br>
+            Formats : TXT, CSV, TSV, DOCX, JSON.<br>
+            <em style="opacity:0.6">En développement.</em>
+          </div>
         </div>
       </div>
     </div>`;
+
+  // Section nav switching
+  container.querySelectorAll<HTMLButtonElement>(".cons-section-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sec = btn.dataset.section!;
+      _activeSection = sec;
+      container.querySelectorAll<HTMLButtonElement>(".cons-section-tab")
+        .forEach((b) => b.classList.toggle("active", b.dataset.section === sec));
+      container.querySelectorAll<HTMLElement>(".cons-section-pane")
+        .forEach((p) => p.classList.toggle("active", p.dataset.section === sec));
+    });
+  });
 
   // Refresh episodes button
   container

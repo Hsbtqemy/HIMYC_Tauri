@@ -44,10 +44,11 @@ export interface ShellContext {
   onStatusChange(cb: (status: BackendStatus) => void): () => void;
 
   /**
-   * Naviguer programmatiquement vers un mode (MX-009).
-   * Utilisé par l'Inspecter pour faire le handoff vers l'Aligner.
+   * Naviguer programmatiquement vers un mode.
+   * hub/concordancier/constituer/exporter = modes top-level.
+   * inspecter/aligner = sous-vues (pas d'onglet top-level, MX-020).
    */
-  navigateTo(mode: "constituer" | "inspecter" | "aligner"): void;
+  navigateTo(mode: "hub" | "concordancier" | "constituer" | "exporter" | "inspecter" | "aligner"): void;
 
   /**
    * Stocker les données de handoff Inspecter → Aligner (MX-009).
