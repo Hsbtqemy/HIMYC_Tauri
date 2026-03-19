@@ -27,11 +27,18 @@ import {
   discoverSubslikescript,
   fetchSubslikescriptTranscript,
   fetchAlignmentRuns,
+  fetchAlignRunStats,
+  fetchAuditLinks,
+  fetchAlignCollisions,
+  setAlignLinkStatus,
   fetchQaReport,
   runExport,
   saveConfig,
   type ExportResult,
   type QaReport,
+  type AlignRunStats,
+  type AuditLink,
+  type AlignCollision,
   type ConfigUpdate,
   type Episode,
   type EpisodeSource,
@@ -918,7 +925,7 @@ const CSS = `
   word-break: break-word;
 }
 
-/* ── Alignment run history ───────────────────────────────────── */
+/* ── Alignment run history + audit view ──────────────────────── */
 .align-runs-panel {
   padding: 10px 14px;
   overflow-y: auto;
@@ -969,10 +976,161 @@ const CSS = `
   font-size: 0.7rem;
   color: var(--text-muted);
 }
+.align-run-card { cursor: pointer; transition: border-color .12s, background .12s; }
+.align-run-card:hover { border-color: var(--accent); background: var(--surface2); }
+.align-run-card.active { border-color: var(--accent); background: #e8f5f3; }
 .align-run-kind {
   font-size: 0.69rem;
   color: var(--text-muted);
 }
+
+/* ── Audit view ──────────────────────────────────────────────── */
+.audit-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.audit-stats-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.audit-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 48px;
+}
+.audit-stat-val {
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  line-height: 1.1;
+}
+.audit-stat-label { font-size: 0.64rem; color: var(--text-muted); text-transform: uppercase; }
+.audit-stat-sep { width: 1px; height: 28px; background: var(--border); }
+.audit-stat-val.ok       { color: #16a34a; }
+.audit-stat-val.warn     { color: #ca8a04; }
+.audit-stat-val.blocking { color: #dc2626; }
+.audit-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.audit-filter-bar select, .audit-filter-bar input {
+  padding: 3px 8px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+}
+.audit-filter-bar input { flex: 1; min-width: 120px; max-width: 240px; }
+.audit-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 12px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.audit-tab {
+  padding: 4px 12px;
+  font-size: 0.77rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  position: relative; bottom: -1px;
+}
+.audit-tab:hover { background: var(--surface2); }
+.audit-tab.active { background: var(--surface2); border-color: var(--border); border-bottom-color: var(--surface2); color: var(--text); font-weight: 600; }
+.audit-tab .audit-tab-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  font-size: 0.65rem; font-weight: 700;
+  border-radius: 8px; background: #fca5a5; color: #7f1d1d;
+  margin-left: 4px;
+}
+.audit-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.audit-pane { display: none; flex-direction: column; overflow: hidden; height: 100%; }
+.audit-pane.active { display: flex; }
+/* Links table */
+.audit-table-wrap { flex: 1; overflow-y: auto; min-height: 0; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+.audit-table thead { position: sticky; top: 0; background: var(--surface); z-index: 2; }
+.audit-table th {
+  padding: 5px 8px; border-bottom: 2px solid var(--border);
+  text-align: left; font-size: 0.7rem; color: var(--text-muted);
+  text-transform: uppercase; white-space: nowrap;
+}
+.audit-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.audit-table tr:hover td { background: var(--surface2); }
+.audit-table tr.accepted td { background: #f0fdf4; }
+.audit-table tr.rejected td { background: #fef2f2; opacity: .7; }
+.audit-status-badge {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px; border-radius: 3px;
+  font-size: 0.68rem; font-weight: 700;
+  white-space: nowrap;
+}
+.audit-status-badge.auto     { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+.audit-status-badge.accepted { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+.audit-status-badge.rejected { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+.audit-action-btn {
+  padding: 1px 6px; font-size: 0.7rem;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: var(--surface); cursor: pointer; font-family: inherit;
+  color: var(--text-muted); transition: background .1s;
+}
+.audit-action-btn:hover { background: var(--surface2); }
+.audit-action-btn.accept { color: #15803d; border-color: #86efac; }
+.audit-action-btn.reject { color: #b91c1c; border-color: #fca5a5; }
+.audit-action-btn.undo   { color: var(--text-muted); }
+.audit-conf-bar {
+  display: inline-block; height: 5px; border-radius: 2px;
+  background: linear-gradient(90deg, #0f766e, #5eead4);
+  vertical-align: middle; margin-right: 4px;
+}
+/* Pagination */
+.audit-pager {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 8px; padding: 5px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface); flex-shrink: 0;
+  font-size: 0.76rem; color: var(--text-muted);
+}
+/* Collisions */
+.audit-collision-list { overflow-y: auto; flex: 1; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
+.audit-collision-card {
+  border: 1px solid #fca5a5; border-radius: var(--radius);
+  background: #fef2f2; padding: 8px 12px;
+}
+.audit-collision-pivot { font-size: 0.77rem; font-weight: 600; color: #7f1d1d; margin-bottom: 6px; }
+.audit-collision-target { font-size: 0.76rem; padding: 3px 0; border-top: 1px solid #fecaca; color: var(--text); }
+.audit-back-btn {
+  padding: 3px 10px; font-size: 0.76rem;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); cursor: pointer; font-family: inherit;
+  color: var(--text-muted); flex-shrink: 0;
+}
+.audit-back-btn:hover { background: var(--surface2); }
 
 /* ── Presets nav button + modal ─────────────────────────────── */
 .cons-nav-presets-btn {
@@ -2387,7 +2545,7 @@ async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle
   panel.innerHTML = `<div class="align-runs-panel"><div style="font-size:0.78rem;color:var(--text-muted)">Chargement historique…</div></div>`;
   try {
     const data = await fetchAlignmentRuns(epId);
-    const runs: AlignmentRun[] = data.runs ?? [];
+    const runs = data.runs ?? [];
     if (runs.length === 0) {
       panel.innerHTML = `
         <div class="align-runs-panel">
@@ -2403,7 +2561,7 @@ async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle
       const d = new Date(r.created_at);
       const dateStr = isNaN(d.getTime()) ? r.created_at : d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
       return `
-        <div class="align-run-card">
+        <div class="align-run-card" data-run-id="${escapeHtml(r.run_id)}" data-pivot="${escapeHtml(r.pivot_lang)}" data-date="${escapeHtml(dateStr)}" tabindex="0" role="button" aria-label="Ouvrir audit run ${escapeHtml(r.run_id)}">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
             <span class="align-run-id" title="${escapeHtml(r.run_id)}">${escapeHtml(r.run_id.slice(0, 12))}…</span>
             <span class="align-run-date">${escapeHtml(dateStr)}</span>
@@ -2415,17 +2573,338 @@ async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle
           </div>
           <div style="display:flex;gap:6px;align-items:center;margin-top:2px">
             <span class="align-run-kind">${escapeHtml(r.segment_kind ?? "utterance")}</span>
+            <span style="margin-left:auto;font-size:0.68rem;color:var(--accent)">Auditer →</span>
           </div>
         </div>`;
     }).join("");
     panel.innerHTML = `
       <div class="align-runs-panel">
-        <div class="align-runs-title">${escapeHtml(epTitle)} — ${runs.length} run(s)</div>
+        <div class="align-runs-title">${escapeHtml(epTitle)} — ${runs.length} run(s) · cliquez pour auditer</div>
         ${cards}
       </div>`;
+
+    // Wire run card clicks → open audit view
+    panel.querySelectorAll<HTMLElement>(".align-run-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        panel.querySelectorAll(".align-run-card").forEach((c) => c.classList.remove("active"));
+        card.classList.add("active");
+        openAuditView(panel, epId, epTitle, card.dataset.runId!);
+      });
+    });
   } catch (e) {
     const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
     panel.innerHTML = `<div class="align-runs-panel"><div style="color:var(--danger);font-size:0.78rem">${escapeHtml(msg)}</div></div>`;
+  }
+}
+
+// ── Audit View ───────────────────────────────────────────────────────────────
+
+interface AuditState {
+  epId: string;
+  runId: string;
+  statusFilter: string;
+  q: string;
+  offset: number;
+  limit: number;
+  total: number;
+  activeTab: "links" | "collisions";
+}
+
+const _auditState: AuditState = {
+  epId: "", runId: "", statusFilter: "", q: "", offset: 0, limit: 50, total: 0, activeTab: "links",
+};
+
+async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, runId: string) {
+  _auditState.epId = epId;
+  _auditState.runId = runId;
+  _auditState.statusFilter = "";
+  _auditState.q = "";
+  _auditState.offset = 0;
+  _auditState.activeTab = "links";
+
+  panel.innerHTML = `
+    <div class="audit-panel">
+      <div class="audit-stats-strip" id="audit-stats-strip">
+        <button class="audit-back-btn" id="audit-back">← Runs</button>
+        <span style="font-size:0.8rem;font-weight:600;color:var(--text);flex:1">${escapeHtml(epTitle)}</span>
+        <span style="font-size:0.72rem;color:var(--text-muted);font-family:ui-monospace,monospace">${escapeHtml(runId.slice(0, 14))}…</span>
+      </div>
+      <div id="audit-kpi-strip" class="audit-stats-strip" style="padding-top:4px;padding-bottom:4px">
+        <span style="font-size:0.76rem;color:var(--text-muted)">Chargement stats…</span>
+      </div>
+      <div class="audit-tabs">
+        <button class="audit-tab active" data-tab="links">Liens</button>
+        <button class="audit-tab" data-tab="collisions">Collisions <span class="audit-tab-badge" id="audit-collision-badge" style="display:none">0</span></button>
+      </div>
+      <div class="audit-filter-bar" id="audit-filter-bar">
+        <select id="audit-status-filter">
+          <option value="">Tous statuts</option>
+          <option value="auto">Auto</option>
+          <option value="accepted">Acceptés</option>
+          <option value="rejected">Rejetés</option>
+        </select>
+        <input id="audit-search" type="search" placeholder="Rechercher texte…" />
+        <span id="audit-count" style="font-size:0.72rem;color:var(--text-muted);margin-left:auto"></span>
+      </div>
+      <div class="audit-body">
+        <div class="audit-pane active" data-tab="links">
+          <div class="audit-table-wrap" id="audit-table-wrap">
+            <div style="padding:12px;font-size:0.78rem;color:var(--text-muted)">Chargement liens…</div>
+          </div>
+          <div class="audit-pager" id="audit-pager"></div>
+        </div>
+        <div class="audit-pane" data-tab="collisions">
+          <div class="audit-collision-list" id="audit-collision-list">
+            <div style="font-size:0.78rem;color:var(--text-muted)">Chargement collisions…</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Back button → restore run list
+  panel.querySelector<HTMLButtonElement>("#audit-back")!.addEventListener("click", () => {
+    loadAlignmentRunHistory(panel, epId, epTitle);
+  });
+
+  // Tab switching
+  panel.querySelectorAll<HTMLButtonElement>(".audit-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      panel.querySelectorAll(".audit-tab").forEach((t) => t.classList.remove("active"));
+      panel.querySelectorAll(".audit-pane").forEach((p) => p.classList.remove("active"));
+      tab.classList.add("active");
+      const pane = panel.querySelector<HTMLElement>(`.audit-pane[data-tab="${tab.dataset.tab}"]`);
+      if (pane) pane.classList.add("active");
+      _auditState.activeTab = tab.dataset.tab as "links" | "collisions";
+    });
+  });
+
+  // Filter controls
+  const statusSel = panel.querySelector<HTMLSelectElement>("#audit-status-filter")!;
+  const searchInput = panel.querySelector<HTMLInputElement>("#audit-search")!;
+  statusSel.addEventListener("change", () => {
+    _auditState.statusFilter = statusSel.value;
+    _auditState.offset = 0;
+    loadAuditLinks(panel, epId, runId);
+  });
+  let _searchTimer: ReturnType<typeof setTimeout> | null = null;
+  searchInput.addEventListener("input", () => {
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      _auditState.q = searchInput.value.trim();
+      _auditState.offset = 0;
+      loadAuditLinks(panel, epId, runId);
+    }, 280);
+  });
+
+  // Load stats + links + collisions in parallel
+  loadAuditStats(panel, epId, runId);
+  loadAuditLinks(panel, epId, runId);
+  loadAuditCollisions(panel, epId, runId);
+}
+
+async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
+  const kpiStrip = panel.querySelector<HTMLElement>("#audit-kpi-strip");
+  if (!kpiStrip) return;
+  try {
+    const s: AlignRunStats = await fetchAlignRunStats(epId, runId);
+    const byStatus = s.by_status ?? {};
+    const nAuto     = byStatus.auto     ?? 0;
+    const nAccepted = byStatus.accepted ?? 0;
+    const nRejected = byStatus.rejected ?? 0;
+    const coverageStr = s.coverage_pct != null ? `${s.coverage_pct}%` : "—";
+    const confStr = s.avg_confidence != null ? `${Math.round(s.avg_confidence * 100)}%` : "—";
+    const collisionClass = s.n_collisions > 0 ? "blocking" : "ok";
+
+    kpiStrip.innerHTML = `
+      <div class="audit-stat"><span class="audit-stat-val">${s.nb_pivot}</span><span class="audit-stat-label">Pivot</span></div>
+      <div class="audit-stat-sep"></div>
+      <div class="audit-stat"><span class="audit-stat-val">${s.nb_target}</span><span class="audit-stat-label">Target</span></div>
+      <div class="audit-stat-sep"></div>
+      <div class="audit-stat"><span class="audit-stat-val ok">${nAccepted}</span><span class="audit-stat-label">Acceptés</span></div>
+      <div class="audit-stat"><span class="audit-stat-val warn">${nAuto}</span><span class="audit-stat-label">Auto</span></div>
+      <div class="audit-stat"><span class="audit-stat-val blocking">${nRejected}</span><span class="audit-stat-label">Rejetés</span></div>
+      <div class="audit-stat-sep"></div>
+      <div class="audit-stat"><span class="audit-stat-val">${coverageStr}</span><span class="audit-stat-label">Couverture</span></div>
+      <div class="audit-stat"><span class="audit-stat-val">${confStr}</span><span class="audit-stat-label">Conf. moy.</span></div>
+      <div class="audit-stat-sep"></div>
+      <div class="audit-stat"><span class="audit-stat-val ${collisionClass}">${s.n_collisions}</span><span class="audit-stat-label">Collisions</span></div>`;
+
+    // Update collision badge
+    const badge = panel.querySelector<HTMLElement>("#audit-collision-badge");
+    if (badge) {
+      badge.textContent = String(s.n_collisions);
+      badge.style.display = s.n_collisions > 0 ? "inline-flex" : "none";
+    }
+  } catch (e) {
+    kpiStrip.innerHTML = `<span style="font-size:0.76rem;color:var(--danger)">${e instanceof ApiError ? e.message : String(e)}</span>`;
+  }
+}
+
+async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
+  const wrap  = panel.querySelector<HTMLElement>("#audit-table-wrap");
+  const pager = panel.querySelector<HTMLElement>("#audit-pager");
+  const countEl = panel.querySelector<HTMLElement>("#audit-count");
+  if (!wrap) return;
+  wrap.innerHTML = `<div style="padding:12px;font-size:0.78rem;color:var(--text-muted)">Chargement…</div>`;
+  try {
+    const res = await fetchAuditLinks(epId, runId, {
+      status: _auditState.statusFilter || undefined,
+      q:      _auditState.q || undefined,
+      offset: _auditState.offset,
+      limit:  _auditState.limit,
+    });
+    _auditState.total = res.total;
+    if (countEl) countEl.textContent = `${res.total} lien(s)`;
+
+    if (res.links.length === 0) {
+      wrap.innerHTML = `<div style="padding:16px;font-size:0.78rem;color:var(--text-muted)">Aucun lien trouvé.</div>`;
+      if (pager) pager.innerHTML = "";
+      return;
+    }
+
+    // Build table
+    const rows = res.links.map((lnk) => renderAuditLinkRow(lnk)).join("");
+    wrap.innerHTML = `
+      <table class="audit-table">
+        <thead>
+          <tr>
+            <th>#</th><th>Transcript</th><th>Pivot</th><th>Cible</th>
+            <th>Lang</th><th style="text-align:center">Conf.</th>
+            <th>Statut</th><th></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+    // Wire accept/reject buttons
+    wrap.querySelectorAll<HTMLButtonElement>(".audit-action-btn[data-link-id]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const linkId = btn.dataset.linkId!;
+        const action = btn.dataset.action as "accepted" | "rejected" | "auto";
+        btn.disabled = true;
+        try {
+          await setAlignLinkStatus(linkId, action);
+          // Update row in-place
+          const row = btn.closest<HTMLTableRowElement>("tr");
+          if (row) {
+            row.className = action;
+            const statusCell = row.querySelector(".audit-status-badge");
+            if (statusCell) {
+              statusCell.className = `audit-status-badge ${action}`;
+              statusCell.textContent = action === "accepted" ? "✓ accepté" : action === "rejected" ? "✗ rejeté" : "auto";
+            }
+            // Swap buttons: if accepted → show reject+undo, if rejected → show accept+undo
+            const actionsCell = row.querySelector(".audit-row-actions");
+            if (actionsCell) actionsCell.innerHTML = renderAuditActions(linkId, action);
+            rewireAuditButtons(wrap);
+          }
+          // Refresh stats
+          loadAuditStats(panel, epId, runId);
+        } catch (e) {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Pagination
+    if (pager) renderAuditPager(pager, panel, epId, runId);
+  } catch (e) {
+    wrap.innerHTML = `<div style="padding:12px;font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
+  }
+}
+
+function renderAuditLinkRow(lnk: AuditLink): string {
+  const segText    = escapeHtml((lnk.text_segment || "").slice(0, 120));
+  const pivotText  = escapeHtml((lnk.text_pivot   || "").slice(0, 100));
+  const targetText = escapeHtml((lnk.text_target  || "").slice(0, 100));
+  const speaker    = lnk.speaker_explicit ? `<span style="font-size:0.65rem;color:var(--text-muted)">${escapeHtml(lnk.speaker_explicit)}: </span>` : "";
+  const confPct    = lnk.confidence != null ? Math.round(lnk.confidence * 100) : null;
+  const confBar    = confPct != null
+    ? `<span class="audit-conf-bar" style="width:${confPct * 0.4}px" title="${confPct}%"></span>${confPct}%`
+    : "—";
+  const n = lnk.segment_n != null ? lnk.segment_n : "—";
+  return `
+    <tr class="${lnk.status}" data-link-id="${escapeHtml(lnk.link_id)}">
+      <td style="font-family:ui-monospace,monospace;font-size:0.68rem;color:var(--text-muted)">${n}</td>
+      <td style="max-width:180px">${speaker}${segText || '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="max-width:140px">${pivotText  || '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="max-width:140px">${targetText || '<span style="color:var(--text-muted)">—</span>'}</td>
+      <td><span class="align-run-lang-badge">${escapeHtml(lnk.lang || "—")}</span></td>
+      <td style="text-align:center;white-space:nowrap">${confBar}</td>
+      <td><span class="audit-status-badge ${lnk.status}">${lnk.status === "accepted" ? "✓ accepté" : lnk.status === "rejected" ? "✗ rejeté" : "auto"}</span></td>
+      <td class="audit-row-actions">${renderAuditActions(lnk.link_id, lnk.status)}</td>
+    </tr>`;
+}
+
+function renderAuditActions(linkId: string, currentStatus: string): string {
+  if (currentStatus === "accepted") {
+    return `<button class="audit-action-btn reject" data-link-id="${escapeHtml(linkId)}" data-action="rejected" title="Rejeter">✗</button>
+            <button class="audit-action-btn undo"   data-link-id="${escapeHtml(linkId)}" data-action="auto"     title="Réinitialiser">↺</button>`;
+  }
+  if (currentStatus === "rejected") {
+    return `<button class="audit-action-btn accept" data-link-id="${escapeHtml(linkId)}" data-action="accepted" title="Accepter">✓</button>
+            <button class="audit-action-btn undo"   data-link-id="${escapeHtml(linkId)}" data-action="auto"     title="Réinitialiser">↺</button>`;
+  }
+  return `<button class="audit-action-btn accept" data-link-id="${escapeHtml(linkId)}" data-action="accepted" title="Accepter">✓</button>
+          <button class="audit-action-btn reject" data-link-id="${escapeHtml(linkId)}" data-action="rejected" title="Rejeter">✗</button>`;
+}
+
+function rewireAuditButtons(wrap: HTMLElement) {
+  // Re-wire freshly rendered buttons after in-place update
+  wrap.querySelectorAll<HTMLButtonElement>(".audit-action-btn[data-link-id]").forEach((btn) => {
+    // Remove old listeners by cloning (cheap, works with small DOM)
+    const fresh = btn.cloneNode(true) as HTMLButtonElement;
+    btn.replaceWith(fresh);
+  });
+  // Re-attach — handled by parent re-render; caller must re-call loadAuditLinks if needed
+}
+
+function renderAuditPager(pager: HTMLElement, panel: HTMLElement, epId: string, runId: string) {
+  const { offset, limit, total } = _auditState;
+  const page    = Math.floor(offset / limit) + 1;
+  const nPages  = Math.ceil(total / limit);
+  const hasPrev = offset > 0;
+  const hasNext = offset + limit < total;
+  pager.innerHTML = `
+    <button class="audit-action-btn" id="audit-prev" ${hasPrev ? "" : "disabled"}>← Préc.</button>
+    <span>Page ${page} / ${nPages || 1}</span>
+    <button class="audit-action-btn" id="audit-next" ${hasNext ? "" : "disabled"}>Suiv. →</button>`;
+  pager.querySelector<HTMLButtonElement>("#audit-prev")?.addEventListener("click", () => {
+    _auditState.offset = Math.max(0, offset - limit);
+    loadAuditLinks(panel, epId, runId);
+  });
+  pager.querySelector<HTMLButtonElement>("#audit-next")?.addEventListener("click", () => {
+    _auditState.offset = offset + limit;
+    loadAuditLinks(panel, epId, runId);
+  });
+}
+
+async function loadAuditCollisions(panel: HTMLElement, epId: string, runId: string) {
+  const listEl = panel.querySelector<HTMLElement>("#audit-collision-list");
+  if (!listEl) return;
+  try {
+    const res = await fetchAlignCollisions(epId, runId);
+    const cols: AlignCollision[] = res.collisions ?? [];
+    if (cols.length === 0) {
+      listEl.innerHTML = `<div style="font-size:0.78rem;color:var(--success,#16a34a)">✅ Aucune collision détectée.</div>`;
+      return;
+    }
+    listEl.innerHTML = cols.map((c) => `
+      <div class="audit-collision-card">
+        <div class="audit-collision-pivot">
+          <span class="align-run-lang-badge" style="background:#dbeafe;color:#1d4ed8">${escapeHtml(c.lang)}</span>
+          pivot : ${escapeHtml(c.pivot_text || c.pivot_cue_id)}
+          <span style="font-size:0.7rem;color:#b91c1c;margin-left:8px">${c.n_targets} cibles en conflit</span>
+        </div>
+        ${c.targets.map((t) => `
+          <div class="audit-collision-target">
+            <span class="audit-status-badge ${t.status}">${t.status}</span>
+            ${escapeHtml(t.target_text || t.cue_id_target)}
+            ${t.confidence != null ? `<span style="font-size:0.68rem;color:var(--text-muted);margin-left:6px">${Math.round(t.confidence * 100)}%</span>` : ""}
+          </div>`).join("")}
+      </div>`).join("");
+  } catch (e) {
+    listEl.innerHTML = `<div style="font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
   }
 }
 

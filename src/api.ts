@@ -56,8 +56,8 @@ export async function apiGet<T>(path: string): Promise<T> {
   return JSON.parse(res.body) as T;
 }
 
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await _loopbackFetch(path, "POST", body);
+export async function apiPost<T>(path: string, body: unknown, method = "POST"): Promise<T> {
+  const res = await _loopbackFetch(path, method, body);
   if (!res.ok) {
     let errorCode = "UNKNOWN";
     let message = res.body;
@@ -280,6 +280,108 @@ export async function fetchAlignmentRuns(
   episodeId: string,
 ): Promise<AlignmentRunsResponse> {
   return apiGet<AlignmentRunsResponse>(`/episodes/${episodeId}/alignment_runs`);
+}
+
+// ── Alignment Audit (MX-028) ──────────────────────────────────────────────────
+
+export interface AlignRunStats {
+  episode_id: string;
+  run_id: string;
+  nb_links: number;
+  nb_pivot: number;
+  nb_target: number;
+  by_status: { auto?: number; accepted?: number; rejected?: number };
+  avg_confidence: number | null;
+  n_collisions: number;
+  coverage_pct: number | null;
+}
+
+export interface AuditLink {
+  link_id: string;
+  role: "pivot" | "target";
+  lang: string;
+  confidence: number | null;
+  status: "auto" | "accepted" | "rejected";
+  segment_id: string | null;
+  cue_id: string | null;
+  cue_id_target: string | null;
+  text_segment: string | null;
+  speaker_explicit: string | null;
+  segment_n: number | null;
+  text_pivot: string | null;
+  text_target: string | null;
+}
+
+export interface AuditLinksResponse {
+  episode_id: string;
+  run_id: string;
+  total: number;
+  offset: number;
+  limit: number;
+  links: AuditLink[];
+}
+
+export interface AlignCollisionTarget {
+  link_id: string;
+  cue_id_target: string;
+  target_text: string;
+  confidence: number | null;
+  status: string;
+}
+
+export interface AlignCollision {
+  pivot_cue_id: string;
+  pivot_text: string;
+  lang: string;
+  n_targets: number;
+  targets: AlignCollisionTarget[];
+}
+
+export interface AlignCollisionsResponse {
+  episode_id: string;
+  run_id: string;
+  collisions: AlignCollision[];
+}
+
+export async function fetchAlignRunStats(
+  episodeId: string,
+  runId: string,
+): Promise<AlignRunStats> {
+  return apiGet<AlignRunStats>(
+    `/episodes/${episodeId}/alignment_runs/${runId}/stats`,
+  );
+}
+
+export async function fetchAuditLinks(
+  episodeId: string,
+  runId: string,
+  params: { status?: string; q?: string; offset?: number; limit?: number } = {},
+): Promise<AuditLinksResponse> {
+  const qs = new URLSearchParams();
+  if (params.status)  qs.set("status", params.status);
+  if (params.q)       qs.set("q", params.q);
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  if (params.limit  != null) qs.set("limit",  String(params.limit));
+  const query = qs.toString() ? `?${qs}` : "";
+  return apiGet<AuditLinksResponse>(
+    `/episodes/${episodeId}/alignment_runs/${runId}/links${query}`,
+  );
+}
+
+export async function fetchAlignCollisions(
+  episodeId: string,
+  runId: string,
+): Promise<AlignCollisionsResponse> {
+  return apiGet<AlignCollisionsResponse>(
+    `/episodes/${episodeId}/alignment_runs/${runId}/collisions`,
+  );
+}
+
+export async function setAlignLinkStatus(
+  linkId: string,
+  status: "accepted" | "rejected" | "auto",
+): Promise<{ link_id: string; status: string }> {
+  return apiPost(`/alignment_links/${linkId}`, { status }, "PATCH");
 }
 
 export async function cancelJob(jobId: string): Promise<{ job_id: string; status: string }> {
