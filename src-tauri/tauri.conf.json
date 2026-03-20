@@ -28,7 +28,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "shortDescription": "HIMYC — constitution et inspection de corpus transcript + SRT",
     "longDescription": "HIMYC desktop app : constitution de corpus multi-langues, inspection source-centric et alignement. Backend Python HIMYC requis (port 8765).",
     "copyright": "2024-2026 HIMYC",
