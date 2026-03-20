@@ -1,10 +1,11 @@
 /**
- * shell.ts — HIMYC Shell V0.2 (MX-020)
+ * shell.ts — HIMYC Shell V0.3 (MX-035)
  *
  * Navigation restructurée AGRAFES x HIMYC :
  * - Hub (landing) → Concordancier · Constituer · Exporter
  * - Inspecter / Aligner = sous-vues (pas d'onglet top-level)
- * - Header : brand + [Concordancier | Constituer | Exporter] + [← Retour] (si sous-vue) + statut API
+ * - Header : brand + [nav tabs] + [zone projet] + statut API
+ * - Zone projet : badge "📁 <nom>" + bouton "Changer…" (Tauri seulement)
  * - Couleurs d'accent par mode
  * - Lifecycle modules : mount / dispose
  * - Persistence localStorage : last_mode (hors hub)
@@ -13,6 +14,8 @@
 
 import type { ShellContext, BackendStatus, AlignerHandoff, InspecterTarget } from "./context.ts";
 import { fetchHealth, API_BASE } from "./api.ts";
+
+const IS_TAURI = import.meta.env.VITE_E2E !== "true" && "__TAURI_INTERNALS__" in window;
 import { mountHub,           disposeHub }           from "./modules/hubModule.ts";
 import { mountConcordancier, disposeConcordancier } from "./modules/concordancierModule.ts";
 import { mountConstituer,    disposeConstituer }    from "./modules/constituerModule.ts";
@@ -168,9 +171,49 @@ const SHELL_CSS = `
     font-weight: 600;
   }
 
+  /* Zone projet (avant le statut API) */
+  .shell-project-zone {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.9rem;
+    height: 44px;
+    border-left: 1px solid rgba(255,255,255,0.12);
+    min-width: 0;
+    max-width: 260px;
+  }
+  .shell-project-name {
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.7);
+    font-family: ui-monospace, "SF Mono", monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+  }
+  .shell-project-name.none {
+    color: rgba(255,255,255,0.35);
+    font-style: italic;
+  }
+  .shell-project-btn {
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.8);
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background 0.15s, color 0.15s;
+  }
+  .shell-project-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+  .shell-project-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
   /* Statut API (droite du header) */
   .shell-api-zone {
-    margin-left: auto;
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -263,8 +306,70 @@ let _headerEl: HTMLElement;
 let _appEl: HTMLElement;
 let _apiDot: HTMLElement;
 let _apiLabel: HTMLElement;
+let _projectLabel: HTMLElement;
+let _projectBtn: HTMLButtonElement;
 let _toastEl: HTMLElement;
 let _toastTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ─── Gestion projet ───────────────────────────────────────────────────────────
+
+let _currentProjectPath: string | null = null;
+
+function _pathBasename(p: string): string {
+  return p.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? p;
+}
+
+function _updateProjectBadge(path: string | null) {
+  _currentProjectPath = path;
+  if (!_projectLabel) return;
+  if (path) {
+    _projectLabel.textContent = "📁 " + _pathBasename(path);
+    _projectLabel.classList.remove("none");
+  } else {
+    _projectLabel.textContent = "aucun projet";
+    _projectLabel.classList.add("none");
+  }
+}
+
+async function _changeProject() {
+  if (!IS_TAURI) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
+
+  const selected = await openDialog({ directory: true, title: "Choisir le dossier projet HIMYC" });
+  if (!selected) return;
+  const path = typeof selected === "string" ? selected : (selected as string[])[0];
+  if (!path) return;
+
+  _projectBtn.disabled = true;
+  _projectBtn.textContent = "…";
+  try {
+    await invoke("set_project_path", { path });
+    // Attendre que le backend réponde
+    let ready = false;
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        const res = await fetch("http://127.0.0.1:8765/health");
+        if (res.ok) { ready = true; break; }
+      } catch { /* pas encore prêt */ }
+    }
+    if (ready) {
+      _updateProjectBadge(path);
+      _toast("Projet changé : " + _pathBasename(path));
+      await _checkHealth();
+      // Recharger le module courant pour refléter le nouveau projet
+      _navigateTo("hub");
+    } else {
+      _toast("Backend non disponible après changement de projet");
+    }
+  } catch (e) {
+    _toast("Erreur : " + String(e));
+  } finally {
+    _projectBtn.disabled = false;
+    _projectBtn.textContent = "Changer…";
+  }
+}
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 
@@ -299,17 +404,21 @@ function _navigateTo(mode: Mode) {
 // ─── Header ───────────────────────────────────────────────────────────────────
 
 function _rebuildNav() {
-  // Vider la zone nav (entre brand et api-zone)
-  const brand   = _headerEl.querySelector<HTMLElement>(".shell-brand")!;
-  const apiZone = _headerEl.querySelector<HTMLElement>(".shell-api-zone")!;
+  // Vider la zone nav (entre brand et zones fixes droite)
+  const brand       = _headerEl.querySelector<HTMLElement>(".shell-brand")!;
+  const projectZone = _headerEl.querySelector<HTMLElement>(".shell-project-zone");
+  const apiZone     = _headerEl.querySelector<HTMLElement>(".shell-api-zone")!;
 
-  // Supprimer les éléments de nav existants
+  // Supprimer les éléments de nav existants (préserver brand + project + api)
   Array.from(_headerEl.children).forEach((child) => {
-    if (child !== brand && child !== apiZone) child.remove();
+    if (child !== brand && child !== projectZone && child !== apiZone) child.remove();
   });
 
+  // Ancre d'insertion = zone projet si elle existe, sinon zone api
+  const insertBefore = projectZone ?? apiZone;
+
   if (_currentMode === "hub") {
-    // Hub : pas de tabs, juste brand + api
+    // Hub : pas de tabs, juste brand + projet + api
     return;
   }
 
@@ -319,14 +428,14 @@ function _rebuildNav() {
     backBtn.className = "shell-back-btn";
     backBtn.innerHTML = "← Retour";
     backBtn.addEventListener("click", () => _navigateTo(_prevNavMode));
-    _headerEl.insertBefore(backBtn, apiZone);
+    _headerEl.insertBefore(backBtn, insertBefore);
 
     const breadcrumb = document.createElement("div");
     breadcrumb.className = "shell-breadcrumb";
     const modeLabel = _currentMode === "inspecter" ? "Inspecter" : "Aligner";
     const parentLabel = _prevNavMode.charAt(0).toUpperCase() + _prevNavMode.slice(1);
     breadcrumb.innerHTML = `${parentLabel} <span style="opacity:0.4">›</span> <span class="shell-breadcrumb-current">${modeLabel}</span>`;
-    _headerEl.insertBefore(breadcrumb, apiZone);
+    _headerEl.insertBefore(breadcrumb, insertBefore);
     return;
   }
 
@@ -341,7 +450,7 @@ function _rebuildNav() {
     btn.addEventListener("click", () => _navigateTo(mode));
     tabs.appendChild(btn);
   });
-  _headerEl.insertBefore(tabs, apiZone);
+  _headerEl.insertBefore(tabs, insertBefore);
 }
 
 function _buildHeader() {
@@ -354,6 +463,22 @@ function _buildHeader() {
   brand.className = "shell-brand";
   brand.textContent = "HIMYC";
   _headerEl.appendChild(brand);
+
+  // Zone projet (Tauri seulement)
+  if (IS_TAURI) {
+    const projectZone = document.createElement("div");
+    projectZone.className = "shell-project-zone";
+    _projectLabel = document.createElement("span");
+    _projectLabel.className = "shell-project-name none";
+    _projectLabel.textContent = "aucun projet";
+    _projectBtn = document.createElement("button");
+    _projectBtn.className = "shell-project-btn";
+    _projectBtn.textContent = "Changer…";
+    _projectBtn.addEventListener("click", _changeProject);
+    projectZone.appendChild(_projectLabel);
+    projectZone.appendChild(_projectBtn);
+    _headerEl.appendChild(projectZone);
+  }
 
   // Zone statut API (toujours à droite)
   const apiZone = document.createElement("div");
@@ -423,6 +548,15 @@ export async function initShell() {
 
   _buildHeader();
   MODE_CONFIGS[_currentMode].mount(_appEl, shellContext);
+
+  // Initialiser le badge projet (Tauri seulement)
+  if (IS_TAURI) {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const path = await invoke<string | null>("get_project_path");
+      _updateProjectBadge(path);
+    } catch { /* ignore */ }
+  }
 
   await _checkHealth();
   _pollInterval = setInterval(_checkHealth, 30_000);
