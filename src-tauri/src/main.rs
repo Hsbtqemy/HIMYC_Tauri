@@ -2,6 +2,100 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::collections::HashMap;
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
+use tauri::{AppHandle, Manager, State};
+
+// ─── Backend state ────────────────────────────────────────────────────────────
+
+struct BackendState {
+    process: Mutex<Option<Child>>,
+}
+
+fn kill_backend(state: &BackendState) {
+    if let Ok(mut guard) = state.process.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|p| p.join("himyc_config.json"))
+        .map_err(|e| format!("app_data_dir: {}", e))
+}
+
+fn read_project_path(app: &AppHandle) -> Option<String> {
+    let cfg = config_path(app).ok()?;
+    let content = std::fs::read_to_string(cfg).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&content).ok()?;
+    val["project_path"].as_str().map(|s| s.to_string())
+}
+
+fn write_project_path(app: &AppHandle, path: &str) -> Result<(), String> {
+    let cfg = config_path(app)?;
+    if let Some(parent) = cfg.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create_dir_all: {}", e))?;
+    }
+    let val = serde_json::json!({ "project_path": path });
+    std::fs::write(&cfg, val.to_string())
+        .map_err(|e| format!("write config: {}", e))
+}
+
+fn spawn_uvicorn(project_path: &str) -> Result<Child, String> {
+    // Essaie python3 puis python
+    let candidates = ["python3", "python"];
+    let mut last_err = String::new();
+    for candidate in candidates {
+        match Command::new(candidate)
+            .args([
+                "-m", "uvicorn",
+                "howimetyourcorpus.api.server:app",
+                "--host", "127.0.0.1",
+                "--port", "8765",
+                "--no-access-log",
+            ])
+            .env("HIMYC_PROJECT_PATH", project_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => return Ok(child),
+            Err(e) => last_err = format!("{}: {}", candidate, e),
+        }
+    }
+    Err(format!("spawn_uvicorn: python introuvable — {}", last_err))
+}
+
+// ─── Commandes Tauri ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_project_path(app: AppHandle) -> Option<String> {
+    read_project_path(&app)
+}
+
+#[tauri::command]
+fn set_project_path(
+    app: AppHandle,
+    path: String,
+    state: State<BackendState>,
+) -> Result<(), String> {
+    // Tuer l'ancien process si présent
+    kill_backend(&state);
+
+    // Persister le chemin
+    write_project_path(&app, &path)?;
+
+    // Lancer uvicorn
+    let child = spawn_uvicorn(&path)?;
+    *state.process.lock().unwrap() = Some(child);
+    Ok(())
+}
 
 // ─── Sidecar loopback fetch ───────────────────────────────────────────────────
 //
@@ -77,12 +171,35 @@ async fn sidecar_fetch_loopback(
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
-        .invoke_handler(tauri::generate_handler![sidecar_fetch_loopback])
-        .run(tauri::generate_context!())
+        .manage(BackendState { process: Mutex::new(None) })
+        .invoke_handler(tauri::generate_handler![
+            sidecar_fetch_loopback,
+            get_project_path,
+            set_project_path,
+        ])
+        .setup(|app| {
+            // Si un chemin projet est déjà sauvegardé, lancer le backend immédiatement
+            if let Some(path) = read_project_path(app.handle()) {
+                let state = app.state::<BackendState>();
+                match spawn_uvicorn(&path) {
+                    Ok(child) => { *state.process.lock().unwrap() = Some(child); }
+                    Err(e) => { eprintln!("HIMYC: spawn_uvicorn au démarrage: {}", e); }
+                }
+            }
+            Ok(())
+        })
+        .build(tauri::generate_context!())
         .expect("erreur lors du demarrage de l application HIMYC");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            let state = app_handle.state::<BackendState>();
+            kill_backend(&state);
+        }
+    });
 }

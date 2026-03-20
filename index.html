@@ -15,6 +15,27 @@
     </style>
   </head>
   <body>
+    <div id="startup-overlay" style="
+      position:fixed;inset:0;background:#0f172a;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      z-index:99999;gap:14px;
+    ">
+      <div style="font-size:1.6rem;font-weight:800;color:#fff;letter-spacing:1px">HIMYC</div>
+      <div id="startup-status" style="color:#94a3b8;font-size:0.85rem;max-width:340px;text-align:center"></div>
+      <div id="startup-spinner" style="
+        width:28px;height:28px;border:3px solid rgba(255,255,255,0.15);
+        border-top-color:#60a5fa;border-radius:50%;
+        animation:spin 0.8s linear infinite;
+      "></div>
+      <div id="startup-error" style="display:none;color:#f87171;font-size:0.8rem;max-width:340px;text-align:center"></div>
+      <button id="startup-pick-btn" style="display:none;margin-top:4px;
+        padding:8px 18px;background:#2563eb;color:#fff;border:none;border-radius:6px;
+        font-size:0.875rem;font-weight:600;cursor:pointer">Choisir un projet…</button>
+      <button id="startup-retry-btn" style="display:none;margin-top:4px;
+        padding:6px 14px;background:transparent;color:#94a3b8;border:1px solid #334155;
+        border-radius:6px;font-size:0.8rem;cursor:pointer">↺ Réessayer</button>
+      <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+    </div>
     <div id="shell-header"></div>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
