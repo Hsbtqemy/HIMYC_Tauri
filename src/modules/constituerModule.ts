@@ -4760,6 +4760,7 @@ function renderExporterSection(pane: HTMLElement) {
               <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="corpus" data-fmt="csv">CSV</button>
               <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="corpus" data-fmt="json">JSON</button>
               <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="corpus" data-fmt="docx">DOCX</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="corpus" data-fmt="jsonl">JSONL</button>
             </div>
             <div class="exp-result" id="exp-corpus-result"></div>
           </div>
@@ -4777,6 +4778,7 @@ function renderExporterSection(pane: HTMLElement) {
               <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="segments" data-fmt="txt">TXT</button>
               <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="segments" data-fmt="csv">CSV</button>
               <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="segments" data-fmt="tsv">TSV</button>
+              <button class="btn btn-secondary btn-sm exp-export-btn" data-scope="segments" data-fmt="docx">DOCX</button>
             </div>
             <div class="exp-result" id="exp-segments-result"></div>
           </div>
