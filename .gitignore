@@ -4,3 +4,16 @@ src-tauri/target/
 src-tauri/gen/
 *.db
 .DS_Store
+
+# Backend Python
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/**/*.egg-info/
+backend/.pytest_cache/
+backend/.venv/
+backend/venv/
+backend/tests/episodes/
+backend/tests/runs/
+backend/tests/*.db
+backend/tests/*.json
+backend/tests/*.toml
