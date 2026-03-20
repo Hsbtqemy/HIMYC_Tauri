@@ -4478,10 +4478,14 @@ async function renderConcordance(
       wrap.innerHTML = `<div class="conc-empty">Aucun résultat${filters.q ? ` pour « ${escapeHtml(filters.q)} »` : ""}.</div>`;
       return;
     }
-    // Determine which target lang columns exist in the data
-    const hasEn = res.rows.some((r) => r.text_en);
-    const hasFr = res.rows.some((r) => r.text_fr);
-    const hasIt = res.rows.some((r) => r.text_it);
+    const pivotLang = res.pivot_lang || "en";
+    // Determine which lang columns are populated
+    const langCols: Array<{ lang: "en" | "fr" | "it"; key: keyof ConcordanceRow }> = (
+      ["en", "fr", "it"] as const
+    )
+      .filter((lg) => res.rows.some((r) => r[`text_${lg}` as keyof ConcordanceRow]))
+      .map((lg) => ({ lang: lg, key: `text_${lg}` as keyof ConcordanceRow }));
+
     const hl = filters.q ? filters.q.toLowerCase() : null;
 
     const highlight = (text: string): string => {
@@ -4494,28 +4498,32 @@ async function renderConcordance(
       );
     };
 
-    const confBadge = (conf: number | null) =>
+    const confBadge = (conf: number | null | undefined) =>
       conf != null ? `<span class="conc-conf">${Math.round(conf * 100)}%</span>` : "";
 
     const colHeaders = [
       `<th>#</th>`,
       `<th>Personnage</th>`,
       `<th>Transcript</th>`,
-      hasEn ? `<th>EN (pivot)</th>` : "",
-      hasFr ? `<th>FR</th>` : "",
-      hasIt ? `<th>IT</th>` : "",
-    ].filter(Boolean).join("");
+      ...langCols.map(({ lang }) =>
+        `<th>${lang.toUpperCase()}${lang === pivotLang ? " <small>(pivot)</small>" : ""}</th>`),
+    ].join("");
 
     const rowsHtml = res.rows.map((row: ConcordanceRow, i: number) => {
       const speakerHtml = row.personnage
         ? `<span class="conc-speaker">${escapeHtml(row.personnage)}</span>` : "";
+      const langCells = langCols.map(({ lang }) => {
+        const text = (row[`text_${lang}` as keyof ConcordanceRow] as string) || "";
+        const conf = lang === pivotLang
+          ? row.confidence_pivot
+          : (row[`confidence_${lang}` as keyof ConcordanceRow] as number | null);
+        return `<td style="max-width:180px">${highlight(text)}${confBadge(conf)}</td>`;
+      }).join("");
       return `<tr>
         <td style="font-family:ui-monospace,monospace;font-size:0.68rem;color:var(--text-muted);text-align:right">${i + 1}</td>
         <td style="font-size:0.72rem;color:var(--accent);white-space:nowrap">${speakerHtml}</td>
         <td style="max-width:200px">${highlight(row.text_segment)}</td>
-        ${hasEn ? `<td style="max-width:180px">${highlight(row.text_en)}${confBadge(row.confidence_pivot)}</td>` : ""}
-        ${hasFr ? `<td style="max-width:180px">${highlight(row.text_fr)}${confBadge(row.confidence_fr)}</td>` : ""}
-        ${hasIt ? `<td style="max-width:180px">${highlight(row.text_it)}</td>` : ""}
+        ${langCells}
       </tr>`;
     }).join("");
 

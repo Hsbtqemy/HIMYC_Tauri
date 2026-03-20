@@ -515,6 +515,7 @@ export interface ConcordanceRow {
 export interface ConcordanceResponse {
   episode_id: string;
   run_id: string;
+  pivot_lang: string;
   total: number;
   rows: ConcordanceRow[];
 }
