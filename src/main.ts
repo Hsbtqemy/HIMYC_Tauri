@@ -11,9 +11,9 @@
  */
 
 import { initShell } from "./shell.ts";
+import { fetchHealth } from "./api.ts";
 
 const IS_TAURI = import.meta.env.VITE_E2E !== "true" && "__TAURI_INTERNALS__" in window;
-const HEALTH_URL = "http://127.0.0.1:8765/health";
 const POLL_INTERVAL_MS = 500;
 const POLL_MAX_TRIES   = 60; // 30s
 
@@ -46,8 +46,8 @@ function hideOverlay() {
 async function pollHealth(maxTries = POLL_MAX_TRIES): Promise<boolean> {
   for (let i = 0; i < maxTries; i++) {
     try {
-      const res = await fetch(HEALTH_URL);
-      if (res.ok) return true;
+      await fetchHealth();
+      return true;
     } catch { /* pas encore prêt */ }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }

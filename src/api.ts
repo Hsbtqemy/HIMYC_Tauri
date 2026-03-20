@@ -28,6 +28,13 @@ export class ApiError extends Error {
   }
 }
 
+/** Formate une erreur inconnue en message lisible pour l'utilisateur. */
+export function formatApiError(e: unknown): string {
+  if (e instanceof ApiError) return `${e.errorCode} — ${e.message}`;
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 async function _loopbackFetch(
   path: string,
   method = "GET",
@@ -179,6 +186,10 @@ export interface SeriesIndexSaveResult {
   series_title: string;
 }
 
+export async function fetchSeriesIndex(): Promise<SeriesIndexInput & { series_title: string; series_url: string }> {
+  return apiGet("/series_index");
+}
+
 export async function saveSeriesIndex(index: SeriesIndexInput): Promise<SeriesIndexSaveResult> {
   return apiPut<SeriesIndexSaveResult>("/series_index", index);
 }
@@ -200,6 +211,7 @@ export interface Episode {
   season: number;
   episode: number;
   title: string;
+  url?: string;
   sources: EpisodeSource[];
 }
 

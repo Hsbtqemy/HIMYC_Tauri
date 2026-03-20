@@ -867,6 +867,7 @@ let _showParallel                  = false;
 let _caseSensitive                 = false;
 let _unsubscribe: (() => void) | null = null;
 let _closeDropdownsRef: ((e: MouseEvent) => void) | null = null;
+let _searchToken                   = 0; // token anti-race pour les facettes
 
 // ── History ──────────────────────────────────────────────────────────────────
 
@@ -1219,20 +1220,21 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     _styleInjected = true;
   }
 
-  _hits        = [];
-  _page        = 0;
-  _hasMore     = false;
-  _facets      = null;
-  _filterOpen  = false;
-  _histOpen    = false;
-  _expOpen     = false;
-  _builderOpen = false;
-  _helpOpen    = false;
-  _scope       = "segments";
-  _builderMode = "simple";
-  _nearN       = 5;
-  _showAligned = false;
-  _showParallel = false;
+  _hits          = [];
+  _page          = 0;
+  _hasMore       = false;
+  _facets        = null;
+  _filterOpen    = false;
+  _histOpen      = false;
+  _expOpen       = false;
+  _builderOpen   = false;
+  _helpOpen      = false;
+  _scope         = "segments";
+  _builderMode   = "simple";
+  _nearN         = 5;
+  _showAligned   = false;
+  _showParallel  = false;
+  _caseSensitive = false;
 
   container.innerHTML = `
     <div class="kwic-root">
@@ -1755,8 +1757,11 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       case_sensitive: _caseSensitive || undefined,
     };
 
+    const myToken = ++_searchToken;
+
     try {
       const res = await apiPost<QueryResponse>("/query", req);
+      if (_searchToken !== myToken) return;
       _hits    = res.hits;
       _hasMore = res.has_more ?? false;
       _page    = 0;
@@ -1773,9 +1778,11 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
         term, scope: _scope, kind: req.kind, lang: req.lang,
         episode_id: req.episode_id, speaker: req.speaker,
       }).then((f) => {
+        if (_searchToken !== myToken) return;
         _facets = f;
         renderAnalytics(container);
       }).catch(() => {
+        if (_searchToken !== myToken) return;
         _facets = buildFacetsFromHits(raw);
         renderAnalytics(container);
       });
@@ -1801,10 +1808,12 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
 export function disposeConcordancier() {
   if (_unsubscribe)       { _unsubscribe(); _unsubscribe = null; }
   if (_closeDropdownsRef) { document.removeEventListener("click", _closeDropdownsRef); _closeDropdownsRef = null; }
-  _hits         = [];
-  _facets       = null;
-  _showAligned  = false;
-  _showParallel = false;
-  _builderMode  = "simple";
-  _nearN        = 5;
+  _searchToken++;
+  _hits          = [];
+  _facets        = null;
+  _showAligned   = false;
+  _showParallel  = false;
+  _builderMode   = "simple";
+  _nearN         = 5;
+  _caseSensitive = false;
 }

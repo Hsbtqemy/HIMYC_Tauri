@@ -57,6 +57,7 @@ const GLOBAL_CSS = `
   --warning:       #f4a261;
   --radius:        10px;
   --shadow:        0 1px 3px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.08);
+  --bg:            var(--surface);
 }
 
 * { box-sizing: border-box; }

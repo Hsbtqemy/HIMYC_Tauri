@@ -246,7 +246,8 @@ function _renderContent(
   if (info.source_state) {
     const stateRow = elt("div", { class: "meta-field" });
     stateRow.appendChild(elt("span", { class: "meta-lbl" }, "Etat"));
-    const badge = elt("span", { class: `meta-state-badge ${info.source_state}` },
+    const stateClass = info.source_state === "ready_for_alignment" ? "ready" : info.source_state;
+    const badge = elt("span", { class: `meta-state-badge ${stateClass}` },
       _stateLabel(info.source_state));
     stateRow.appendChild(badge);
     body.appendChild(stateRow);

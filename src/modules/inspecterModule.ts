@@ -195,6 +195,8 @@ let _alignBtn: HTMLButtonElement | null = null;
 /** Polling auto-refresh (Écart #2) */
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _watchedJobId: string | null = null;
+/** Token anti-race : stale loadContent ignoré si token périmé */
+let _loadToken = 0;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -395,6 +397,8 @@ async function loadContent(container: HTMLElement) {
     return;
   }
 
+  const myToken = ++_loadToken;
+
   const ep  = _episodes.find((e) => e.episode_id === _selectedEpId);
   const src = ep?.sources.find((s) => s.source_key === _selectedSrcKey);
 
@@ -410,19 +414,22 @@ async function loadContent(container: HTMLElement) {
       () => fetchEpisodeSource(_selectedEpId, _selectedSrcKey),
     );
 
+    if (_loadToken !== myToken) return;
+
     if (data.source_key === "transcript") {
       const t = data as TranscriptSourceContent;
       const hasClean = !!t.clean?.trim();
       renderTabs(container, hasClean);
 
+      // Use onclick (not addEventListener) to avoid accumulating listeners on each reload
       const tabBar = container.querySelector<HTMLElement>(".insp-tabs")!;
       tabBar.querySelectorAll<HTMLElement>(".insp-tab").forEach((tab) => {
-        tab.addEventListener("click", () => {
+        tab.onclick = () => {
           _activeTab = tab.dataset.tab as "raw" | "clean";
           tabBar.querySelectorAll(".insp-tab").forEach((t2) =>
             t2.classList.toggle("active", t2 === tab));
           displayText(wrap, _activeTab === "clean" ? t.clean : t.raw);
-        });
+        };
       });
 
       displayText(wrap, _activeTab === "clean" && hasClean ? t.clean : t.raw);
@@ -435,6 +442,7 @@ async function loadContent(container: HTMLElement) {
     // Panneau méta
     const metaBtn = container.querySelector<HTMLButtonElement>("#insp-btn-meta");
     if (metaBtn && ep && src) {
+      metaBtn.disabled = false;
       metaBtn.onclick = () => {
         const info: EpisodeSourceInfo = {
           episode_id:   ep.episode_id,
@@ -448,6 +456,7 @@ async function loadContent(container: HTMLElement) {
       };
     }
   } catch (e) {
+    if (_loadToken !== myToken) return;
     wrap.innerHTML = "";
     showError(container, e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e));
   }
@@ -652,4 +661,5 @@ export function disposeInspecter() {
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   stopJobPoll();
   _alignBtn = null;
+  _loadToken++; // invalide tout fetch en cours
 }

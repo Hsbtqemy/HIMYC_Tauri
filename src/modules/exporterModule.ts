@@ -1,7 +1,7 @@
 /**
  * exporterModule.ts — Vue Exporter top-level (depuis hub tile) — L4
  *
- * Stage tabs : Corpus | Segments | QA | Jobs
+ * Stage tabs : Corpus | Segments | Alignements | SRT enrichi | Personnages | QA | Jobs
  * KPI strip + gate banner QA + export jobs JSONL.
  */
 
@@ -16,6 +16,7 @@ import {
   propagateCharacters,
   fetchEpisodeSource,
   ApiError,
+  formatApiError,
   type ExportResult,
   type QaReport,
   type AlignmentRunFlat,
@@ -228,6 +229,7 @@ let _srtTabLoaded = false;
 
 export function mountExporter(container: HTMLElement, ctx: ShellContext) {
   injectGlobalCss();
+  _qaPolicy = "lenient";
 
   if (!_styleInjected) {
     const style = document.createElement("style");
@@ -457,7 +459,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
       result.textContent = "✓ Téléchargement lancé";
       result.className = "exp-result visible ok";
     } catch (e) {
-      result.textContent = e instanceof ApiError ? e.message : String(e);
+      result.textContent = formatApiError(e);
       result.className = "exp-result visible err";
     } finally {
       btn.disabled = false;
@@ -498,7 +500,7 @@ async function handleExport(container: HTMLElement, btn: HTMLButtonElement) {
     result.textContent = `✓ ${count} → ${res.path}`;
     result.className = "exp-result visible ok";
   } catch (e) {
-    result.textContent = e instanceof ApiError ? e.message : String(e);
+    result.textContent = formatApiError(e);
     result.className = "exp-result visible err";
   } finally {
     btn.disabled = false;
@@ -549,7 +551,7 @@ async function loadQaData(container: HTMLElement) {
     }
   } catch (e) {
     banner.className = "exp-gate-banner blocking";
-    gateText.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+    gateText.textContent = formatApiError(e);
   }
 }
 
@@ -572,7 +574,7 @@ async function loadAlignmentsTab(container: HTMLElement) {
     _alignRuns = runs;
     renderAlignmentsTab(body);
   } catch (e) {
-    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e)}</div>`;
+    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${formatApiError(e)}</div>`;
   }
 }
 
@@ -636,7 +638,7 @@ function renderAlignmentsTab(body: HTMLElement) {
           result.textContent = `✓ ${res.rows} lignes → ${res.path}`;
           result.className = "exp-result visible ok";
         } catch (e) {
-          result.textContent = e instanceof ApiError ? e.message : String(e);
+          result.textContent = formatApiError(e);
           result.className = "exp-result visible err";
         } finally {
           btn.disabled = false;
@@ -659,7 +661,7 @@ async function loadSrtTab(container: HTMLElement) {
     if (_alignRuns === null) _alignRuns = runs;
     renderSrtTab(body, runs);
   } catch (e) {
-    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e)}</div>`;
+    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${formatApiError(e)}</div>`;
   }
 }
 
@@ -729,7 +731,7 @@ function renderSrtTab(body: HTMLElement, runs: AlignmentRunFlat[]) {
         // Afficher boutons de téléchargement SRT par langue
         _renderSrtDownloadBtns(row, epId, langs);
       } catch (e) {
-        result.textContent = e instanceof ApiError ? e.message : String(e);
+        result.textContent = formatApiError(e);
         result.className = "exp-srt-result-strip srt-propagate-result err";
         result.style.display = "flex";
         btn.disabled = false;

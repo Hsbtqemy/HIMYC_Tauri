@@ -225,6 +225,8 @@ let _styleInjected = false;
 let _unsubscribe: (() => void) | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _pendingJobId: string | null = null;
+let _loaded = false;       // guard : évite de recharger si déjà peuplé
+let _runsToken = 0;        // token anti-race pour loadRuns
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -244,8 +246,10 @@ function targetLangsFromKeys(keys: string[]): string[] {
 async function loadRuns(container: HTMLElement, episodeId: string) {
   const runsEl = container.querySelector<HTMLElement>("#align-runs-body");
   if (!runsEl) return;
+  const myToken = ++_runsToken;
   try {
     const { runs } = await fetchAlignmentRuns(episodeId);
+    if (_runsToken !== myToken) return;
     if (runs.length === 0) {
       runsEl.innerHTML = `<div class="align-runs-empty">Aucun run d'alignement pour cet épisode.</div>`;
       return;
@@ -289,10 +293,14 @@ function startPoll(container: HTMLElement, jobId: string, episodeId: string) {
           fb.style.color = "var(--success)";
           stopPoll();
           loadRuns(container, episodeId);
+          const launchBtn = container.querySelector<HTMLButtonElement>("#align-btn-launch");
+          if (launchBtn) launchBtn.disabled = false;
         } else if (job.status === "error") {
           fb.textContent = formatJobError(job.error_msg);
           fb.style.color = "var(--danger)";
           stopPoll();
+          const launchBtn = container.querySelector<HTMLButtonElement>("#align-btn-launch");
+          if (launchBtn) launchBtn.disabled = false;
         }
       }
     } catch { stopPoll(); }
@@ -470,6 +478,8 @@ async function loadModule(
     const selectedId = handoff?.episode_id ?? episodes[0]?.episode_id ?? "";
     epSel.value = selectedId;
 
+    _loaded = true;
+
     const episode = episodes.find((e) => e.episode_id === selectedId);
     if (episode) {
       renderForm(container, episode, handoff);
@@ -535,7 +545,7 @@ export function mountAligner(container: HTMLElement, ctx: ShellContext) {
     });
 
   _unsubscribe = ctx.onStatusChange((s) => {
-    if (s.online) loadModule(container, handoff);
+    if (s.online && !_loaded) loadModule(container, handoff);
   });
 
   if (ctx.getBackendStatus().online) {
@@ -550,4 +560,6 @@ export function mountAligner(container: HTMLElement, ctx: ShellContext) {
 export function disposeAligner() {
   stopPoll();
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+  _loaded = false;
+  _runsToken++;
 }

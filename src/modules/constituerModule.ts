@@ -65,11 +65,13 @@ import {
   type Character,
   type CharacterAssignment,
   saveSeriesIndex,
+  fetchSeriesIndex,
   type WebEpisodeRef,
   type AlignmentRun,
   type LinkPosition,
   fetchLinkPositions,
   ApiError,
+  formatApiError,
 } from "../api";
 import {
   guardImportTranscript,
@@ -329,6 +331,91 @@ const CSS = `
   gap: 4px;
 }
 .docs-stat-sep { opacity: 0.3; }
+
+/* ── Documents : liste groupée par saison ─────────────────────────── */
+.docs-season-group { margin-bottom: 2px; }
+.docs-season-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 14px; cursor: pointer; user-select: none;
+  background: var(--surface2); border-bottom: 1px solid var(--border);
+  font-size: 0.78rem; font-weight: 600; color: var(--text-muted);
+  position: sticky; top: 0; z-index: 2;
+}
+.docs-season-header:hover { background: var(--surface); color: var(--text); }
+.docs-season-caret { font-size: 10px; transition: transform .15s ease; margin-right: 2px; }
+.docs-season-group.collapsed .docs-season-caret { transform: rotate(-90deg); }
+.docs-season-group.collapsed .docs-season-body { display: none; }
+.docs-season-count {
+  margin-left: auto; font-weight: 400; opacity: .65; font-size: 0.73rem;
+}
+.docs-ep-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 14px; border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: background .12s ease;
+  font-size: 0.82rem;
+}
+.docs-ep-row:hover { background: var(--surface2); }
+.docs-ep-row.active { background: #e8f0fe; }
+.docs-ep-id {
+  font-family: ui-monospace, monospace; font-size: 0.74rem;
+  color: var(--text-muted); min-width: 52px; flex-shrink: 0;
+}
+.docs-ep-title {
+  flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.docs-ep-badges { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+.docs-ep-arrow { color: var(--text-muted); font-size: 0.8rem; flex-shrink: 0; }
+
+/* ── Documents : panneau latéral (style AGRAFES metaPanel) ─────────── */
+.docs-panel-backdrop {
+  position: absolute; inset: 0; background: rgba(0,0,0,.18); z-index: 50;
+}
+.docs-panel {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 340px;
+  background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: -4px 0 16px rgba(0,0,0,.10);
+  display: flex; flex-direction: column; z-index: 51;
+  animation: docs-panel-in .18s ease;
+}
+@keyframes docs-panel-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.docs-panel-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.docs-panel-ep-id {
+  font-family: ui-monospace, monospace; font-size: 0.74rem;
+  color: var(--text-muted);
+}
+.docs-panel-title { flex: 1; font-weight: 600; font-size: 0.88rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docs-panel-close {
+  background: none; border: none; cursor: pointer; color: var(--text-muted);
+  font-size: 1rem; padding: 2px 6px; border-radius: 4px; line-height: 1;
+}
+.docs-panel-close:hover { background: var(--surface2); color: var(--text); }
+.docs-panel-body { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
+.docs-panel-section-head {
+  font-size: 0.7rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;
+}
+.docs-panel-field { display: flex; gap: 8px; align-items: baseline; font-size: 0.82rem; margin-bottom: 4px; }
+.docs-panel-lbl { min-width: 68px; color: var(--text-muted); font-size: 0.75rem; flex-shrink: 0; }
+.docs-panel-val { font-family: ui-monospace, monospace; font-size: 0.78rem; color: var(--text); }
+.docs-edit-row { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.docs-edit-input {
+  flex: 1; padding: 4px 8px; font-size: 0.82rem;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); color: var(--text);
+}
+.docs-edit-input:focus { outline: none; border-color: var(--brand); }
+.docs-source-row {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+}
+.docs-source-row:last-child { border-bottom: none; }
+.docs-source-key { font-family: ui-monospace, monospace; font-size: 0.76rem; font-weight: 600; color: var(--text); }
+.docs-source-actions { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 
 /* Per-episode normalize button in curation list */
 .cur-ep-item { position: relative; }
@@ -1687,7 +1774,7 @@ let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _jobsExpanded = true;
 let _activeSection = "actions";
-let _activeActionsSubView: "hub" | "curation" | "segmentation" | "alignement" = "hub";
+let _activeActionsSubView: "curation" | "segmentation" | "alignement" = "curation";
 let _navCollapsed = false;
 let _page = 0;
 /** Données épisodes en cache pour Documents (rechargées à chaque mount section) */
@@ -1696,6 +1783,10 @@ let _cachedEpisodes: EpisodesResponse | null = null;
 let _cachedConfig: ConfigResponse | null = null;
 /** Référence ShellContext (nécessaire pour navigateTo depuis Documents) */
 let _ctx: ShellContext | null = null;
+/** Épisode actuellement ouvert dans le panneau Documents */
+let _docsPanelEpId: string | null = null;
+/** Filtre saison actif dans Documents (null = toutes) */
+let _docsSeasonFilter: number | null = null;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1827,7 +1918,15 @@ async function refreshJobs(container: HTMLElement) {
     renderJobsPanel(container, jobs);
     // Polling actif tant que jobs pending/running
     const hasActive = jobs.some((j) => j.status === "pending" || j.status === "running");
-    if (!hasActive) stopJobPoll();
+    if (!hasActive) {
+      stopJobPoll();
+      // Refresh the active sub-view episode list so badges reflect actual job results
+      if (_activeSection === "actions") {
+        if (_activeActionsSubView === "curation")     loadAndRender(container);
+        if (_activeActionsSubView === "segmentation") loadAndRenderSegmentation(container);
+        if (_activeActionsSubView === "alignement")   loadAndRenderAlignement(container);
+      }
+    }
   } catch { /* backend down — stop poll */ stopJobPoll(); }
 }
 
@@ -2305,14 +2404,7 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
         await createJob("normalize_transcript", epId, "transcript", { normalize_profile: profile });
         startJobPoll(container);
         btn.textContent = "✓";
-        // Update badge in the item
-        const item = listEl.querySelector<HTMLElement>(`[data-ep-id="${epId}"]`);
-        if (item) {
-          item.dataset.epState = "normalized";
-          const badgeEl = item.querySelector(".cons-badge");
-          if (badgeEl) { badgeEl.textContent = "norm."; badgeEl.className = "cons-badge normalized"; (badgeEl as HTMLElement).style.fontSize = "0.65rem"; }
-          setTimeout(() => btn.remove(), 800);
-        }
+        setTimeout(() => btn.remove(), 800);
       } catch {
         btn.disabled = false;
         btn.textContent = "⚡";
@@ -2450,15 +2542,21 @@ async function loadAndRender(container: HTMLElement) {
 // ── Section Documents ───────────────────────────────────────────────────────
 
 function renderDocumentsSection(pane: HTMLElement) {
+  pane.style.position = "relative"; // nécessaire pour le panneau absolument positionné
   pane.innerHTML = `
     <div class="cons-toolbar">
       <span class="cons-toolbar-title">Documents</span>
-      <input class="cons-search" id="docs-search" type="search" placeholder="Filtrer…" style="font-size:0.8rem;padding:3px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);width:180px">
+      <span class="docs-series-title" id="docs-series-title" style="font-size:0.78rem;color:var(--text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <select id="docs-season-sel" class="insp-select" style="font-size:0.78rem;padding:2px 6px">
+        <option value="">Toutes les saisons</option>
+      </select>
+      <input class="cons-search" id="docs-search" type="search" placeholder="Filtrer…"
+        style="font-size:0.8rem;padding:3px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);width:160px">
       <button class="btn btn-ghost btn-sm" id="docs-refresh">↺ Actualiser</button>
     </div>
     <div class="docs-stats-bar" id="docs-stats-bar"></div>
     <div class="cons-error" id="docs-error" style="display:none"></div>
-    <div class="cons-table-wrap" id="docs-table-wrap">
+    <div id="docs-list" style="flex:1;overflow-y:auto;min-height:0">
       <div class="cons-empty">Chargement…</div>
     </div>`;
 
@@ -2466,20 +2564,36 @@ function renderDocumentsSection(pane: HTMLElement) {
     .addEventListener("click", () => loadDocuments(pane));
 
   pane.querySelector<HTMLInputElement>("#docs-search")!
-    .addEventListener("input", (e) => {
-      const q = (e.target as HTMLInputElement).value.toLowerCase();
-      renderDocumentsTable(pane, q);
+    .addEventListener("input", () => renderDocumentsGrouped(pane));
+
+  pane.querySelector<HTMLSelectElement>("#docs-season-sel")!
+    .addEventListener("change", (e) => {
+      const v = (e.target as HTMLSelectElement).value;
+      _docsSeasonFilter = v ? parseInt(v, 10) : null;
+      renderDocumentsGrouped(pane);
     });
 
   loadDocuments(pane);
 }
 
 async function loadDocuments(pane: HTMLElement) {
+  const errEl = pane.querySelector<HTMLElement>("#docs-error");
+  if (errEl) errEl.style.display = "none";
   try {
     _cachedEpisodes = await fetchEpisodes();
-    renderDocumentsTable(pane, "");
+    // Peupler le sélecteur de saisons
+    const sel = pane.querySelector<HTMLSelectElement>("#docs-season-sel");
+    if (sel && _cachedEpisodes) {
+      const seasons = [...new Set(_cachedEpisodes.episodes.map((e) => e.season))].sort((a, b) => a - b);
+      const opts = seasons.map((s) => `<option value="${s}">Saison ${s}</option>`).join("");
+      sel.innerHTML = `<option value="">Toutes les saisons</option>${opts}`;
+      if (_docsSeasonFilter !== null) sel.value = String(_docsSeasonFilter);
+    }
+    // Titre de série
+    const titleEl = pane.querySelector<HTMLElement>("#docs-series-title");
+    if (titleEl && _cachedEpisodes?.series_title) titleEl.textContent = _cachedEpisodes.series_title;
+    renderDocumentsGrouped(pane);
   } catch (e) {
-    const errEl = pane.querySelector<HTMLElement>("#docs-error");
     if (errEl) {
       errEl.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
       errEl.style.display = "block";
@@ -2487,20 +2601,20 @@ async function loadDocuments(pane: HTMLElement) {
   }
 }
 
-function renderDocumentsTable(pane: HTMLElement, filter: string) {
-  const wrap = pane.querySelector<HTMLElement>("#docs-table-wrap");
-  if (!wrap || !_cachedEpisodes) return;
+function renderDocumentsGrouped(pane: HTMLElement) {
+  const list = pane.querySelector<HTMLElement>("#docs-list");
+  if (!list || !_cachedEpisodes) return;
 
-  // Pipeline stats (on the unfiltered set)
+  // Stats bar (sur l'ensemble non filtré)
   const statsBar = pane.querySelector<HTMLElement>("#docs-stats-bar");
   if (statsBar) {
     let nRaw = 0, nNorm = 0, nSeg = 0, nMissing = 0;
     for (const ep of _cachedEpisodes.episodes) {
       const t = ep.sources.find((s) => s.source_key === "transcript");
       if (!t?.available) { nMissing++; continue; }
-      if (t.state === "segmented")  nSeg++;
-      else if (t.state === "normalized") nNorm++;
-      else nRaw++;
+      if (t.state === "segmented")        nSeg++;
+      else if (t.state === "normalized")  nNorm++;
+      else                                nRaw++;
     }
     const total = _cachedEpisodes.episodes.length;
     statsBar.innerHTML = [
@@ -2512,65 +2626,329 @@ function renderDocumentsTable(pane: HTMLElement, filter: string) {
     ].join("");
   }
 
-  const episodes = filter
-    ? _cachedEpisodes.episodes.filter(
-        (ep) =>
-          ep.episode_id.toLowerCase().includes(filter) ||
-          ep.title.toLowerCase().includes(filter),
-      )
-    : _cachedEpisodes.episodes;
+  // Filtres
+  const q = (pane.querySelector<HTMLInputElement>("#docs-search")?.value ?? "").toLowerCase();
+  let episodes = _cachedEpisodes.episodes;
+  if (_docsSeasonFilter !== null) episodes = episodes.filter((ep) => ep.season === _docsSeasonFilter);
+  if (q) episodes = episodes.filter((ep) =>
+    ep.episode_id.toLowerCase().includes(q) || ep.title.toLowerCase().includes(q),
+  );
 
   if (episodes.length === 0) {
-    wrap.innerHTML = `<div class="cons-empty">${filter ? "Aucun résultat pour « " + escapeHtml(filter) + " »." : "Aucun épisode dans ce projet."}</div>`;
+    list.innerHTML = `<div class="cons-empty">${q || _docsSeasonFilter !== null ? "Aucun résultat." : "Aucun épisode dans ce projet."}</div>`;
     return;
   }
 
+  // Grouper par saison
+  const bySeasonMap = new Map<number, typeof episodes>();
+  for (const ep of episodes) {
+    if (!bySeasonMap.has(ep.season)) bySeasonMap.set(ep.season, []);
+    bySeasonMap.get(ep.season)!.push(ep);
+  }
+  const seasons = [...bySeasonMap.keys()].sort((a, b) => a - b);
   const srtLangs = collectSrtLangs(episodes);
-  const srtHeaders = srtLangs.map((l) => `<th>SRT ${escapeHtml(l.toUpperCase())}</th>`).join("");
 
-  const rows = episodes.map((ep) => {
-    const transcript = sourceForKey(ep, "transcript");
-    const transcriptCell = transcript
-      ? stateBadge(transcript)
-      : `<span class="cons-badge absent">—</span>`;
+  list.innerHTML = "";
+  for (const season of seasons) {
+    const eps = bySeasonMap.get(season)!;
+    const group = document.createElement("div");
+    group.className = "docs-season-group";
+    group.dataset.season = String(season);
 
-    const srtCells = srtLangs.map((lang) => {
-      const src = sourceForKey(ep, `srt_${lang}`);
-      return `<td>${src ? stateBadge(src) : `<span class="cons-badge absent">—</span>`}</td>`;
-    }).join("");
+    // Header saison
+    const header = document.createElement("div");
+    header.className = "docs-season-header";
+    header.innerHTML = `
+      <span class="docs-season-caret">▾</span>
+      <span>Saison ${season}</span>
+      <span class="docs-season-count">${eps.length} épisode${eps.length > 1 ? "s" : ""}</span>`;
+    header.addEventListener("click", () => group.classList.toggle("collapsed"));
 
-    return `
-      <tr>
-        <td style="font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
-        <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title)}</td>
-        <td>${transcriptCell}</td>
-        ${srtCells}
-        <td>
-          <button class="btn btn-secondary btn-sm" data-inspecter="${escapeHtml(ep.episode_id)}" title="Ouvrir dans l'Inspecter">→ Inspecter</button>
-        </td>
-      </tr>`;
-  }).join("");
+    // Body
+    const body = document.createElement("div");
+    body.className = "docs-season-body";
 
-  wrap.innerHTML = `
-    <div style="padding:4px 16px;font-size:0.75rem;color:var(--text-muted)">${episodes.length} épisode${episodes.length > 1 ? "s" : ""}</div>
-    <table class="cons-table">
-      <thead>
-        <tr>
-          <th>Épisode</th><th>Titre</th><th>Transcript</th>
-          ${srtHeaders}
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+    for (const ep of eps) {
+      const transcript = sourceForKey(ep, "transcript");
+      const srtBadges = srtLangs.map((lang) => {
+        const src = sourceForKey(ep, `srt_${lang}`);
+        return src?.available
+          ? stateBadge(src)
+          : `<span class="cons-badge absent" title="SRT ${lang.toUpperCase()} absent">${lang.toUpperCase()}</span>`;
+      }).join("");
 
-  wrap.querySelectorAll<HTMLButtonElement>("[data-inspecter]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (!_ctx) return;
-      _ctx.setInspecterTarget({ episode_id: btn.dataset.inspecter! });
-      _ctx.navigateTo("inspecter");
+      const row = document.createElement("div");
+      row.className = `docs-ep-row${_docsPanelEpId === ep.episode_id ? " active" : ""}`;
+      row.dataset.epId = ep.episode_id;
+      row.innerHTML = `
+        <span class="docs-ep-id">${escapeHtml(ep.episode_id)}</span>
+        <span class="docs-ep-title" title="${escapeHtml(ep.title)}">${escapeHtml(ep.title) || "<em style='color:var(--text-muted)'>sans titre</em>"}</span>
+        <span class="docs-ep-badges">
+          ${transcript?.available ? stateBadge(transcript) : `<span class="cons-badge absent">—</span>`}
+          ${srtBadges}
+        </span>
+        <span class="docs-ep-arrow">›</span>`;
+      row.addEventListener("click", () => openDocPanel(ep, pane));
+      body.appendChild(row);
+    }
+
+    group.appendChild(header);
+    group.appendChild(body);
+    list.appendChild(group);
+  }
+}
+
+// ── Panneau latéral Documents ────────────────────────────────────────────────
+
+function closeDocPanel(pane: HTMLElement) {
+  _docsPanelEpId = null;
+  pane.querySelector(".docs-panel-backdrop")?.remove();
+  pane.querySelector(".docs-panel")?.remove();
+  pane.querySelectorAll<HTMLElement>(".docs-ep-row.active")
+    .forEach((r) => r.classList.remove("active"));
+}
+
+function openDocPanel(ep: Episode, pane: HTMLElement) {
+  // Fermer si re-clic sur le même épisode
+  if (_docsPanelEpId === ep.episode_id) { closeDocPanel(pane); return; }
+  closeDocPanel(pane);
+  _docsPanelEpId = ep.episode_id;
+
+  // Marquer la ligne active
+  pane.querySelector<HTMLElement>(`.docs-ep-row[data-ep-id="${ep.episode_id}"]`)
+    ?.classList.add("active");
+
+  // Backdrop (ferme le panel au clic)
+  const backdrop = document.createElement("div");
+  backdrop.className = "docs-panel-backdrop";
+  backdrop.addEventListener("click", () => closeDocPanel(pane));
+
+  // Panel
+  const panel = document.createElement("div");
+  panel.className = "docs-panel";
+  renderDocPanel(ep, panel, pane);
+
+  pane.appendChild(backdrop);
+  pane.appendChild(panel);
+}
+
+function renderDocPanel(ep: Episode, panel: HTMLElement, pane: HTMLElement) {
+  const onRefresh = async () => {
+    await loadDocuments(pane);
+    // Ré-ouvrir le panel avec les données fraîches
+    const fresh = _cachedEpisodes?.episodes.find((e) => e.episode_id === ep.episode_id);
+    if (fresh) renderDocPanel(fresh, panel, pane);
+    else closeDocPanel(pane);
+  };
+
+  const srtLangs = _cachedEpisodes ? collectSrtLangs(_cachedEpisodes.episodes) : [];
+
+  panel.innerHTML = `
+    <div class="docs-panel-head">
+      <span class="docs-panel-ep-id">${escapeHtml(ep.episode_id)}</span>
+      <span class="docs-panel-title">${escapeHtml(ep.title) || "—"}</span>
+      <button class="docs-panel-close" id="docs-panel-close" title="Fermer">✕</button>
+    </div>
+    <div class="docs-panel-body">
+
+      <!-- Métadonnées -->
+      <div>
+        <div class="docs-panel-section-head">Métadonnées</div>
+        <div class="docs-panel-field">
+          <span class="docs-panel-lbl">ID</span>
+          <span class="docs-panel-val">${escapeHtml(ep.episode_id)}</span>
+        </div>
+        <div class="docs-panel-field">
+          <span class="docs-panel-lbl">Saison · Ép.</span>
+          <span class="docs-panel-val">S${String(ep.season).padStart(2,"0")} · E${String(ep.episode).padStart(2,"0")}</span>
+        </div>
+        <div class="docs-panel-field" style="align-items:flex-start">
+          <span class="docs-panel-lbl" style="padding-top:4px">Titre</span>
+          <div style="flex:1">
+            <div class="docs-edit-row">
+              <input class="docs-edit-input" id="docs-edit-title" type="text" value="${escapeHtml(ep.title)}" placeholder="Titre de l'épisode">
+              <button class="btn btn-ghost btn-sm" id="docs-save-title">✓</button>
+            </div>
+            <div id="docs-title-fb" style="font-size:0.72rem;min-height:1em;margin-top:2px;color:var(--text-muted)"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sources -->
+      <div>
+        <div class="docs-panel-section-head">Sources</div>
+        <div id="docs-panel-sources"></div>
+      </div>
+
+    </div>`;
+
+  // Fermeture
+  panel.querySelector<HTMLButtonElement>("#docs-panel-close")!
+    .addEventListener("click", () => closeDocPanel(pane));
+
+  // Édition titre
+  const titleInput = panel.querySelector<HTMLInputElement>("#docs-edit-title")!;
+  const titleFb    = panel.querySelector<HTMLElement>("#docs-title-fb")!;
+  panel.querySelector<HTMLButtonElement>("#docs-save-title")!
+    .addEventListener("click", async () => {
+      const newTitle = titleInput.value.trim();
+      if (newTitle === ep.title) return;
+      titleFb.textContent = "Enregistrement…";
+      titleFb.style.color = "var(--text-muted)";
+      try {
+        const idx = await fetchSeriesIndex();
+        const updated = idx.episodes.map((e) =>
+          e.episode_id === ep.episode_id ? { ...e, title: newTitle } : e,
+        );
+        await saveSeriesIndex({ ...idx, episodes: updated });
+        titleFb.textContent = "✓ Sauvegardé";
+        titleFb.style.color = "var(--success, #16a34a)";
+        ep = { ...ep, title: newTitle };
+        panel.querySelector<HTMLElement>(".docs-panel-title")!.textContent = newTitle || "—";
+        setTimeout(() => { titleFb.textContent = ""; }, 2000);
+        _cachedEpisodes = null; // invalider le cache
+      } catch (e) {
+        titleFb.textContent = formatApiError(e);
+        titleFb.style.color = "var(--danger, #dc2626)";
+      }
+    });
+  titleInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") panel.querySelector<HTMLButtonElement>("#docs-save-title")!.click();
+  });
+
+  // Sources
+  const sourcesEl = panel.querySelector<HTMLElement>("#docs-panel-sources")!;
+  const allSrtSources = srtLangs.map((lang) => sourceForKey(ep, `srt_${lang}`));
+  const hasTranscript = sourceForKey(ep, "transcript");
+
+  // Transcript
+  renderDocPanelSource(
+    sourcesEl, ep, "transcript",
+    hasTranscript ?? null, pane, onRefresh,
+  );
+
+  // SRT connus
+  for (const lang of srtLangs) {
+    renderDocPanelSource(
+      sourcesEl, ep, `srt_${lang}`,
+      allSrtSources[srtLangs.indexOf(lang)] ?? null, pane, onRefresh,
+    );
+  }
+
+  // Bouton "Importer nouveau SRT" (toute langue)
+  const importSrtRow = document.createElement("div");
+  importSrtRow.className = "docs-source-row";
+  importSrtRow.style.borderBottom = "none";
+  const srtLangInput = document.createElement("input");
+  srtLangInput.type = "text"; srtLangInput.value = "fr"; srtLangInput.placeholder = "ex: fr, en";
+  srtLangInput.className = "docs-edit-input";
+  srtLangInput.style.cssText = "width:60px;margin-right:4px";
+  const importSrtBtn = document.createElement("button");
+  importSrtBtn.className = "btn btn-secondary btn-sm";
+  importSrtBtn.textContent = "🔤 Importer SRT";
+  importSrtBtn.addEventListener("click", async () => {
+    const lang = srtLangInput.value.trim();
+    if (!lang) return;
+    await handleImportSrt(ep.episode_id, lang, onRefresh, (msg) => {
+      titleFb.textContent = msg; titleFb.style.color = "var(--danger, #dc2626)";
     });
   });
+  importSrtRow.innerHTML = `<div class="docs-panel-section-head" style="margin-bottom:4px">Nouvelle piste SRT</div>`;
+  const row = document.createElement("div");
+  row.className = "docs-source-actions";
+  row.appendChild(srtLangInput);
+  row.appendChild(importSrtBtn);
+  importSrtRow.appendChild(row);
+  sourcesEl.appendChild(importSrtRow);
+}
+
+function renderDocPanelSource(
+  container: HTMLElement,
+  ep: Episode,
+  sourceKey: string,
+  src: EpisodeSource | null,
+  pane: HTMLElement,
+  onRefresh: () => void,
+) {
+  const row = document.createElement("div");
+  row.className = "docs-source-row";
+
+  const keyLabel = document.createElement("div");
+  keyLabel.style.display = "flex"; keyLabel.style.alignItems = "center"; keyLabel.style.gap = "6px";
+  const keyEl = document.createElement("span");
+  keyEl.className = "docs-source-key";
+  keyEl.textContent = sourceKey;
+  keyLabel.appendChild(keyEl);
+  if (src?.available) keyLabel.appendChild((() => { const el = document.createElement("span"); el.innerHTML = stateBadge(src); return el.firstChild as Node; })());
+  else {
+    const absent = document.createElement("span"); absent.className = "cons-badge absent"; absent.textContent = "absent";
+    keyLabel.appendChild(absent);
+  }
+  row.appendChild(keyLabel);
+
+  const actions = document.createElement("div");
+  actions.className = "docs-source-actions";
+
+  if (src?.available) {
+    // → Inspecter
+    const inspBtn = document.createElement("button");
+    inspBtn.className = "btn btn-secondary btn-sm";
+    inspBtn.textContent = "→ Inspecter";
+    inspBtn.addEventListener("click", () => {
+      if (!_ctx) return;
+      _ctx.setInspecterTarget({ episode_id: ep.episode_id, source_key: sourceKey });
+      _ctx.navigateTo("inspecter");
+    });
+    actions.appendChild(inspBtn);
+
+    // Supprimer
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn btn-ghost btn-sm";
+    delBtn.title = `Supprimer ${sourceKey}`;
+    delBtn.textContent = "🗑";
+    delBtn.addEventListener("click", async () => {
+      const what = sourceKey === "transcript" ? "le transcript" : `la piste ${sourceKey}`;
+      if (!confirm(`Supprimer ${what} de « ${ep.episode_id} » ? (irréversible)`)) return;
+      try {
+        if (sourceKey === "transcript") await deleteTranscript(ep.episode_id);
+        else await deleteSrt(ep.episode_id, sourceKey.replace("srt_", ""));
+        onRefresh();
+      } catch (e) { alert(formatApiError(e)); }
+    });
+    actions.appendChild(delBtn);
+  } else if (sourceKey === "transcript") {
+    // ⬇ Télécharger depuis Subslikescript (si URL connue)
+    if (ep.url && ep.url.includes("subslikescript")) {
+      const slBtn = document.createElement("button");
+      slBtn.className = "btn btn-primary btn-sm";
+      slBtn.textContent = "⬇ Subslikescript";
+      slBtn.title = ep.url;
+      slBtn.addEventListener("click", async () => {
+        slBtn.disabled = true;
+        slBtn.textContent = "…";
+        try {
+          const res = await fetchSubslikescriptTranscript(ep.episode_id, ep.url!);
+          slBtn.textContent = "✓";
+          setTimeout(onRefresh, 300);
+          void res;
+        } catch (e) {
+          slBtn.disabled = false;
+          slBtn.textContent = "⬇ Subslikescript";
+          alert(formatApiError(e));
+        }
+      });
+      actions.appendChild(slBtn);
+    }
+    // Importer depuis fichier local
+    const impBtn = document.createElement("button");
+    impBtn.className = "btn btn-secondary btn-sm";
+    impBtn.textContent = "📄 Fichier local";
+    impBtn.addEventListener("click", () => handleImportTranscript(ep.episode_id, onRefresh, (msg) => alert(msg)));
+    actions.appendChild(impBtn);
+  }
+
+  if (actions.childElementCount > 0) row.appendChild(actions);
+  container.appendChild(row);
 }
 
 // ── Section Importer ────────────────────────────────────────────────────────
@@ -2592,6 +2970,11 @@ function renderImporterSection(pane: HTMLElement) {
             <select id="imp-ep-select" class="insp-select" style="max-width:280px">
               <option value="">— chargement… —</option>
             </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+            <label style="font-size:0.8rem;color:var(--text-muted);min-width:90px">Langue SRT</label>
+            <input id="imp-srt-lang" type="text" value="fr" placeholder="ex: fr, en, it"
+              style="width:80px;padding:3px 7px;font-size:0.82rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text)">
           </div>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" id="imp-transcript-btn">📄 Importer transcript</button>
@@ -2751,28 +3134,90 @@ function renderWebEpisodesTable(episodes: WebEpisodeRef[], showFetchBtn: boolean
   </table>`;
 }
 
-function wireSubslikeFetchButtons(
+function renderSubslikeBatchUI(episodes: WebEpisodeRef[]): string {
+  if (episodes.length === 0) return `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.82rem">Aucun épisode trouvé.</div>`;
+  const rows = episodes.map((ep) => `
+    <tr class="sl-ep-row" data-ep-id="${escapeHtml(ep.episode_id)}">
+      <td style="padding:3px 6px"><input type="checkbox" class="sl-ep-check" data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-url="${escapeHtml(ep.url)}" checked></td>
+      <td style="white-space:nowrap">${escapeHtml(ep.episode_id)}</td>
+      <td>${escapeHtml(ep.title)}</td>
+      <td class="sl-ep-status" style="white-space:nowrap;font-size:0.78rem;color:var(--text-muted)"></td>
+    </tr>`).join("");
+  return `
+    <div class="sl-batch-toolbar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.82rem">
+        <input type="checkbox" id="sl-check-all" checked> Tout sélectionner
+      </label>
+      <span id="sl-sel-count" style="color:var(--text-muted);font-size:0.82rem">${episodes.length} épisodes sélectionnés</span>
+      <button class="btn btn-primary btn-sm" id="sl-batch-btn" style="margin-left:auto">⬇ Télécharger la sélection (${episodes.length})</button>
+    </div>
+    <div style="overflow-x:auto;max-height:320px;overflow-y:auto">
+      <table style="width:100%">
+        <thead><tr><th></th><th>ID</th><th>Titre</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function wireSubslikeBatchUI(
   container: HTMLElement,
   setFeedback: (msg: string, ok?: boolean) => void,
 ) {
-  container.querySelectorAll<HTMLButtonElement>(".web-fetch-transcript-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const epId  = btn.dataset.epId!;
-      const epUrl = btn.dataset.epUrl!;
-      btn.disabled = true;
-      btn.textContent = "…";
-      setFeedback(`Téléchargement ${epId}…`);
+  const checkAll  = container.querySelector<HTMLInputElement>("#sl-check-all")!;
+  const selCount  = container.querySelector<HTMLElement>("#sl-sel-count")!;
+  const batchBtn  = container.querySelector<HTMLButtonElement>("#sl-batch-btn")!;
+  const allChecks = () => Array.from(container.querySelectorAll<HTMLInputElement>(".sl-ep-check"));
+
+  const updateCount = () => {
+    const n = allChecks().filter((c) => c.checked).length;
+    selCount.textContent = `${n} épisode${n > 1 ? "s" : ""} sélectionné${n > 1 ? "s" : ""}`;
+    batchBtn.textContent = `⬇ Télécharger la sélection (${n})`;
+    batchBtn.disabled = n === 0;
+    checkAll.indeterminate = n > 0 && n < allChecks().length;
+    checkAll.checked = n === allChecks().length;
+  };
+
+  checkAll.addEventListener("change", () => {
+    allChecks().forEach((c) => { c.checked = checkAll.checked; });
+    updateCount();
+  });
+  allChecks().forEach((c) => c.addEventListener("change", updateCount));
+
+  batchBtn.addEventListener("click", async () => {
+    const selected = allChecks().filter((c) => c.checked);
+    if (selected.length === 0) { setFeedback("Aucun épisode sélectionné.", false); return; }
+    batchBtn.disabled = true;
+    let ok = 0, fail = 0;
+    for (let i = 0; i < selected.length; i++) {
+      const chk   = selected[i];
+      const epId  = chk.dataset.epId!;
+      const epUrl = chk.dataset.epUrl!;
+      const row   = container.querySelector<HTMLElement>(`.sl-ep-row[data-ep-id="${CSS.escape(epId)}"]`);
+      const statusEl = row?.querySelector<HTMLElement>(".sl-ep-status");
+      setFeedback(`Téléchargement ${i + 1}/${selected.length} : ${epId}…`);
+      if (statusEl) { statusEl.textContent = "…"; statusEl.style.color = "var(--text-muted)"; }
       try {
         const res = await fetchSubslikescriptTranscript(epId, epUrl);
-        btn.textContent = "✓";
-        setFeedback(`${epId} importé — ${res.chars} chars.`);
-        _cachedEpisodes = null;
+        if (statusEl) { statusEl.textContent = `✓ ${res.chars} chars`; statusEl.style.color = "var(--success,#16a34a)"; }
+        chk.checked = false;
+        ok++;
       } catch (e) {
-        btn.disabled = false;
-        btn.textContent = "⬇ Importer";
-        setFeedback(e instanceof ApiError ? e.message : String(e), false);
+        if (statusEl) {
+          statusEl.textContent = "✗";
+          statusEl.style.color = "var(--danger,#dc2626)";
+          statusEl.title = e instanceof Error ? e.message : String(e);
+        }
+        fail++;
       }
-    });
+      updateCount();
+      if (i < selected.length - 1) await new Promise<void>((r) => setTimeout(r, 1500));
+    }
+    _cachedEpisodes = null;
+    batchBtn.disabled = false;
+    setFeedback(
+      `Terminé — ${ok} importé${ok > 1 ? "s" : ""}${fail > 0 ? `, ${fail} erreur${fail > 1 ? "s" : ""}` : ""}.`,
+      fail === 0,
+    );
   });
 }
 
@@ -2799,10 +3244,10 @@ function wireImporterButtons(pane: HTMLElement) {
     .addEventListener("click", async () => {
       const epId = pane.querySelector<HTMLSelectElement>("#imp-ep-select")!.value;
       if (!epId) { setFeedback("Sélectionnez un épisode.", false); return; }
-      const lang = window.prompt("Langue de la piste SRT (ex: en, fr, it) :");
-      if (!lang?.trim()) return;
+      const lang = pane.querySelector<HTMLInputElement>("#imp-srt-lang")!.value.trim();
+      if (!lang) { setFeedback("Saisissez un code langue (ex: fr, en).", false); return; }
       await handleImportSrt(
-        epId, lang.trim(),
+        epId, lang,
         () => { setFeedback(`SRT ${lang} importé pour ${epId}.`); _cachedEpisodes = null; _tradViewMounted = false; },
         (msg) => setFeedback(msg, false),
       );
@@ -2890,9 +3335,9 @@ function wireImporterButtons(pane: HTMLElement) {
         setSlFeedback(`${data.series_title} — ${data.episode_count} épisodes.`);
         slResults.style.display = "block";
         slResults.innerHTML =
-          renderWebEpisodesTable(data.episodes, true) +
-          `<div style="margin-top:8px"><button class="btn btn-primary btn-sm" id="subslike-save-btn">✓ Enregistrer la structure (${data.episode_count} épisodes)</button></div>`;
-        wireSubslikeFetchButtons(slResults, setSlFeedback);
+          renderSubslikeBatchUI(data.episodes) +
+          `<div style="margin-top:8px"><button class="btn btn-secondary btn-sm" id="subslike-save-btn">✓ Enregistrer la structure (${data.episode_count} épisodes)</button></div>`;
+        wireSubslikeBatchUI(slResults, setSlFeedback);
         pane.querySelector<HTMLButtonElement>("#subslike-save-btn")!
           .addEventListener("click", async () => {
             if (!_slLastData) return;
@@ -3176,8 +3621,8 @@ function renderLongtextSegments(
     <div class="seg-lt-search-bar">
       <input type="text" class="seg-lt-search-bar input" placeholder="Rechercher dans le texte…" id="lt-search-input" autocomplete="off">
       <div class="seg-lt-search-nav">
-        <button id="lt-search-prev" title="Précédent (Shift+Entrée)">▲</button>
-        <button id="lt-search-next" title="Suivant (Entrée)">▼</button>
+        <button class="btn btn-ghost btn-sm" id="lt-search-prev" title="Précédent (Shift+Entrée)">▲</button>
+        <button class="btn btn-ghost btn-sm" id="lt-search-next" title="Suivant (Entrée)">▼</button>
       </div>
       <span class="seg-lt-search-count" id="lt-search-count"></span>
     </div>
@@ -3422,6 +3867,7 @@ const _VS_ROW_H = 40;  // px — estimated row height (single-line cells)
 const _VS_BUFFER = 6;  // extra rows rendered above and below viewport
 let _vsLinks: AuditLink[] = [];
 let _vsFocusIdx = -1;
+let _auditLoadToken = 0; // incremented on each load — stale fetches are discarded
 
 const _MINIMAP_STATUS_COLORS: Record<string, string> = {
   accepted: "#22c55e",
@@ -3912,6 +4358,10 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
   const pager   = panel.querySelector<HTMLElement>("#audit-pager");
   const countEl = panel.querySelector<HTMLElement>("#audit-count");
   if (!wrap) return;
+
+  // Guard against race conditions: stale fetches from a previous run are discarded
+  const myToken = ++_auditLoadToken;
+
   wrap.innerHTML = `<div style="padding:12px;font-size:0.78rem;color:var(--text-muted)">Chargement…</div>`;
   if (pager) pager.innerHTML = "";
   try {
@@ -3923,6 +4373,8 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
       offset: 0,
       limit:  BATCH,
     });
+    if (_auditLoadToken !== myToken) return;
+
     _auditState.total = first.total;
     if (countEl) countEl.textContent = `${first.total} lien(s)`;
 
@@ -3934,7 +4386,7 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
     }
 
     // Fetch remaining batches in parallel
-    _vsLinks = [...first.links];
+    let links = [...first.links];
     if (first.total > BATCH) {
       const batches: Promise<{ links: AuditLink[] }>[] = [];
       for (let off = BATCH; off < first.total; off += BATCH) {
@@ -3946,13 +4398,16 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
         }));
       }
       const results = await Promise.all(batches);
-      for (const r of results) _vsLinks.push(...r.links);
+      if (_auditLoadToken !== myToken) return;
+      for (const r of results) links.push(...r.links);
     }
 
+    _vsLinks = links;
     _vsFocusIdx = -1;
     _vsSetup(wrap, panel, epId, runId);
     updateMinimapViewport(panel);
   } catch (e) {
+    if (_auditLoadToken !== myToken) return;
     wrap.innerHTML = `<div style="padding:12px;font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
   }
 }
@@ -5117,7 +5572,9 @@ function renderCharDetail(pane: HTMLElement, char: Character | null) {
 
   if (!isNew) {
     detail.querySelector<HTMLButtonElement>("#pers-delete-btn")?.addEventListener("click", async () => {
-      if (!confirm(`Supprimer « ${c.canonical} » et toutes ses assignations ?`)) return;
+      const assignCount = _assignments.filter((a) => a.character_id === c.id).length;
+      const assignMsg = assignCount > 0 ? ` et ses ${assignCount} assignation(s)` : "";
+      if (!confirm(`Supprimer « ${c.canonical} »${assignMsg} ? (irréversible)`)) return;
       const newList = _characters.filter((ch) => ch.id !== c.id);
       const newAssignments = _assignments.filter((a) => a.character_id !== c.id);
       try {
@@ -5315,8 +5772,10 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
   // Restore persisted nav state
   _navCollapsed = localStorage.getItem("cons-nav-collapsed") === "1";
-  const _savedSubView = localStorage.getItem("cons-active-subview") as typeof _activeActionsSubView | null;
-  if (_savedSubView) _activeActionsSubView = _savedSubView;
+  const _savedSubView = localStorage.getItem("cons-active-subview");
+  if (_savedSubView === "curation" || _savedSubView === "segmentation" || _savedSubView === "alignement") {
+    _activeActionsSubView = _savedSubView;
+  }
   const _savedSection = localStorage.getItem("cons-active-section");
   if (_savedSection) _activeSection = _savedSection;
 
@@ -5335,17 +5794,11 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         <button class="cons-nav-tab${_activeSection === "documents"   ? " active" : ""}" data-section="documents">Documents</button>
         <button class="cons-nav-tab${_activeSection === "actions"     ? " active" : ""}" data-section="actions">Actions</button>
 
-        <details class="cons-nav-tree" ${_activeSection === "actions" ? "open" : ""}>
-          <summary class="cons-nav-tree-summary">
-            Actions disponibles
-            <span class="cons-nav-tree-caret">▾</span>
-          </summary>
-          <div class="cons-nav-tree-body">
-            <button class="cons-nav-tree-link${_activeActionsSubView === "curation"     ? " active" : ""}" data-subview="curation">Curation</button>
-            <button class="cons-nav-tree-link${_activeActionsSubView === "segmentation" ? " active" : ""}" data-subview="segmentation">Segmentation</button>
-            <button class="cons-nav-tree-link${_activeActionsSubView === "alignement"   ? " active" : ""}" data-subview="alignement">Alignement</button>
-          </div>
-        </details>
+        <div class="cons-nav-tree-body">
+          <button class="cons-nav-tree-link${_activeSection === "actions" && _activeActionsSubView === "curation"     ? " active" : ""}" data-subview="curation">Curation</button>
+          <button class="cons-nav-tree-link${_activeSection === "actions" && _activeActionsSubView === "segmentation" ? " active" : ""}" data-subview="segmentation">Segmentation</button>
+          <button class="cons-nav-tree-link${_activeSection === "actions" && _activeActionsSubView === "alignement"   ? " active" : ""}" data-subview="alignement">Alignement</button>
+        </div>
 
         <button class="cons-nav-tab${_activeSection === "personnages" ? " active" : ""}" data-section="personnages">Personnages</button>
         <button class="cons-nav-tab${_activeSection === "exporter"    ? " active" : ""}" data-section="exporter">Exporter</button>
@@ -5396,35 +5849,9 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         <!-- Section : Actions -->
         <div class="cons-section-pane${_activeSection === "actions" ? " active" : ""}" data-section="actions">
 
-          <!-- Hub sub-pane -->
-          <div class="cons-actions-pane${_activeActionsSubView === "hub" ? " active" : ""}" data-subview="hub">
-            <div class="acts-hub">
-              <div class="acts-hub-title">Actions pipeline</div>
-              <div class="acts-hub-desc">Choisissez une étape à appliquer sur vos épisodes.</div>
-              <div class="acts-hub-cards">
-                <button class="acts-hub-card" data-subview="curation">
-                  <div class="acts-hub-card-icon">✂️</div>
-                  <div class="acts-hub-card-title">Curation</div>
-                  <div class="acts-hub-card-desc">Normaliser les transcripts et SRT bruts.</div>
-                </button>
-                <button class="acts-hub-card" data-subview="segmentation">
-                  <div class="acts-hub-card-icon">🔤</div>
-                  <div class="acts-hub-card-title">Segmentation</div>
-                  <div class="acts-hub-card-desc">Découper en segments prêts pour l'alignement.</div>
-                </button>
-                <button class="acts-hub-card" data-subview="alignement">
-                  <div class="acts-hub-card-icon">⚡</div>
-                  <div class="acts-hub-card-title">Alignement</div>
-                  <div class="acts-hub-card-desc">Lancer ou consulter les runs d'alignement.</div>
-                </button>
-              </div>
-            </div>
-          </div>
-
           <!-- Curation sub-pane -->
           <div class="cons-actions-pane${_activeActionsSubView === "curation" ? " active" : ""}" data-subview="curation">
             <div class="cons-toolbar">
-              <button class="acts-back-btn" id="cons-back-curation">← Actions</button>
               <span class="cons-toolbar-title">Curation</span>
               <span class="cons-toolbar-series"></span>
               <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
@@ -5510,7 +5937,6 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           <!-- Segmentation sub-pane -->
           <div class="cons-actions-pane${_activeActionsSubView === "segmentation" ? " active" : ""}" data-subview="segmentation">
             <div class="cons-toolbar">
-              <button class="acts-back-btn" id="cons-back-segmentation">← Actions</button>
               <span class="cons-toolbar-title">Segmentation</span>
               <button class="btn btn-secondary btn-sm" id="cons-batch-segment">🔤 Segmenter tout</button>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-seg">↺ Actualiser</button>
@@ -5559,7 +5985,6 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           <!-- Alignement sub-pane -->
           <div class="cons-actions-pane${_activeActionsSubView === "alignement" ? " active" : ""}" data-subview="alignement">
             <div class="cons-toolbar">
-              <button class="acts-back-btn" id="cons-back-alignement">← Actions</button>
               <span class="cons-toolbar-title">Alignement</span>
               <button class="btn btn-secondary btn-sm" id="cons-batch-align">⚡ Aligner tout</button>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-align">↺ Actualiser</button>
@@ -5646,7 +6071,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   }
 
   // ── Helper: switch Actions sub-view ──────────────────────────────────────
-  function activateSubView(subview: "hub" | "curation" | "segmentation" | "alignement") {
+  function activateSubView(subview: "curation" | "segmentation" | "alignement") {
     _activeActionsSubView = subview;
     localStorage.setItem("cons-active-subview", subview);
     container.querySelectorAll<HTMLElement>(".cons-actions-pane")
@@ -5743,18 +6168,6 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   });
 
   // ── Hub CTA card clicks ───────────────────────────────────────────────────
-  container.querySelectorAll<HTMLButtonElement>(".acts-hub-card").forEach((card) => {
-    card.addEventListener("click", () => {
-      activateSubView(card.dataset.subview as "curation" | "segmentation" | "alignement");
-    });
-  });
-
-  // ── Back buttons ──────────────────────────────────────────────────────────
-  ["curation", "segmentation", "alignement"].forEach((sv) => {
-    const btn = container.querySelector<HTMLButtonElement>(`#cons-back-${sv}`);
-    if (btn) btn.addEventListener("click", () => activateSubView("hub"));
-  });
-
   // ── Segmentation pane wiring ───────────────────────────────────────────────
   container.querySelector<HTMLButtonElement>("#cons-batch-segment")
     ?.addEventListener("click", async () => {
@@ -5916,7 +6329,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         await queueBatchNormalize(episodes, container);
       } catch (e) {
         const errEl = container.querySelector<HTMLElement>(".cons-error");
-        if (errEl) { errEl.textContent = String(e); errEl.style.display = "block"; }
+        if (errEl) { errEl.textContent = formatApiError(e); errEl.style.display = "block"; }
       }
     });
 
@@ -5953,4 +6366,6 @@ export function disposeConstituer() {
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   _container = null;
   _ctx = null;
+  _cachedEpisodes = null;
+  _cachedConfig   = null;
 }

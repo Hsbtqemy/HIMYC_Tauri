@@ -77,4 +77,10 @@ export interface ShellContext {
   setInspecterTarget(t: InspecterTarget | null): void;
   /** Lire et consommer la cible Inspecter (null si navigation directe). */
   getInspecterTarget(): InspecterTarget | null;
+
+  /**
+   * Ouvre le sélecteur de dossier Tauri pour changer de projet.
+   * No-op en mode non-Tauri (dev Vite / E2E).
+   */
+  changeProject(): void;
 }

@@ -103,41 +103,68 @@ const SHELL_CSS = `
     margin-right: 0.25rem;
   }
 
-  .shell-tabs {
+  /* ── Sidebar ────────────────────────────────────────────────── */
+  #shell-sidebar {
+    background: #12151f;
+    border-right: 1px solid rgba(255,255,255,0.07);
     display: flex;
-    height: 44px;
-    gap: 0;
+    flex-direction: column;
+    overflow: hidden;
+    transition: transform 0.22s ease;
+  }
+  #shell-sidebar.collapsed {
+    transform: translateX(-100%);
+  }
+  #app {
+    transition: padding-left 0.22s ease;
+  }
+  #app.sidebar-hidden {
+    padding-left: 0 !important;
   }
 
-  .shell-tab {
-    background: none;
-    border: none;
-    border-bottom: 3px solid transparent;
-    color: rgba(255,255,255,0.65);
-    font-size: 0.875rem;
-    font-weight: 500;
-    padding: 0 1.15rem;
-    height: 100%;
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  .sidebar-section-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(255,255,255,0.22);
+    padding: 0.9rem 0.9rem 0.3rem;
+  }
+
+  .sidebar-nav-item {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.65rem;
+    padding: 0.62rem 0.9rem;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    font-size: 0.83rem;
+    font-family: inherit;
+    border: none;
+    border-left: 3px solid transparent;
+    background: none;
+    width: 100%;
+    text-align: left;
+    transition: color 0.14s, background 0.14s, border-color 0.14s;
+    user-select: none;
   }
-  .shell-tab:hover {
+  .sidebar-nav-item:hover {
+    color: rgba(255,255,255,0.9);
+    background: rgba(255,255,255,0.06);
+  }
+  .sidebar-nav-item.active {
     color: #fff;
-    background: rgba(255,255,255,0.08);
+    font-weight: 600;
+    background: rgba(255,255,255,0.09);
+    border-left-color: var(--accent);
   }
-  .shell-tab.active {
-    color: #fff;
-    font-weight: 700;
-    border-bottom-color: rgba(255,255,255,0.88);
-    background: rgba(255,255,255,0.12);
+  .sidebar-nav-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+    width: 18px;
+    text-align: center;
   }
-  .shell-tab-badge {
-    font-size: 0.7rem;
-    opacity: 0.5;
-  }
+  .sidebar-spacer { flex: 1; }
 
   /* Bouton retour (sous-vues) */
   .shell-back-btn {
@@ -292,6 +319,7 @@ const shellContext: ShellContext = {
   getHandoff()      { const h = _handoff; _handoff = null; return h; },
   setInspecterTarget(t) { _inspecterTarget = t; },
   getInspecterTarget()  { const t = _inspecterTarget; _inspecterTarget = null; return t; },
+  changeProject()       { void _changeProject(); },
 };
 
 function _setBackendStatus(status: BackendStatus) {
@@ -303,6 +331,7 @@ function _setBackendStatus(status: BackendStatus) {
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
 
 let _headerEl: HTMLElement;
+let _sidebarEl: HTMLElement;
 let _appEl: HTMLElement;
 let _apiDot: HTMLElement;
 let _apiLabel: HTMLElement;
@@ -350,8 +379,9 @@ async function _changeProject() {
     for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 500));
       try {
-        const res = await fetch("http://127.0.0.1:8765/health");
-        if (res.ok) { ready = true; break; }
+        await fetchHealth();
+        ready = true;
+        break;
       } catch { /* pas encore prêt */ }
     }
     if (ready) {
@@ -397,6 +427,12 @@ function _navigateTo(mode: Mode) {
   if (_headerEl) _headerEl.style.background = accentHeader;
 
   _rebuildNav();
+
+  // Sidebar : ouverte sur le hub, repliée dans les modules
+  const isHub = mode === "hub";
+  _sidebarEl?.classList.toggle("collapsed",     !isHub);
+  _appEl.classList.toggle("sidebar-hidden", !isHub);
+
   _appEl.innerHTML = "";
   MODE_CONFIGS[mode].mount(_appEl, shellContext);
 }
@@ -404,26 +440,27 @@ function _navigateTo(mode: Mode) {
 // ─── Header ───────────────────────────────────────────────────────────────────
 
 function _rebuildNav() {
-  // Vider la zone nav (entre brand et zones fixes droite)
+  // ── Sidebar : mettre à jour l'item actif ──────────────────────────────────
+  if (_sidebarEl) {
+    _sidebarEl.querySelectorAll<HTMLElement>(".sidebar-nav-item").forEach((item) => {
+      const active = item.dataset.mode === _currentMode
+        || (SUB_VIEWS.has(_currentMode) && item.dataset.mode === _prevNavMode);
+      item.classList.toggle("active", active);
+    });
+  }
+
+  // ── Header : back button pour les sous-vues uniquement ───────────────────
   const brand       = _headerEl.querySelector<HTMLElement>(".shell-brand")!;
   const projectZone = _headerEl.querySelector<HTMLElement>(".shell-project-zone");
   const apiZone     = _headerEl.querySelector<HTMLElement>(".shell-api-zone")!;
+  const insertBefore = projectZone ?? apiZone;
 
-  // Supprimer les éléments de nav existants (préserver brand + project + api)
+  // Supprimer les éléments de nav du header (back btn + breadcrumb)
   Array.from(_headerEl.children).forEach((child) => {
     if (child !== brand && child !== projectZone && child !== apiZone) child.remove();
   });
 
-  // Ancre d'insertion = zone projet si elle existe, sinon zone api
-  const insertBefore = projectZone ?? apiZone;
-
-  if (_currentMode === "hub") {
-    // Hub : pas de tabs, juste brand + projet + api
-    return;
-  }
-
   if (SUB_VIEWS.has(_currentMode)) {
-    // Sous-vue (inspecter / aligner) : bouton retour + breadcrumb
     const backBtn = document.createElement("button");
     backBtn.className = "shell-back-btn";
     backBtn.innerHTML = "← Retour";
@@ -432,25 +469,35 @@ function _rebuildNav() {
 
     const breadcrumb = document.createElement("div");
     breadcrumb.className = "shell-breadcrumb";
-    const modeLabel = _currentMode === "inspecter" ? "Inspecter" : "Aligner";
+    const modeLabel   = _currentMode === "inspecter" ? "Inspecter" : "Aligner";
     const parentLabel = _prevNavMode.charAt(0).toUpperCase() + _prevNavMode.slice(1);
     breadcrumb.innerHTML = `${parentLabel} <span style="opacity:0.4">›</span> <span class="shell-breadcrumb-current">${modeLabel}</span>`;
     _headerEl.insertBefore(breadcrumb, insertBefore);
-    return;
   }
+}
 
-  // Modes nav normaux (concordancier / constituer / exporter)
-  const tabs = document.createElement("div");
-  tabs.className = "shell-tabs";
-  NAV_MODES.forEach(({ mode, label, badge }) => {
+const SIDEBAR_ITEMS: Array<{ mode: NavMode; icon: string; label: string }> = [
+  { mode: "concordancier", icon: "🔍", label: "Concordancier" },
+  { mode: "constituer",    icon: "📂", label: "Constituer" },
+  { mode: "exporter",      icon: "📤", label: "Exporter" },
+];
+
+function _buildSidebar() {
+  const label = document.createElement("div");
+  label.className = "sidebar-section-label";
+  label.textContent = "Navigation";
+  _sidebarEl.appendChild(label);
+
+  SIDEBAR_ITEMS.forEach(({ mode, icon, label }) => {
     const btn = document.createElement("button");
-    btn.className = "shell-tab" + (mode === _currentMode ? " active" : "");
+    btn.className = "sidebar-nav-item";
     btn.dataset.mode = mode;
-    btn.innerHTML = `${label} <span class="shell-tab-badge">${badge}</span>`;
+    btn.innerHTML = `<span class="sidebar-nav-icon">${icon}</span>${label}`;
     btn.addEventListener("click", () => _navigateTo(mode));
-    tabs.appendChild(btn);
+    _sidebarEl.appendChild(btn);
   });
-  _headerEl.insertBefore(tabs, insertBefore);
+
+  _sidebarEl.appendChild(Object.assign(document.createElement("div"), { className: "sidebar-spacer" }));
 }
 
 function _buildHeader() {
@@ -458,10 +505,12 @@ function _buildHeader() {
   style.textContent = SHELL_CSS;
   document.head.appendChild(style);
 
-  // Brand
+  // Brand — cliquable pour revenir au hub
   const brand = document.createElement("div");
   brand.className = "shell-brand";
   brand.textContent = "HIMYC";
+  brand.style.cursor = "pointer";
+  brand.addEventListener("click", () => _navigateTo("hub"));
   _headerEl.appendChild(brand);
 
   // Zone projet (Tauri seulement)
@@ -536,8 +585,9 @@ async function _checkHealth() {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 export async function initShell() {
-  _headerEl = document.getElementById("shell-header")!;
-  _appEl    = document.getElementById("app")!;
+  _headerEl  = document.getElementById("shell-header")!;
+  _sidebarEl = document.getElementById("shell-sidebar")!;
+  _appEl     = document.getElementById("app")!;
 
   // Restaurer le dernier mode (hors hub et hors sous-vues)
   const saved = localStorage.getItem("himyc_last_mode");
@@ -547,6 +597,14 @@ export async function initShell() {
   }
 
   _buildHeader();
+  _buildSidebar();
+
+  // Init état sidebar selon le mode restauré
+  const isHub = _currentMode === "hub";
+  _sidebarEl.classList.toggle("collapsed",     !isHub);
+  _appEl.classList.toggle("sidebar-hidden", !isHub);
+
+  _rebuildNav();
   MODE_CONFIGS[_currentMode].mount(_appEl, shellContext);
 
   // Initialiser le badge projet (Tauri seulement)
