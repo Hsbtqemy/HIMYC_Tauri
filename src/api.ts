@@ -696,11 +696,13 @@ export interface ExportResult {
   episodes?: number;
   segments?: number;
   jobs?: number;
+  characters?: number;
+  assignments?: number;
   path: string;
 }
 
 export async function runExport(
-  scope: "corpus" | "segments" | "jobs",
+  scope: "corpus" | "segments" | "jobs" | "characters" | "assignments",
   fmt: string,
   use_clean = true,
 ): Promise<ExportResult> {

@@ -14,11 +14,13 @@ import {
   fetchAllAlignmentRuns,
   exportAlignments,
   propagateCharacters,
+  fetchEpisodeSource,
   ApiError,
   type ExportResult,
   type QaReport,
   type AlignmentRunFlat,
   type PropagateResult,
+  type SrtSourceContent,
 } from "../api";
 
 const CSS = `
@@ -259,6 +261,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
           <button class="exp-tab" data-stage="segments">Segments</button>
           <button class="exp-tab" data-stage="alignements">Alignements</button>
           <button class="exp-tab" data-stage="srt">SRT Enrichi</button>
+          <button class="exp-tab" data-stage="personnages">Personnages</button>
           <button class="exp-tab" data-stage="qa">QA</button>
           <button class="exp-tab" data-stage="jobs">Jobs</button>
         </div>
@@ -318,6 +321,36 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
         <div class="exp-pane" data-stage="srt">
           <div id="exp-srt-body">
             <div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Chargement…</div>
+          </div>
+        </div>
+
+        <!-- ── Personnages ────────────────────── -->
+        <div class="exp-pane" data-stage="personnages">
+          <div class="exp-card-grid">
+            <div class="exp-card">
+              <div class="exp-card-title">Catalogue personnages</div>
+              <div class="exp-card-desc">
+                Liste des personnages avec noms canoniques, noms par langue et alias.<br>
+                Fichier source : <code>characters.json</code>.
+              </div>
+              <div class="exp-fmt-row">
+                <button class="btn btn-secondary btn-sm exp-btn" data-scope="characters" data-fmt="json">JSON</button>
+                <button class="btn btn-secondary btn-sm exp-btn" data-scope="characters" data-fmt="csv">CSV</button>
+              </div>
+              <div class="exp-result" id="exp-characters-result"></div>
+            </div>
+            <div class="exp-card">
+              <div class="exp-card-title">Assignations</div>
+              <div class="exp-card-desc">
+                Table des assignations segment/cue → personnage.<br>
+                Fichier source : <code>assignments.json</code>.
+              </div>
+              <div class="exp-fmt-row">
+                <button class="btn btn-secondary btn-sm exp-btn" data-scope="assignments" data-fmt="json">JSON</button>
+                <button class="btn btn-secondary btn-sm exp-btn" data-scope="assignments" data-fmt="csv">CSV</button>
+              </div>
+              <div class="exp-result" id="exp-assignments-result"></div>
+            </div>
           </div>
         </div>
 
@@ -442,7 +475,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
 }
 
 async function handleExport(container: HTMLElement, btn: HTMLButtonElement) {
-  const scope  = btn.dataset.scope as "corpus" | "segments" | "jobs";
+  const scope  = btn.dataset.scope as "corpus" | "segments" | "jobs" | "characters" | "assignments";
   const fmt    = btn.dataset.fmt!;
   const resultId = `exp-${scope}-result`;
   const result = container.querySelector<HTMLElement>(`#${resultId}`)!;
@@ -457,7 +490,11 @@ async function handleExport(container: HTMLElement, btn: HTMLButtonElement) {
       ? `${res.episodes} épisodes`
       : res.segments != null
         ? `${res.segments} segments`
-        : `${res.jobs ?? 0} jobs`;
+        : res.characters != null
+          ? `${res.characters} personnages`
+          : res.assignments != null
+            ? `${res.assignments} assignations`
+            : `${res.jobs ?? 0} jobs`;
     result.textContent = `✓ ${count} → ${res.path}`;
     result.className = "exp-result visible ok";
   } catch (e) {
@@ -646,12 +683,13 @@ function renderSrtTab(body: HTMLElement, runs: AlignmentRunFlat[]) {
     const created = r.created_at
       ? new Date(r.created_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })
       : "—";
-    const langs = [r.pivot_lang, ...r.target_langs].filter(Boolean).join(" → ");
+    const langsDisplay = [r.pivot_lang, ...r.target_langs].filter(Boolean).join(" → ");
+    const langsData    = [r.pivot_lang, ...r.target_langs].filter(Boolean).join(",");
     return `
-      <tr data-run-id="${escapeHtml(r.run_id)}" data-ep-id="${escapeHtml(r.episode_id)}">
+      <tr data-run-id="${escapeHtml(r.run_id)}" data-ep-id="${escapeHtml(r.episode_id)}" data-langs="${escapeHtml(langsData)}">
         <td class="exp-align-mono">${escapeHtml(r.episode_id)}</td>
         <td class="exp-align-mono" style="font-size:0.7rem;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.run_id)}">${escapeHtml(r.run_id.slice(0, 12))}…</td>
-        <td><span class="exp-align-badge">${escapeHtml(langs)}</span></td>
+        <td><span class="exp-align-badge">${escapeHtml(langsDisplay)}</span></td>
         <td style="white-space:nowrap;font-size:0.75rem;color:var(--text-muted)">${created}</td>
         <td>
           <button class="btn btn-primary btn-sm srt-propagate-btn">✦ Propager</button>
@@ -672,8 +710,9 @@ function renderSrtTab(body: HTMLElement, runs: AlignmentRunFlat[]) {
     </div>`;
 
   body.querySelectorAll<HTMLTableRowElement>("tr[data-run-id]").forEach((row) => {
-    const epId  = row.dataset.epId!;
-    const runId = row.dataset.runId!;
+    const epId   = row.dataset.epId!;
+    const runId  = row.dataset.runId!;
+    const langs  = (row.dataset.langs ?? "").split(",").filter(Boolean);
     const btn    = row.querySelector<HTMLButtonElement>(".srt-propagate-btn")!;
     const result = row.querySelector<HTMLElement>(".srt-propagate-result")!;
 
@@ -687,6 +726,8 @@ function renderSrtTab(body: HTMLElement, runs: AlignmentRunFlat[]) {
         result.className = "exp-srt-result-strip srt-propagate-result ok";
         result.style.display = "flex";
         btn.textContent = "✓ Propagé";
+        // Afficher boutons de téléchargement SRT par langue
+        _renderSrtDownloadBtns(row, epId, langs);
       } catch (e) {
         result.textContent = e instanceof ApiError ? e.message : String(e);
         result.className = "exp-srt-result-strip srt-propagate-result err";
@@ -696,4 +737,38 @@ function renderSrtTab(body: HTMLElement, runs: AlignmentRunFlat[]) {
       }
     });
   });
+}
+
+function _renderSrtDownloadBtns(row: HTMLTableRowElement, epId: string, langs: string[]) {
+  const cell = row.querySelector("td:last-child")!;
+  const existing = cell.querySelector(".srt-dl-row");
+  if (existing) existing.remove();
+  if (!langs.length) return;
+  const dlRow = document.createElement("div");
+  dlRow.className = "srt-dl-row";
+  dlRow.style.cssText = "display:flex;gap:6px;margin-top:6px;flex-wrap:wrap";
+  langs.forEach((lang) => {
+    const dlBtn = document.createElement("button");
+    dlBtn.className = "btn btn-ghost btn-sm";
+    dlBtn.textContent = `⬇ SRT ${lang.toUpperCase()}`;
+    dlBtn.addEventListener("click", async () => {
+      dlBtn.disabled = true;
+      try {
+        const src = await fetchEpisodeSource(epId, `srt_${lang}`) as SrtSourceContent;
+        const blob = new Blob([src.content], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${epId}_${lang}.${src.format ?? "srt"}`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        dlBtn.textContent = `✗ SRT ${lang.toUpperCase()}`;
+      } finally {
+        dlBtn.disabled = false;
+      }
+    });
+    dlRow.appendChild(dlBtn);
+  });
+  cell.appendChild(dlRow);
 }
