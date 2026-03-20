@@ -17,13 +17,16 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: "--target aarch64-apple-darwin --target x86_64-apple-darwin"
+            args: "--target universal-apple-darwin"
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
             label: macOS
           - platform: windows-latest
             args: ""
+            rust_targets: ""
             label: Windows
           - platform: ubuntu-22.04
             args: ""
+            rust_targets: ""
             label: Linux
 
     runs-on: ${{ matrix.platform }}
@@ -45,7 +48,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           # macOS : on compile en universal binary (Intel + Apple Silicon)
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust_targets }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -101,10 +104,8 @@ jobs:
 
             ### Backend Python requis
 
-            Le backend HIMYC doit être lancé séparément :
-            ```bash
-            uvicorn howimetyourcorpus.api.server:app --host 127.0.0.1 --port 8765
-            ```
-          releaseDraft: true
+            L'app lance automatiquement `python3 -m uvicorn howimetyourcorpus.api.server:app`.
+            Pré-requis : `pip install howimetyourcorpus`
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
