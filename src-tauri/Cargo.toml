@@ -1,6 +1,6 @@
 [package]
 name = "himyc-tauri"
-version = "0.1.0"
+version = "0.7.0"
 description = "HIMYC — application desktop Tauri (corpus transcript + SRT, inspection, alignement)"
 authors = ["HIMYC"]
 edition = "2021"
