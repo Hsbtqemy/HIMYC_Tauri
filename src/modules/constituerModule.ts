@@ -3992,7 +3992,7 @@ function _vsSetup(wrap: HTMLElement, panel: HTMLElement, epId: string, runId: st
       const idx = _vsLinks.findIndex((l) => l.link_id === linkId);
       if (idx >= 0) {
         _vsLinks[idx] = { ..._vsLinks[idx], status: action };
-        const row = wrap.querySelector<HTMLTableRowElement>(`tr[data-link-id="${CSS.escape(linkId)}"]`);
+        const row = wrap.querySelector<HTMLTableRowElement>(`tr[data-link-id="${window.CSS.escape(linkId)}"]`);
         if (row) {
           row.className = action;
           const badge = row.querySelector(".audit-status-badge");
