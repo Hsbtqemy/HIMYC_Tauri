@@ -8,7 +8,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-export const API_BASE = "http://localhost:8765";
+export { API_BASE, SUPPORTED_LANGUAGES } from "./constants";
+import { API_BASE, DEFAULT_ERROR_CODE, TAURI_SIDECAR_CMD } from "./constants";
 
 interface FetchResult {
   status: number;
@@ -33,7 +34,17 @@ async function _loopbackFetch(
   body?: unknown,
 ): Promise<FetchResult> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  return invoke<FetchResult>("sidecar_fetch_loopback", {
+  // VITE_E2E=true : bypass Tauri invoke, use native fetch (Playwright E2E tests)
+  if (import.meta.env.VITE_E2E === "true") {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    const bodyText = await res.text();
+    return { status: res.status, ok: res.ok, body: bodyText };
+  }
+  return invoke<FetchResult>(TAURI_SIDECAR_CMD, {
     url: `${API_BASE}${path}`,
     method,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -44,7 +55,7 @@ async function _loopbackFetch(
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await _loopbackFetch(path);
   if (!res.ok) {
-    let errorCode = "UNKNOWN";
+    let errorCode = DEFAULT_ERROR_CODE;
     let message = res.body;
     try {
       const parsed = JSON.parse(res.body);
@@ -56,10 +67,14 @@ export async function apiGet<T>(path: string): Promise<T> {
   return JSON.parse(res.body) as T;
 }
 
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return apiPost<T>(path, body, "PATCH");
+}
+
 export async function apiPost<T>(path: string, body: unknown, method = "POST"): Promise<T> {
   const res = await _loopbackFetch(path, method, body);
   if (!res.ok) {
-    let errorCode = "UNKNOWN";
+    let errorCode = DEFAULT_ERROR_CODE;
     let message = res.body;
     try {
       const parsed = JSON.parse(res.body);
@@ -74,7 +89,7 @@ export async function apiPost<T>(path: string, body: unknown, method = "POST"): 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   const res = await _loopbackFetch(path, "PUT", body);
   if (!res.ok) {
-    let errorCode = "UNKNOWN";
+    let errorCode = DEFAULT_ERROR_CODE;
     let message = res.body;
     try {
       const parsed = JSON.parse(res.body);
@@ -89,7 +104,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 export async function apiDelete<T>(path: string): Promise<T> {
   const res = await _loopbackFetch(path, "DELETE");
   if (!res.ok) {
-    let errorCode = "UNKNOWN";
+    let errorCode = DEFAULT_ERROR_CODE;
     let message = res.body;
     try {
       const parsed = JSON.parse(res.body);
@@ -139,6 +154,33 @@ export interface ConfigUpdate {
 
 export async function saveConfig(update: ConfigUpdate): Promise<ConfigResponse> {
   return apiPut<ConfigResponse>("/config", update);
+}
+
+// /series_index
+
+export interface EpisodeRefInput {
+  episode_id: string;
+  season: number;
+  episode: number;
+  title?: string;
+  url?: string;
+  source_id?: string;
+}
+
+export interface SeriesIndexInput {
+  series_title?: string;
+  series_url?: string;
+  episodes: EpisodeRefInput[];
+}
+
+export interface SeriesIndexSaveResult {
+  saved: number;
+  dirs_created: string[];
+  series_title: string;
+}
+
+export async function saveSeriesIndex(index: SeriesIndexInput): Promise<SeriesIndexSaveResult> {
+  return apiPut<SeriesIndexSaveResult>("/series_index", index);
 }
 
 // /episodes
@@ -232,7 +274,7 @@ export async function patchTranscript(
   episodeId: string,
   clean: string,
 ): Promise<{ episode_id: string; source_key: string; state: string; chars: number }> {
-  return apiPost(`/episodes/${episodeId}/sources/transcript`, { clean }, "PATCH");
+  return apiPatch(`/episodes/${episodeId}/sources/transcript`, { clean });
 }
 
 export async function importSrt(
@@ -417,14 +459,14 @@ export async function setAlignLinkStatus(
   linkId: string,
   status: "accepted" | "rejected" | "auto" | "ignored",
 ): Promise<{ link_id: string; status: string }> {
-  return apiPost(`/alignment_links/${linkId}`, { status }, "PATCH");
+  return apiPatch(`/alignment_links/${linkId}`, { status });
 }
 
 export async function setAlignLinkNote(
   linkId: string,
   note: string,
 ): Promise<{ link_id: string; note: string }> {
-  return apiPost(`/alignment_links/${linkId}`, { note }, "PATCH");
+  return apiPatch(`/alignment_links/${linkId}`, { note });
 }
 
 export interface BulkAlignStatusParams {
@@ -442,10 +484,9 @@ export async function bulkSetAlignLinkStatus(
   runId: string,
   params: BulkAlignStatusParams,
 ): Promise<{ updated: number; new_status: string }> {
-  return apiPost(
+  return apiPatch(
     `/episodes/${episodeId}/alignment_runs/${runId}/links/bulk`,
     params,
-    "PATCH",
   );
 }
 
@@ -495,17 +536,18 @@ export async function retargetAlignLink(
   linkId: string,
   cueIdTarget: string,
 ): Promise<{ link_id: string; cue_id_target: string; status: string }> {
-  return apiPost(`/alignment_links/${linkId}/retarget`, { cue_id_target: cueIdTarget }, "PATCH");
+  return apiPatch(`/alignment_links/${linkId}/retarget`, { cue_id_target: cueIdTarget });
 }
 
 // ── Concordancier parallèle + Segments longtext (MX-029) ─────────────────────
 
 export interface ConcordanceRow {
   segment_id: string | null;
-  personnage: string;
+  speaker: string;
   text_segment: string;
   text_en: string;
   confidence_pivot: number | null;
+  confidence_en: number | null;
   text_fr: string;
   confidence_fr: number | null;
   text_it: string;
@@ -560,29 +602,7 @@ export async function fetchEpisodeSegments(
 }
 
 export async function cancelJob(jobId: string): Promise<{ job_id: string; status: string }> {
-  // DELETE via loopback — réutilise _loopbackFetch directement
-  const res = await (async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<{ status: number; ok: boolean; body: string }>(
-      "sidecar_fetch_loopback",
-      {
-        url: `${API_BASE}/jobs/${jobId}`,
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  })();
-  if (!res.ok) {
-    let errorCode = "UNKNOWN";
-    let message = res.body;
-    try {
-      const p = JSON.parse(res.body);
-      errorCode = p.error ?? errorCode;
-      message = p.message ?? message;
-    } catch { /* not JSON */ }
-    throw new ApiError(res.status, errorCode, message);
-  }
-  return JSON.parse(res.body);
+  return apiDelete(`/jobs/${jobId}`);
 }
 
 // ── /characters + /assignments (MX-021c) ─────────────────────────────────────
@@ -754,6 +774,20 @@ export interface AllAlignmentRunsResponse {
 
 export async function fetchAllAlignmentRuns(): Promise<AllAlignmentRunsResponse> {
   return apiGet<AllAlignmentRunsResponse>("/alignment_runs");
+}
+
+// ── /links/positions minimap (MX-047) ─────────────────────────────────────────
+
+export interface LinkPosition {
+  n: number;
+  status: string;
+}
+
+export async function fetchLinkPositions(
+  episodeId: string,
+  runId: string,
+): Promise<{ positions: LinkPosition[] }> {
+  return apiGet(`/episodes/${episodeId}/alignment_runs/${runId}/links/positions`);
 }
 
 // ── /export/alignments (MX-030) ───────────────────────────────────────────────

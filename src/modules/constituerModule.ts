@@ -64,8 +64,11 @@ import {
   type JobType,
   type Character,
   type CharacterAssignment,
+  saveSeriesIndex,
   type WebEpisodeRef,
   type AlignmentRun,
+  type LinkPosition,
+  fetchLinkPositions,
   ApiError,
 } from "../api";
 import {
@@ -1145,14 +1148,15 @@ const CSS = `
 .audit-pane.active { display: flex; }
 /* Links table */
 .audit-table-wrap { flex: 1; overflow-y: auto; min-height: 0; }
-.audit-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; table-layout: fixed; }
 .audit-table thead { position: sticky; top: 0; background: var(--surface); z-index: 2; }
 .audit-table th {
   padding: 5px 8px; border-bottom: 2px solid var(--border);
   text-align: left; font-size: 0.7rem; color: var(--text-muted);
-  text-transform: uppercase; white-space: nowrap;
+  text-transform: uppercase; white-space: nowrap; overflow: hidden;
 }
-.audit-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.audit-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audit-vs-spacer td { padding: 0; border: none; }
 .audit-table tr:hover td { background: var(--surface2); }
 .audit-table tr.accepted td { background: #f0fdf4; }
 .audit-table tr.rejected td { background: #fef2f2; opacity: .7; }
@@ -1230,6 +1234,18 @@ const CSS = `
 }
 .audit-note-input:hover { border-color: var(--border, #d1d5db); background: var(--bg-alt, #f9fafb); }
 .audit-note-input:focus { outline: none; border-color: var(--accent, #0f766e); background: var(--bg-alt, #f9fafb); }
+/* ── Minimap (G-004 / MX-047) ────────────────────────────────────── */
+.audit-links-layout { flex: 1; display: flex; flex-direction: row; min-height: 0; overflow: hidden; }
+.audit-links-col { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.audit-minimap-wrap {
+  width: 16px; flex-shrink: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+}
+.audit-minimap { width: 16px; display: block; }
 /* ── Retarget modal (MX-040) ──────────────────────────────────────── */
 .retarget-overlay {
   position: fixed; inset: 0;
@@ -2813,17 +2829,33 @@ function wireImporterButtons(pane: HTMLElement) {
     tvFeedback.style.color = ok ? "var(--text-muted)" : "var(--danger, #dc2626)";
   };
 
+  let _tvLastData: import("../api").WebDiscoverResult | null = null;
+
   pane.querySelector<HTMLButtonElement>("#tvmaze-search-btn")!
     .addEventListener("click", async () => {
       const name = tvInput.value.trim();
       if (!name) { setTvFeedback("Saisissez un nom de série.", false); return; }
       setTvFeedback("Recherche en cours…");
       tvResults.style.display = "none";
+      _tvLastData = null;
       try {
         const data = await discoverTvmaze(name);
+        _tvLastData = data;
         setTvFeedback(`${data.series_title} — ${data.episode_count} épisodes.`);
         tvResults.style.display = "block";
-        tvResults.innerHTML = renderWebEpisodesTable(data.episodes, false);
+        tvResults.innerHTML =
+          renderWebEpisodesTable(data.episodes, false) +
+          `<div style="margin-top:8px"><button class="btn btn-primary btn-sm" id="tvmaze-save-btn">✓ Enregistrer la structure (${data.episode_count} épisodes)</button></div>`;
+        pane.querySelector<HTMLButtonElement>("#tvmaze-save-btn")!
+          .addEventListener("click", async () => {
+            if (!_tvLastData) return;
+            try {
+              const r = await saveSeriesIndex({ series_title: _tvLastData.series_title, series_url: _tvLastData.series_url, episodes: _tvLastData.episodes });
+              setTvFeedback(`✓ Structure enregistrée — ${r.saved} épisodes, ${r.dirs_created.length} répertoires créés.`);
+            } catch (e) {
+              setTvFeedback(e instanceof ApiError ? e.message : String(e), false);
+            }
+          });
       } catch (e) {
         setTvFeedback(e instanceof ApiError ? e.message : String(e), false);
       }
@@ -2843,18 +2875,34 @@ function wireImporterButtons(pane: HTMLElement) {
     slFeedback.style.color = ok ? "var(--text-muted)" : "var(--danger, #dc2626)";
   };
 
+  let _slLastData: import("../api").WebDiscoverResult | null = null;
+
   pane.querySelector<HTMLButtonElement>("#subslike-discover-btn")!
     .addEventListener("click", async () => {
       const url = slInput.value.trim();
       if (!url) { setSlFeedback("Saisissez l'URL de la série.", false); return; }
       setSlFeedback("Découverte en cours…");
       slResults.style.display = "none";
+      _slLastData = null;
       try {
         const data = await discoverSubslikescript(url);
+        _slLastData = data;
         setSlFeedback(`${data.series_title} — ${data.episode_count} épisodes.`);
         slResults.style.display = "block";
-        slResults.innerHTML = renderWebEpisodesTable(data.episodes, true);
+        slResults.innerHTML =
+          renderWebEpisodesTable(data.episodes, true) +
+          `<div style="margin-top:8px"><button class="btn btn-primary btn-sm" id="subslike-save-btn">✓ Enregistrer la structure (${data.episode_count} épisodes)</button></div>`;
         wireSubslikeFetchButtons(slResults, setSlFeedback);
+        pane.querySelector<HTMLButtonElement>("#subslike-save-btn")!
+          .addEventListener("click", async () => {
+            if (!_slLastData) return;
+            try {
+              const r = await saveSeriesIndex({ series_title: _slLastData.series_title, series_url: _slLastData.series_url, episodes: _slLastData.episodes });
+              setSlFeedback(`✓ Structure enregistrée — ${r.saved} épisodes, ${r.dirs_created.length} répertoires créés.`);
+            } catch (e) {
+              setSlFeedback(e instanceof ApiError ? e.message : String(e), false);
+            }
+          });
       } catch (e) {
         setSlFeedback(e instanceof ApiError ? e.message : String(e), false);
       }
@@ -3366,6 +3414,77 @@ const _auditState: AuditState = {
 
 let _concordanceLoaded = false;
 let _auditKeydownHandler: ((e: KeyboardEvent) => void) | null = null;
+let _minimapPositions: LinkPosition[] = [];
+let _minimapMaxN = 1;
+
+// Virtual scroll state
+const _VS_ROW_H = 40;  // px — estimated row height (single-line cells)
+const _VS_BUFFER = 6;  // extra rows rendered above and below viewport
+let _vsLinks: AuditLink[] = [];
+let _vsFocusIdx = -1;
+
+const _MINIMAP_STATUS_COLORS: Record<string, string> = {
+  accepted: "#22c55e",
+  rejected: "#ef4444",
+  auto:     "#94a3b8",
+  ignored:  "#cbd5e1",
+};
+
+async function loadMinimapPositions(panel: HTMLElement, epId: string, runId: string) {
+  try {
+    const res = await fetchLinkPositions(epId, runId);
+    _minimapPositions = res.positions;
+    _minimapMaxN = _minimapPositions.reduce((mx, p) => Math.max(mx, p.n), 1) || 1;
+  } catch {
+    _minimapPositions = [];
+    _minimapMaxN = 1;
+  }
+  updateMinimapViewport(panel);
+}
+
+function renderMinimap(
+  canvas: HTMLCanvasElement,
+  positions: LinkPosition[],
+  maxN: number,
+  offset: number,
+  limit: number,
+) {
+  const wrap = canvas.parentElement;
+  if (!wrap) return;
+  const h = wrap.clientHeight || 300;
+  canvas.width  = 16;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, 16, h);
+  if (positions.length === 0) return;
+  const scale = h / Math.max(maxN, 1);
+  for (const pos of positions) {
+    ctx.fillStyle = _MINIMAP_STATUS_COLORS[pos.status] ?? "#94a3b8";
+    ctx.fillRect(2, Math.round(pos.n * scale), 12, Math.max(1, Math.ceil(scale)));
+  }
+  // Viewport indicator
+  if (limit > 0) {
+    const vTop    = Math.round(offset * scale);
+    const vHeight = Math.max(3, Math.round(limit * scale));
+    ctx.fillStyle   = "rgba(15,118,110,0.15)";
+    ctx.fillRect(0, vTop, 16, vHeight);
+    ctx.strokeStyle = "rgba(15,118,110,0.65)";
+    ctx.lineWidth   = 1;
+    ctx.strokeRect(0.5, vTop + 0.5, 15, Math.max(2, vHeight - 1));
+  }
+}
+
+function updateMinimapViewport(panel: HTMLElement) {
+  const canvas = panel.querySelector<HTMLCanvasElement>("#audit-minimap");
+  const wrap   = panel.querySelector<HTMLElement>("#audit-table-wrap");
+  if (!canvas) return;
+  const scrollTop  = wrap ? wrap.scrollTop  : 0;
+  const viewH      = wrap ? wrap.clientHeight : 400;
+  const visOffset  = Math.floor(scrollTop / _VS_ROW_H);
+  const visLimit   = Math.ceil(viewH / _VS_ROW_H);
+  renderMinimap(canvas, _minimapPositions, _minimapMaxN, visOffset, visLimit);
+}
 
 async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, runId: string) {
   _auditState.epId = epId;
@@ -3454,10 +3573,17 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
             <button class="audit-action-btn undo" id="audit-bulk-reset-all"
               title="Remettre tous les liens (acceptés / rejetés / ignorés) en statut auto">↺ Reset tout en auto</button>
           </div>
-          <div class="audit-table-wrap" id="audit-table-wrap">
-            <div style="padding:12px;font-size:0.78rem;color:var(--text-muted)">Chargement liens…</div>
+          <div class="audit-links-layout">
+            <div class="audit-links-col">
+              <div class="audit-table-wrap" id="audit-table-wrap">
+                <div style="padding:12px;font-size:0.78rem;color:var(--text-muted)">Chargement liens…</div>
+              </div>
+              <div class="audit-pager" id="audit-pager"></div>
+            </div>
+            <div class="audit-minimap-wrap" id="audit-minimap-wrap">
+              <canvas class="audit-minimap" id="audit-minimap"></canvas>
+            </div>
           </div>
-          <div class="audit-pager" id="audit-pager"></div>
         </div>
         <div class="audit-pane" data-tab="collisions">
           <div class="audit-collision-list" id="audit-collision-list">
@@ -3624,12 +3750,8 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
     );
   }
 
-  function _auditFocusRow(row: HTMLTableRowElement | null) {
-    _auditRows().forEach((r) => r.classList.remove("audit-focused"));
-    if (row) {
-      row.classList.add("audit-focused");
-      row.scrollIntoView({ block: "nearest" });
-    }
+  function _auditFocusRow(_row: HTMLTableRowElement | null) {
+    // Legacy: focus is now index-driven via _vsFocusIdx; this is a no-op shim.
   }
 
   function _auditClickAction(row: HTMLTableRowElement, action: string) {
@@ -3638,12 +3760,17 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
   }
 
   function _auditMoveFocus(delta: number) {
-    const rows = _auditRows();
-    if (rows.length === 0) return;
-    const cur = _auditFocusedRow();
-    const idx = cur ? rows.indexOf(cur) : -1;
-    const next = rows[Math.max(0, Math.min(rows.length - 1, idx + delta))];
-    _auditFocusRow(next ?? rows[0]);
+    if (_vsLinks.length === 0) return;
+    _vsFocusIdx = Math.max(0, Math.min(_vsLinks.length - 1, _vsFocusIdx + delta));
+    const wrap = panel.querySelector<HTMLElement>("#audit-table-wrap");
+    if (wrap) {
+      // Scroll into view if needed (leave 50px gap for sticky thead)
+      const rowTop = _vsFocusIdx * _VS_ROW_H;
+      const rowBot = rowTop + _VS_ROW_H;
+      if (rowTop < wrap.scrollTop + 50)      wrap.scrollTop = Math.max(0, rowTop - 50);
+      else if (rowBot > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = rowBot - wrap.clientHeight;
+      _vsRender(wrap);
+    }
   }
 
   const _onAuditKeydown = (e: KeyboardEvent) => {
@@ -3674,10 +3801,12 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
       if (row) { e.preventDefault(); _auditClickAction(row, "ignored"); }
     } else if (key === "n") {
       e.preventDefault();
-      panel.querySelector<HTMLButtonElement>("#audit-next")?.click();
+      const tw = panel.querySelector<HTMLElement>("#audit-table-wrap");
+      if (tw) tw.scrollTop += tw.clientHeight;
     } else if (key === "p") {
       e.preventDefault();
-      panel.querySelector<HTMLButtonElement>("#audit-prev")?.click();
+      const tw = panel.querySelector<HTMLElement>("#audit-table-wrap");
+      if (tw) tw.scrollTop = Math.max(0, tw.scrollTop - tw.clientHeight);
     }
   };
 
@@ -3694,10 +3823,31 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
     { once: true },
   );
 
-  // Load stats + links + collisions in parallel
+  // Minimap click → scroll virtual table to the closest segment rank
+  panel.querySelector<HTMLElement>("#audit-minimap-wrap")!.addEventListener("click", (e) => {
+    const mmWrap = panel.querySelector<HTMLElement>("#audit-minimap-wrap")!;
+    const h = mmWrap.clientHeight || 1;
+    const ratio = Math.max(0, Math.min(1, (e as MouseEvent).offsetY / h));
+    const targetN = Math.round(ratio * _minimapMaxN);
+    const sorted = _minimapPositions.slice().sort((a, b) => a.n - b.n);
+    let closestIdx = 0, minDist = Infinity;
+    sorted.forEach((p, i) => {
+      const d = Math.abs(p.n - targetN);
+      if (d < minDist) { minDist = d; closestIdx = i; }
+    });
+    const tableWrap = panel.querySelector<HTMLElement>("#audit-table-wrap");
+    if (tableWrap) {
+      tableWrap.scrollTop = closestIdx * _VS_ROW_H;
+      _vsFocusIdx = closestIdx;
+      _vsRender(tableWrap);
+    }
+  });
+
+  // Load stats + links + collisions + minimap in parallel
   loadAuditStats(panel, epId, runId);
   loadAuditLinks(panel, epId, runId);
   loadAuditCollisions(panel, epId, runId);
+  loadMinimapPositions(panel, epId, runId);
 }
 
 async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
@@ -3758,96 +3908,141 @@ async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
 }
 
 async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
-  const wrap  = panel.querySelector<HTMLElement>("#audit-table-wrap");
-  const pager = panel.querySelector<HTMLElement>("#audit-pager");
+  const wrap    = panel.querySelector<HTMLElement>("#audit-table-wrap");
+  const pager   = panel.querySelector<HTMLElement>("#audit-pager");
   const countEl = panel.querySelector<HTMLElement>("#audit-count");
   if (!wrap) return;
   wrap.innerHTML = `<div style="padding:12px;font-size:0.78rem;color:var(--text-muted)">Chargement…</div>`;
+  if (pager) pager.innerHTML = "";
   try {
-    const res = await fetchAuditLinks(epId, runId, {
+    // Fetch first batch to get total
+    const BATCH = 200;
+    const first = await fetchAuditLinks(epId, runId, {
       status: _auditState.statusFilter || undefined,
       q:      _auditState.q || undefined,
-      offset: _auditState.offset,
-      limit:  _auditState.limit,
+      offset: 0,
+      limit:  BATCH,
     });
-    _auditState.total = res.total;
-    if (countEl) countEl.textContent = `${res.total} lien(s)`;
+    _auditState.total = first.total;
+    if (countEl) countEl.textContent = `${first.total} lien(s)`;
 
-    if (res.links.length === 0) {
+    if (first.total === 0) {
       wrap.innerHTML = `<div style="padding:16px;font-size:0.78rem;color:var(--text-muted)">Aucun lien trouvé.</div>`;
-      if (pager) pager.innerHTML = "";
+      _vsLinks = [];
+      _vsFocusIdx = -1;
       return;
     }
 
-    // Build table
-    const rows = res.links.map((lnk) => renderAuditLinkRow(lnk)).join("");
-    wrap.innerHTML = `
-      <table class="audit-table">
-        <thead>
-          <tr>
-            <th>#</th><th>Transcript</th><th>Pivot</th><th>Cible</th>
-            <th>Lang</th><th style="text-align:center">Conf.</th>
-            <th>Statut</th><th>Note</th><th></th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>`;
+    // Fetch remaining batches in parallel
+    _vsLinks = [...first.links];
+    if (first.total > BATCH) {
+      const batches: Promise<{ links: AuditLink[] }>[] = [];
+      for (let off = BATCH; off < first.total; off += BATCH) {
+        batches.push(fetchAuditLinks(epId, runId, {
+          status: _auditState.statusFilter || undefined,
+          q:      _auditState.q || undefined,
+          offset: off,
+          limit:  BATCH,
+        }));
+      }
+      const results = await Promise.all(batches);
+      for (const r of results) _vsLinks.push(...r.links);
+    }
 
-    // Wire accept/reject buttons
-    wrap.querySelectorAll<HTMLButtonElement>(".audit-action-btn[data-link-id]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const linkId = btn.dataset.linkId!;
-        const action = btn.dataset.action as "accepted" | "rejected" | "auto" | "ignored";
-        btn.disabled = true;
-        try {
-          await setAlignLinkStatus(linkId, action);
-          // Update row in-place
-          const row = btn.closest<HTMLTableRowElement>("tr");
-          if (row) {
-            row.className = action;
-            const statusCell = row.querySelector(".audit-status-badge");
-            if (statusCell) {
-              statusCell.className = `audit-status-badge ${action}`;
-              statusCell.textContent = _statusLabel(action);
-            }
-            // Swap buttons: if accepted → show reject+undo, if rejected → show accept+undo
-            const actionsCell = row.querySelector(".audit-row-actions");
-            if (actionsCell) actionsCell.innerHTML = renderAuditActions(linkId, action);
-            rewireAuditButtons(wrap);
-          }
-          // Refresh stats
-          loadAuditStats(panel, epId, runId);
-        } catch (e) {
-          btn.disabled = false;
-        }
-      });
-    });
-
-    // Wire note inputs — save on blur if value changed
-    wrap.querySelectorAll<HTMLInputElement>(".audit-note-input").forEach((inp) => {
-      inp.addEventListener("blur", async () => {
-        const newNote = inp.value.trim();
-        if (newNote === inp.dataset.noteOrig) return;
-        inp.disabled = true;
-        try {
-          await setAlignLinkNote(inp.dataset.linkId!, newNote || "");
-          inp.dataset.noteOrig = newNote;
-        } catch (_e) {
-          inp.value = inp.dataset.noteOrig!;
-        } finally {
-          inp.disabled = false;
-        }
-      });
-    });
-
-    // Pagination
-    if (pager) renderAuditPager(pager, panel, epId, runId);
+    _vsFocusIdx = -1;
+    _vsSetup(wrap, panel, epId, runId);
+    updateMinimapViewport(panel);
   } catch (e) {
     wrap.innerHTML = `<div style="padding:12px;font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;
   }
 }
 
-function renderAuditLinkRow(lnk: AuditLink): string {
+function _vsSetup(wrap: HTMLElement, panel: HTMLElement, epId: string, runId: string) {
+  wrap.innerHTML = `
+    <table class="audit-table" style="table-layout:fixed">
+      <colgroup>
+        <col style="width:36px"><col style="width:180px"><col style="width:140px"><col style="width:140px">
+        <col style="width:56px"><col style="width:70px"><col style="width:90px"><col style="width:130px"><col style="width:90px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>#</th><th>Transcript</th><th>Pivot</th><th>Cible</th>
+          <th>Lang</th><th style="text-align:center">Conf.</th>
+          <th>Statut</th><th>Note</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="audit-vs-tbody"></tbody>
+    </table>`;
+  _vsRender(wrap);
+
+  wrap.addEventListener("scroll", () => {
+    _vsRender(wrap);
+    updateMinimapViewport(panel);
+  }, { passive: true });
+
+  // Event delegation — action buttons
+  wrap.addEventListener("click", async (e) => {
+    const btn = (e.target as Element).closest<HTMLButtonElement>(".audit-action-btn[data-link-id]");
+    if (!btn || btn.disabled) return;
+    const linkId = btn.dataset.linkId!;
+    const action = btn.dataset.action as "accepted" | "rejected" | "auto" | "ignored";
+    btn.disabled = true;
+    try {
+      await setAlignLinkStatus(linkId, action);
+      const idx = _vsLinks.findIndex((l) => l.link_id === linkId);
+      if (idx >= 0) {
+        _vsLinks[idx] = { ..._vsLinks[idx], status: action };
+        const row = wrap.querySelector<HTMLTableRowElement>(`tr[data-link-id="${CSS.escape(linkId)}"]`);
+        if (row) {
+          row.className = action;
+          const badge = row.querySelector(".audit-status-badge");
+          if (badge) { badge.className = `audit-status-badge ${action}`; badge.textContent = _statusLabel(action); }
+          const actionsCell = row.querySelector(".audit-row-actions");
+          if (actionsCell) actionsCell.innerHTML = renderAuditActions(linkId, action);
+        }
+      }
+      loadAuditStats(panel, epId, runId);
+    } catch { btn.disabled = false; }
+  });
+
+  // Event delegation — note inputs
+  wrap.addEventListener("focusout", async (e) => {
+    const inp = (e.target as Element).closest<HTMLInputElement>(".audit-note-input");
+    if (!inp) return;
+    const newNote = inp.value.trim();
+    if (newNote === inp.dataset.noteOrig) return;
+    inp.disabled = true;
+    try {
+      await setAlignLinkNote(inp.dataset.linkId!, newNote || "");
+      inp.dataset.noteOrig = newNote;
+      const idx = _vsLinks.findIndex((l) => l.link_id === inp.dataset.linkId);
+      if (idx >= 0) _vsLinks[idx] = { ..._vsLinks[idx], note: newNote };
+    } catch { inp.value = inp.dataset.noteOrig!; }
+    finally { inp.disabled = false; }
+  });
+}
+
+function _vsRender(wrap: HTMLElement) {
+  const tbody = wrap.querySelector<HTMLElement>("#audit-vs-tbody");
+  if (!tbody || _vsLinks.length === 0) return;
+  const total    = _vsLinks.length;
+  const scrollTop = wrap.scrollTop;
+  const viewH    = wrap.clientHeight || 400;
+  const startIdx = Math.max(0, Math.floor(scrollTop / _VS_ROW_H) - _VS_BUFFER);
+  const endIdx   = Math.min(total, Math.ceil((scrollTop + viewH) / _VS_ROW_H) + _VS_BUFFER);
+  const topH     = startIdx * _VS_ROW_H;
+  const botH     = Math.max(0, (total - endIdx) * _VS_ROW_H);
+  const rows: string[] = [
+    `<tr class="audit-vs-spacer" style="height:${topH}px"><td colspan="9"></td></tr>`,
+  ];
+  for (let i = startIdx; i < endIdx; i++) {
+    rows.push(renderAuditLinkRow(_vsLinks[i], i === _vsFocusIdx ? " audit-focused" : ""));
+  }
+  rows.push(`<tr class="audit-vs-spacer" style="height:${botH}px"><td colspan="9"></td></tr>`);
+  tbody.innerHTML = rows.join("");
+}
+
+function renderAuditLinkRow(lnk: AuditLink, extraClass = ""): string {
   const segText    = escapeHtml((lnk.text_segment || "").slice(0, 120));
   const pivotText  = escapeHtml((lnk.text_pivot   || "").slice(0, 100));
   const targetText = escapeHtml((lnk.text_target  || "").slice(0, 100));
@@ -3858,7 +4053,7 @@ function renderAuditLinkRow(lnk: AuditLink): string {
     : "—";
   const n = lnk.segment_n != null ? lnk.segment_n : "—";
   return `
-    <tr class="${lnk.status}" data-link-id="${escapeHtml(lnk.link_id)}">
+    <tr class="${lnk.status}${extraClass}" data-link-id="${escapeHtml(lnk.link_id)}">
       <td style="font-family:ui-monospace,monospace;font-size:0.68rem;color:var(--text-muted)">${n}</td>
       <td style="max-width:180px">${speaker}${segText || '<span style="color:var(--text-muted)">—</span>'}</td>
       <td style="max-width:140px">${pivotText  || '<span style="color:var(--text-muted)">—</span>'}</td>
@@ -3902,14 +4097,8 @@ function renderAuditActions(linkId: string, currentStatus: string): string {
           <button class="audit-action-btn ignore" data-link-id="${id}" data-action="ignored"  title="Ignorer (pas de traduction attendue)">◌</button>`;
 }
 
-function rewireAuditButtons(wrap: HTMLElement) {
-  // Re-wire freshly rendered buttons after in-place update
-  wrap.querySelectorAll<HTMLButtonElement>(".audit-action-btn[data-link-id]").forEach((btn) => {
-    // Remove old listeners by cloning (cheap, works with small DOM)
-    const fresh = btn.cloneNode(true) as HTMLButtonElement;
-    btn.replaceWith(fresh);
-  });
-  // Re-attach — handled by parent re-render; caller must re-call loadAuditLinks if needed
+function rewireAuditButtons(_wrap: HTMLElement) {
+  // No-op: event delegation handles all button interactions (see _vsSetup).
 }
 
 function renderAuditPager(pager: HTMLElement, panel: HTMLElement, epId: string, runId: string) {
@@ -4510,8 +4699,8 @@ async function renderConcordance(
     ].join("");
 
     const rowsHtml = res.rows.map((row: ConcordanceRow, i: number) => {
-      const speakerHtml = row.personnage
-        ? `<span class="conc-speaker">${escapeHtml(row.personnage)}</span>` : "";
+      const speakerHtml = row.speaker
+        ? `<span class="conc-speaker">${escapeHtml(row.speaker)}</span>` : "";
       const langCells = langCols.map(({ lang }) => {
         const text = (row[`text_${lang}` as keyof ConcordanceRow] as string) || "";
         const conf = lang === pivotLang
