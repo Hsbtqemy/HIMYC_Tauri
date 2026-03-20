@@ -1,4 +1,4 @@
-# CLAUDE.md — himyc-tauri
+# CLAUDE.md — HIMYC (backend Python)
 
 Guide de référence pour agents IA travaillant sur ce dépôt.
 
@@ -6,57 +6,46 @@ Guide de référence pour agents IA travaillant sur ce dépôt.
 
 ## Vue d'ensemble
 
-Frontend desktop **Tauri 2 + TypeScript vanilla** pour l'application HIMYC.
-- Aucun framework UI (pas de React/Vue) — DOM vanilla organisé en modules
-- Communique avec un backend FastAPI Python (dépôt séparé : `HIMYC/`)
-- Le backend est lancé automatiquement par Rust au démarrage de l'app
+Backend Python **FastAPI** pour l'application HIMYC — corpus de transcriptions + sous-titres.
+- Serveur HTTP sur `http://127.0.0.1:8765`
+- 41 routes couplées au frontend Tauri (`himyc-tauri/`)
+- Base de données SQLite avec FTS5, 8 migrations
+- Lancé automatiquement par le frontend Tauri via `python3 -m uvicorn howimetyourcorpus.api.server:app`
 
-**Dépôt GitHub** : `https://github.com/Hsbtqemy/HIMYC_Tauri`
-**Backend Python** : `/Users/hsmy/Dev/HIMYC/` (GitHub : `Hsbtqemy/HIMYC`)
+**Dépôt GitHub** : `https://github.com/Hsbtqemy/HIMYC`
+**Frontend Tauri** : `/Users/hsmy/Dev/himyc-tauri/` (GitHub : `Hsbtqemy/HIMYC_Tauri`)
+**Branche principale** : `master`
 
 ---
 
 ## Architecture
 
 ```
-himyc-tauri/
-├── src/                        # TypeScript frontend
-│   ├── main.ts                 # Point d'entrée : startup overlay + IS_TAURI detection
-│   ├── shell.ts                # Initialise la navigation (tabs, modules)
-│   ├── api.ts                  # Toutes les fonctions fetch vers le backend
-│   ├── constants.ts            # API_PORT=8765, SUPPORTED_LANGUAGES, etc.
-│   ├── model.ts                # Interfaces TypeScript (Episode, AlignLink, etc.)
-│   ├── guards.ts               # Type guards (isEpisode, isAlignLink, etc.)
-│   ├── context.ts              # Contexte navigation partagé entre modules
-│   ├── perf.ts                 # Virtual scroll et optimisations DOM
-│   ├── modules/
-│   │   ├── hubModule.ts        # Onglet Hub : KPIs projet, gate QA, onboarding
-│   │   ├── constituerModule.ts # Onglet Constituer : épisodes, sources, personnages
-│   │   ├── inspecterModule.ts  # Onglet Inspecter : raw/clean, normalize/segment
-│   │   ├── alignerModule.ts    # Onglet Aligner : configuration run, progression
-│   │   ├── exporterModule.ts   # Onglet Exporter : exports + propagation personnages
-│   │   └── concordancierModule.ts  # Onglet Concordancier : KWIC FTS5
-│   ├── features/
-│   │   └── metaPanel.ts        # Panneau méta (audit view intégré)
-│   └── ui/
-│       ├── dom.ts              # Helpers DOM ($, $$, createElement, etc.)
-│       └── copyUtils.ts        # Copie presse-papier
-├── src-tauri/
-│   ├── src/main.rs             # Rust : BackendState, spawn_uvicorn, commandes Tauri
-│   ├── Cargo.toml              # Dépendances Rust (tauri, reqwest, serde_json)
-│   ├── tauri.conf.json         # Config Tauri : identifier, version, bundle, icons
-│   ├── capabilities/
-│   │   └── default.json        # Permissions Tauri (fs, dialog, http loopback)
-│   └── icons/                  # icon.ico, icon.icns, 32x32.png, 128x128.png
+HIMYC/
+├── src/howimetyourcorpus/
+│   ├── __init__.py             # __version__ via importlib.metadata
+│   ├── api/
+│   │   ├── server.py           # FastAPI : 41 routes, CORS, Pydantic models
+│   │   └── jobs.py             # File de jobs async (normalize, segment, align)
+│   └── core/
+│       ├── constants.py        # TOUTES les constantes (langues, ports, noms fichiers)
+│       ├── models.py           # Dataclasses partagées
+│       ├── export_utils.py     # Fonctions d'export (CSV, TSV, JSON, DOCX, JSONL, HTML)
+│       ├── storage/            # ProjectStore : lecture/écriture corpus.db + fichiers
+│       ├── pipeline/           # Orchestrateur normalize → segment → align
+│       ├── normalize/          # Profils de normalisation texte
+│       ├── segment/            # Segmentation en utterances
+│       ├── align/              # Algorithme d'alignement transcript ↔ sous-titres
+│       ├── subtitles/          # Parsers SRT / VTT
+│       ├── adapters/           # TVMaze API, Subslikescript scraper
+│       ├── preparer/           # Préparation sources (DB)
+│       └── utils/              # Utilitaires texte, timecodes, etc.
 ├── tests/
-│   ├── e2e/                    # Tests Playwright (VITE_E2E=true)
-│   └── *.test.ts               # Tests Vitest (model, guards, perf)
-├── index.html                  # Startup overlay + #shell-header + #app
-├── package.json
-├── vite.config.ts
-├── .github/workflows/
-│   ├── release.yml             # Build release sur tag v* (macOS/Windows/Linux)
-│   └── e2e.yml                 # Tests Playwright sur push/PR
+│   ├── test_e2e_pipeline.py    # 9 tests pytest (TestClient) — pipeline complet
+│   └── test_*.py               # ~40 fichiers de tests unitaires
+├── pyproject.toml              # Source de vérité pour la version
+├── AUDIT_2026-03.md            # Audit complet : routes, DB, exports, frontend
+├── CHANGELOG.md                # Historique des releases
 └── CLAUDE.md                   # Ce fichier
 ```
 
@@ -65,136 +54,163 @@ himyc-tauri/
 ## Commandes de développement
 
 ```bash
-# Installation (première fois)
-npm install
+# Installation
+pip install -e ".[dev]"
 
-# Dev avec hot-reload (nécessite le backend Python lancé séparément)
-npm run tauri dev
+# Lancer le backend (dev, avec reload)
+cd /Users/hsmy/Dev/HIMYC
+HIMYC_PROJECT_PATH=/chemin/vers/projet uvicorn howimetyourcorpus.api.server:app \
+  --host 127.0.0.1 --port 8765 --reload
 
-# Vérification TypeScript sans compilation
-npx tsc --noEmit
+# Lancer le backend (production, sans reload)
+HIMYC_PROJECT_PATH=/chemin/vers/projet uvicorn howimetyourcorpus.api.server:app \
+  --host 127.0.0.1 --port 8765 --no-access-log
 
-# Tests unitaires Vitest
-npm test
+# Tests (tous)
+pytest tests/ -v
 
-# Tests E2E Playwright (backend doit tourner sur port 8765)
-VITE_E2E=true npm run test:e2e
+# Tests E2E pipeline uniquement
+pytest tests/test_e2e_pipeline.py -v
 
-# Build release local (macOS → .app + .dmg)
-npm run tauri build
-# ou
-./build-release.sh
-
-# Vérification prérequis build
-./build-release.sh --check
+# Coverage
+pytest tests/ --cov=src/howimetyourcorpus --cov-report=term-missing
 ```
 
 ---
 
-## Mécanisme de communication avec le backend
+## Variables d'environnement
 
-**Problème** : Tauri 2 bloque les requêtes HTTP sortantes via CSP, même vers loopback.
-
-**Solution** : commande Rust `sidecar_fetch_loopback` dans `main.rs`.
-- Tous les appels API passent par `invoke("sidecar_fetch_loopback", { url, method, body, headers })`
-- Restreint aux hôtes `127.0.0.1`, `localhost`, `::1`
-- Wrappé dans `api.ts` via les fonctions `apiGet`, `apiPost`, `apiPut`, `apiPatch`, `apiDelete`
-
-**En mode dev Vite** (`VITE_E2E=true` ou sans `__TAURI_INTERNALS__`) : utilise `fetch()` natif directement.
+| Variable | Défaut | Usage |
+|---|---|---|
+| `HIMYC_PROJECT_PATH` | _(obligatoire)_ | Chemin racine du projet corpus |
+| `HIMYC_API_PORT` | `8765` | Port d'écoute FastAPI |
 
 ---
 
-## Backend auto-launch (main.rs)
+## Routes API — 41 endpoints
 
-Au démarrage de l'app Tauri :
-1. `.setup()` lit `{app_data_dir}/himyc_config.json` (`{ "project_path": "..." }`)
-2. Si un chemin est sauvegardé → `spawn_uvicorn(path)` lance `python3 -m uvicorn howimetyourcorpus.api.server:app --host 127.0.0.1 --port 8765`
-3. `RunEvent::Exit` → `kill_backend()` tue proprement le process
+Voir `AUDIT_2026-03.md` section A pour la liste complète.
 
-**Commandes Tauri exposées** :
-- `get_project_path()` → `Option<String>`
-- `set_project_path(path: String)` → kill ancien process + sauvegarde + relance uvicorn
-
-**Frontend (`main.ts`)** :
-- `IS_TAURI = "__TAURI_INTERNALS__" in window && VITE_E2E !== "true"`
-- `pollHealth()` — poll `GET /health` toutes les 500ms × 60 (30s max)
-- `startupTauri()` — lit le chemin sauvegardé, lance ou affiche le picker
-
----
-
-## Startup overlay (index.html)
-
-Éléments DOM utilisés par `main.ts` :
-- `#startup-overlay` — fond plein écran (caché par `hideOverlay()` quand prêt)
-- `#startup-status` — message texte d'état
-- `#startup-spinner` — animation spin CSS
-- `#startup-error` — message d'erreur (rouge)
-- `#startup-pick-btn` — bouton "Choisir un projet…"
-- `#startup-retry-btn` — bouton "↺ Réessayer"
+Principales familles :
+- **Config** : `GET/PUT /config`, `PUT /series_index`
+- **Episodes** : `GET /episodes`, `GET/POST/DELETE/PATCH /episodes/{id}/sources/{key}`
+- **Jobs** : `GET/POST /jobs`, `GET/DELETE /jobs/{id}`
+- **Alignement** : `GET /alignment_runs`, `GET /episodes/{id}/alignment_runs`, `PATCH /alignment_links/{id}`, bulk, retarget, stats, concordance
+- **Personnages** : `GET/PUT /characters`, `GET/PUT /assignments`, `POST /assignments/auto`, `POST /episodes/{id}/propagate_characters`
+- **Export** : `POST /export` (scopes: corpus, segments, jobs, characters, assignments), `GET /export/qa`, `GET /export/alignments`
+- **Concordancier** : `POST /query`, `POST /query/facets`
+- **Web** : `POST /web/tvmaze/discover`, `POST /web/subslikescript/discover`, `POST /web/subslikescript/fetch_transcript`
+- **Health** : `GET /health`
 
 ---
 
-## Ajout d'une nouvelle route API
+## Base de données SQLite
 
-1. **`src/api.ts`** : ajouter interface + fonction `apiGet/apiPost/…`
-2. **Module concerné** (`src/modules/*.ts`) : appeler la fonction, gérer le rendu
-3. **`HIMYC/src/howimetyourcorpus/api/server.py`** : implémenter le endpoint
-4. **`HIMYC/AUDIT_2026-03.md`** : mettre à jour le tableau des routes (section A)
+8 migrations dans `src/howimetyourcorpus/core/storage/` :
+
+| # | Fichier | Tables créées |
+|---|---------|---------------|
+| 1 | `schema.sql` | `episodes`, `documents`, `documents_fts` |
+| 2 | `002_segments.sql` | `segments`, `segments_fts` |
+| 3 | `003_subtitles.sql` | `subtitle_tracks`, `subtitle_cues`, `cues_fts` |
+| 4 | `004_align.sql` | `align_runs`, `align_links` |
+| 5 | `005_optimize_indexes.sql` | Index composites perf |
+| 6 | `006_fk_cascade.sql` | Triggers CASCADE DELETE |
+| 7 | `007_drop_runs.sql` | DROP TABLE `runs` (orpheline) |
+| 8 | `008_speaker_explicit_fts.sql` | Rebuild `segments_fts` + colonne `speaker_explicit` |
+
+**Règle absolue** : toutes les requêtes `conn.execute()` utilisent des placeholders `?` — jamais d'interpolation de chaînes.
 
 ---
 
-## Release (CI GitHub Actions)
+## Ajout d'un endpoint
 
-Déclenchement : `git tag vX.Y.Z && git push origin vX.Y.Z`
-
-Le workflow `.github/workflows/release.yml` build sur 3 plateformes :
-
-| Platform | Runner | Args | Artefacts |
-|---|---|---|---|
-| macOS | `macos-latest` | `--target universal-apple-darwin` | `.dmg` (arm64+x86) |
-| Windows | `windows-latest` | _(aucun)_ | `_x64-setup.exe`, `.msi` |
-| Linux | `ubuntu-22.04` | _(aucun)_ | `.AppImage`, `.deb` |
-
-**Avant de tagger** :
-- Bumper `version` dans `src-tauri/tauri.conf.json`
-- Bumper `version` dans `src-tauri/Cargo.toml`
-- Committer, puis tagger
-
-**Pièges connus** :
-- `--target` ne peut être passé qu'une fois → utiliser `--target universal-apple-darwin` pour macOS universel
-- `tauri.conf.json` : le tableau `icon` doit être rempli (32x32.png, 128x128.png, icns, ico) sinon Windows échoue
-- `ubuntu-22.04` : `apt-get update` parfois flaky → retry intégré dans le workflow
-- `com.himyc.app` : l'identifiant Tauri se termine par `.app` — macOS le tolère mais si ça pose problème à l'avenir, changer en `com.himyc.desktop`
+1. **`api/server.py`** : ajouter le modèle Pydantic + la route décorée `@app.get/post/…`
+2. **`AUDIT_2026-03.md`** : ajouter une ligne dans le tableau section A, mettre à jour le compteur
+3. **`CHANGELOG.md`** : documenter dans la section de la version en cours
+4. **`himyc-tauri/src/api.ts`** : ajouter l'interface + la fonction fetch correspondante
 
 ---
 
 ## Constantes centralisées
 
-**`src/constants.ts`** — modifier ici en priorité, jamais hardcoder :
-- `API_PORT = 8765`
-- `API_BASE = "http://localhost:8765"`
-- `TAURI_SIDECAR_CMD = "sidecar_fetch_loopback"`
-- `SUPPORTED_LANGUAGES = ["en", "fr", "it"]`
+**`core/constants.py`** — toujours importer depuis ici, jamais hardcoder :
+
+```python
+from howimetyourcorpus.core.constants import (
+    SUPPORTED_LANGUAGES,        # ["en", "fr", "it"]
+    DEFAULT_PIVOT_LANG,         # "en"
+    DEFAULT_NORMALIZE_PROFILE,  # "default_en_v1"
+    API_PORT,                   # 8765 (ou HIMYC_API_PORT env)
+    CORPUS_DB_FILENAME,         # "corpus.db"
+    RAW_TEXT_FILENAME,          # "raw.txt"
+    CLEAN_TEXT_FILENAME,        # "clean.txt"
+    SEGMENTS_JSONL_FILENAME,    # "segments.jsonl"
+    EPISODES_DIR_NAME,          # "episodes"
+    EXPORTS_DIR_NAME,           # "exports"
+    DEFAULT_AUDIT_LIMIT,        # 50
+    MAX_AUDIT_LIMIT,            # 200
+    MAX_KWIC_HITS,              # 2000
+)
+```
 
 ---
 
-## Tests
+## Scopes d'export (`POST /export`)
 
-| Suite | Commande | Environnement |
+| scope | Formats | Contenu |
 |---|---|---|
-| Vitest (unit) | `npm test` | Node, pas de Tauri |
-| Playwright E2E | `VITE_E2E=true npm run test:e2e` | Chromium, backend réel requis |
+| `corpus` | TXT, CSV, JSON, DOCX, JSONL | Utterances du corpus |
+| `segments` | TXT, CSV, TSV, DOCX | Segments normalisés |
+| `jobs` | JSONL, JSON | Historique des jobs |
+| `characters` | JSON, CSV | Catalogue personnages (id, canonical, name_<lang>..., aliases) |
+| `assignments` | JSON, CSV | Assignations (character_id, speaker_label, episode_id, segment_id, cue_id) |
 
-En mode `VITE_E2E=true` :
-- `IS_TAURI = false` → `fetch()` natif au lieu de `sidecar_fetch_loopback`
-- L'overlay de démarrage est caché directement (`hideOverlay()`)
-- Le backend Python doit tourner sur `127.0.0.1:8765`
+`GET /export/alignments` : CSV/TSV avec fieldnames dynamiques selon `pivot_lang`.
+
+---
+
+## Nomenclature importante
+
+- **`speaker`** (pas `personnage`) — unifié dans tout le code (AUD-04)
+- **`speaker_explicit`** — colonne dans `segments_fts` pour la recherche sur speaker
+- **`align_run`** / **`align_link`** — jamais `run` seul (table orpheline supprimée en migration 007)
+- **`episode_id`** — clé string type `"s01e01"`, pas d'entier autoincrement
+
+---
+
+## Gestion des branches
+
+- **`master`** — branche principale stable
+- Les features se font sur des branches `feature/...`
+- Le frontend Tauri est sur `https://github.com/Hsbtqemy/HIMYC_Tauri` (branche `main`)
+
+**Workflow commit standard** :
+```bash
+# Backend seul
+git add src/ tests/ && git commit -m "feat(mx-XXX): description"
+
+# Avec mise à jour audit
+git add src/ tests/ AUDIT_2026-03.md CHANGELOG.md && git commit -m "feat(mx-XXX): ..."
+```
+
+---
+
+## Tests E2E pipeline (`test_e2e_pipeline.py`)
+
+9 tests pytest utilisant `httpx.TestClient` — couvrent le pipeline complet :
+- Import transcript → roundtrip lecture
+- Normalize → `clean.txt` + `prep_status=clean`
+- Segment → `segments.jsonl` + indexation DB
+- Export TXT, CSV, corpus vide (pas de 500)
+
+Ne nécessitent pas de backend uvicorn lancé — utilisent TestClient directement.
 
 ---
 
 ## Liens utiles
 
-- Backend Python (FastAPI) : `/Users/hsmy/Dev/HIMYC/` — voir son propre `CLAUDE.md`
-- Audit routes : `HIMYC/AUDIT_2026-03.md`
-- Changelog : `HIMYC/CHANGELOG.md`
-- Tauri 2 docs : https://v2.tauri.app
+- Frontend Tauri : `/Users/hsmy/Dev/himyc-tauri/` — voir son propre `CLAUDE.md`
+- Audit complet : `AUDIT_2026-03.md`
+- Changelog : `CHANGELOG.md`
+- FastAPI docs : http://127.0.0.1:8765/docs (disponible en dev)
