@@ -3699,7 +3699,7 @@ function wireSubslikeBatchUI(
       const chk   = selected[i];
       const epId  = chk.dataset.epId!;
       const epUrl = chk.dataset.epUrl!;
-      const row   = container.querySelector<HTMLElement>(`.sl-ep-row[data-ep-id="${CSS.escape(epId)}"]`);
+      const row   = container.querySelector<HTMLElement>(`.sl-ep-row[data-ep-id="${window.CSS.escape(epId)}"]`);
       const statusEl = row?.querySelector<HTMLElement>(".sl-ep-status");
       setFeedback(`Téléchargement ${i + 1}/${selected.length} : ${epId}…`);
       if (statusEl) { statusEl.textContent = "…"; statusEl.style.color = "var(--text-muted)"; }
