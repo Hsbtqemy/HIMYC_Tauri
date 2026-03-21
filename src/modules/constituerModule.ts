@@ -1615,6 +1615,25 @@ const CSS = `
 .seg-lt-search-nav button { padding: 1px 7px; font-size: 0.72rem; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); cursor: pointer; font-family: inherit; color: var(--text-muted); }
 .seg-lt-search-nav button:hover { background: var(--surface2); }
 
+/* ── S-1 : Table segments ───────────────────────────────────── */
+.seg-table-info {
+  font-size: 0.72rem; color: var(--text-muted); padding: 4px 10px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.seg-segments-scroll { flex: 1; overflow: auto; }
+.seg-segments-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.seg-segments-table th { position: sticky; top: 0; background: var(--surface2); z-index: 1; }
+.seg-cell-n     { width: 36px; text-align: right; color: var(--text-muted); padding: 3px 6px; font-family: ui-monospace,monospace; }
+.seg-cell-speaker { width: 90px; padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg-cell-text  { padding: 3px 6px; line-height: 1.5; }
+.seg-cell-len   { width: 46px; text-align: right; padding: 3px 6px; font-family: ui-monospace,monospace; font-size: 0.72rem; }
+/* S-3 : warning utterance */
+.seg-warn-utterance {
+  margin: 8px; padding: 8px 12px; border-radius: 6px; font-size: 0.78rem;
+  background: color-mix(in srgb, var(--warning,#f59e0b) 12%, transparent);
+  color: var(--warning-text, #92400e); border: 1px solid color-mix(in srgb, var(--warning,#f59e0b) 30%, transparent);
+}
+
 /* ── Mode traduction (MX-036) ────────────────────────────────── */
 .seg-trad-toolbar {
   display: flex; align-items: center; gap: 8px;
@@ -3816,29 +3835,125 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
       <tbody>${rows}</tbody>
     </table>`;
   wrap.querySelectorAll<HTMLButtonElement>(".seg-ep-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
       const epId   = btn.dataset.ep!;
-      const segKind = container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "utterance";
+      const segKind = container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "sentence";
       btn.disabled = true; btn.textContent = "…";
       try {
         await createJob("segment_transcript", epId, "transcript", { segment_kind: segKind });
         startJobPoll(container);
         btn.textContent = "✓ en queue";
-      } catch (e) {
+      } catch (e2) {
         btn.disabled = false; btn.textContent = "Segmenter";
         const errEl = container.querySelector<HTMLElement>(".seg-error");
-        if (errEl) { errEl.textContent = e instanceof ApiError ? e.message : String(e); errEl.style.display = "block"; }
+        if (errEl) { errEl.textContent = e2 instanceof ApiError ? e2.message : String(e2); errEl.style.display = "block"; }
       }
     });
   });
 
-  // Wire text viewer
+  // S-1 : clic sur une ligne → afficher la table de segments dans le panneau droit
   const segTextPanel = container.querySelector<HTMLElement>("#seg-text-panel");
-  if (segTextPanel) {
-    wireTextPanelRows(wrap, segTextPanel, [
-      { key: "raw",   label: "Brut" },
-      { key: "clean", label: "Normalisé" },
-    ]);
+  wrap.querySelectorAll<HTMLTableRowElement>("tr[data-ep-id]").forEach((row) => {
+    row.style.cursor = "pointer";
+    row.addEventListener("click", async () => {
+      wrap.querySelectorAll("tr[data-ep-id]").forEach((r) => r.classList.remove("active-row"));
+      row.classList.add("active-row");
+      if (segTextPanel) {
+        const kind = (container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "sentence") as "sentence" | "utterance";
+        await loadSegmentsTable(segTextPanel, row.dataset.epId!, row.dataset.epTitle!, kind, container);
+      }
+    });
+  });
+
+  // Re-wire le select #seg-kind pour recharger la table quand l'épisode actif change de mode
+  const kindSel = container.querySelector<HTMLSelectElement>("#seg-kind");
+  if (kindSel && !kindSel.dataset.segWired) {
+    kindSel.dataset.segWired = "1";
+    kindSel.addEventListener("change", async () => {
+      const activeRow = wrap.querySelector<HTMLTableRowElement>("tr.active-row");
+      if (activeRow && segTextPanel) {
+        const kind = kindSel.value as "sentence" | "utterance";
+        await loadSegmentsTable(segTextPanel, activeRow.dataset.epId!, activeRow.dataset.epTitle!, kind, container);
+      }
+    });
+  }
+}
+
+/**
+ * S-1 : Charge et affiche la table des segments d'un épisode dans le panneau droit.
+ * S-3 : Affiche un avertissement si mode utterance et pas de speaker_explicit détecté.
+ */
+async function loadSegmentsTable(
+  panel: HTMLElement,
+  epId: string,
+  epTitle: string,
+  kind: "sentence" | "utterance",
+  container: HTMLElement,
+) {
+  panel.innerHTML = `<div class="acts-text-empty">Chargement segments…</div>`;
+  try {
+    const res = await fetchEpisodeSegments(epId, kind);
+    const segs = res.segments;
+
+    if (segs.length === 0) {
+      // S-3 : utterance sans segments → vérifier si c'est un problème de speaker markers
+      if (kind === "utterance") {
+        panel.innerHTML = `
+          <div class="seg-warn-utterance">
+            <strong>⚠ Aucun segment utterance</strong> pour ${escapeHtml(epTitle)}.<br>
+            Le mode utterance nécessite des marqueurs de locuteur <code>NOM: </code> dans le transcript.
+            <br><br>
+            <button class="btn btn-primary btn-sm" id="seg-go-curation">→ Annoter dans Curation</button>
+          </div>`;
+        panel.querySelector<HTMLButtonElement>("#seg-go-curation")?.addEventListener("click", () => {
+          // Naviguer vers Curation avec cet épisode (N-2 prérequis — navigation best-effort)
+          container.querySelector<HTMLButtonElement>('.cons-nav-tree-link[data-subview="curation"]')?.click();
+        });
+      } else {
+        panel.innerHTML = `<div class="acts-text-empty">Aucun segment — lancez la segmentation d'abord.</div>`;
+      }
+      return;
+    }
+
+    // S-3 : avertissement utterance si pas de speaker_explicit parmi les segments
+    const hasSpeakers = segs.some((s) => s.speaker_explicit);
+    const utteranceWarn = (kind === "utterance" && !hasSpeakers)
+      ? `<div class="seg-warn-utterance" style="margin-bottom:8px">
+          ⚠ Aucun locuteur identifié — les utterances n'ont pas de marqueurs <code>NOM: </code>.
+          <button class="btn btn-ghost btn-sm" style="margin-left:6px" id="seg-warn-go-curation">→ Annoter</button>
+        </div>`
+      : "";
+
+    const rows = segs.map((s) => {
+      const speaker = s.speaker_explicit
+        ? `<span style="color:var(--accent);font-weight:600">${escapeHtml(s.speaker_explicit)}</span>`
+        : `<span style="color:var(--text-muted)">—</span>`;
+      const len = s.text.length;
+      const lenStyle = len > 200 ? "color:var(--danger,#dc2626)" : len > 120 ? "color:var(--warning,#b45309)" : "";
+      return `<tr>
+        <td class="seg-cell-n">${s.n}</td>
+        <td class="seg-cell-speaker">${speaker}</td>
+        <td class="seg-cell-text">${escapeHtml(s.text)}</td>
+        <td class="seg-cell-len" style="${lenStyle}">${len}</td>
+      </tr>`;
+    }).join("");
+
+    panel.innerHTML = `
+      ${utteranceWarn}
+      <div class="seg-table-info">${escapeHtml(epTitle)} — ${segs.length} segment(s) · mode <em>${kind}</em></div>
+      <div class="seg-segments-scroll">
+        <table class="cons-table seg-segments-table">
+          <thead><tr><th>#</th><th>Locuteur</th><th>Texte</th><th>Long.</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+
+    panel.querySelector<HTMLButtonElement>("#seg-warn-go-curation")?.addEventListener("click", () => {
+      container.querySelector<HTMLButtonElement>('.cons-nav-tree-link[data-subview="curation"]')?.click();
+    });
+  } catch (e) {
+    panel.innerHTML = `<div class="acts-text-empty" style="color:var(--danger)">${escapeHtml(e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e))}</div>`;
   }
 }
 
@@ -6517,7 +6632,6 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <span style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Vue</span>
               <div class="seg-mode-toggle">
                 <button class="seg-mode-btn active" data-seg-mode="table" id="seg-mode-table">Table</button>
-                <button class="seg-mode-btn" data-seg-mode="longtext" id="seg-mode-lt">Texte</button>
                 <button class="seg-mode-btn" data-seg-mode="traduction" id="seg-mode-trad">Traduction</button>
               </div>
             </div>
@@ -6531,8 +6645,6 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 <div class="acts-text-empty">← Sélectionnez un épisode</div>
               </div>
             </div>
-            <!-- Vue Longtext (lazy) -->
-            <div id="seg-view-lt" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden"></div>
             <!-- Vue Traduction (lazy, MX-036) -->
             <div id="seg-view-trad" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden"></div>
           </div>
@@ -6816,30 +6928,9 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       container.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
       container.querySelector("#seg-mode-table")?.classList.add("active");
       const tv   = container.querySelector<HTMLElement>("#seg-view-table");
-      const lv   = container.querySelector<HTMLElement>("#seg-view-lt");
       const trdv = container.querySelector<HTMLElement>("#seg-view-trad");
       if (tv)   tv.style.display   = "";
-      if (lv)   lv.style.display   = "none";
       if (trdv) trdv.style.display = "none";
-    });
-
-  container.querySelector<HTMLButtonElement>("#seg-mode-lt")
-    ?.addEventListener("click", () => {
-      container.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
-      container.querySelector("#seg-mode-lt")?.classList.add("active");
-      const tv   = container.querySelector<HTMLElement>("#seg-view-table");
-      const lv   = container.querySelector<HTMLElement>("#seg-view-lt");
-      const trdv = container.querySelector<HTMLElement>("#seg-view-trad");
-      if (tv)   tv.style.display   = "none";
-      if (trdv) trdv.style.display = "none";
-      if (lv) {
-        lv.style.display = "flex";
-        const activeRow = tv?.querySelector<HTMLTableRowElement>("tr.active-row");
-        const epId    = activeRow?.dataset.epId ?? null;
-        const epTitle = activeRow?.dataset.epTitle ?? epId ?? "";
-        const kind    = (container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "utterance") as "utterance" | "sentence";
-        loadLongtextView(lv, epId, epTitle, kind);
-      }
     });
 
   container.querySelector<HTMLButtonElement>("#seg-mode-trad")
@@ -6847,10 +6938,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       container.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
       container.querySelector("#seg-mode-trad")?.classList.add("active");
       const tv   = container.querySelector<HTMLElement>("#seg-view-table");
-      const lv   = container.querySelector<HTMLElement>("#seg-view-lt");
       const trdv = container.querySelector<HTMLElement>("#seg-view-trad");
       if (tv)   tv.style.display   = "none";
-      if (lv)   lv.style.display   = "none";
       if (trdv) {
         trdv.style.display = "flex";
         const episodes = _cachedEpisodes?.episodes ?? [];
