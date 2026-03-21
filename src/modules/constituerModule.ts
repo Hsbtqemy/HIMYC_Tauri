@@ -6635,14 +6635,6 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 </select>
               </div>
             </div>
-            <!-- Vue toggle Table / Texte -->
-            <div style="display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(--surface2);border-bottom:1px solid var(--border);flex-shrink:0">
-              <span style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Vue</span>
-              <div class="seg-mode-toggle">
-                <button class="seg-mode-btn active" data-seg-mode="table" id="seg-mode-table">Table</button>
-                <button class="seg-mode-btn" data-seg-mode="traduction" id="seg-mode-trad">Traduction</button>
-              </div>
-            </div>
             <div class="cons-error seg-error" style="display:none"></div>
             <!-- Vue Table -->
             <div id="seg-view-table" class="acts-split" style="flex:1;min-height:0;overflow:hidden">
@@ -6653,17 +6645,20 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 <div class="acts-text-empty">← Sélectionnez un épisode</div>
               </div>
             </div>
-            <!-- Vue Traduction (lazy, MX-036) -->
-            <div id="seg-view-trad" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden"></div>
           </div>
 
           <!-- Alignement sub-pane -->
           <div class="cons-actions-pane${_activeActionsSubView === "alignement" ? " active" : ""}" data-subview="alignement">
             <div class="cons-toolbar">
               <span class="cons-toolbar-title">Alignement — épisode</span>
-              <button class="btn btn-ghost btn-sm" id="cons-refresh-align">↺ Actualiser</button>
+              <div class="seg-mode-toggle" style="margin-left:8px">
+                <button class="seg-mode-btn active" id="align-mode-inspect">Inspection</button>
+                <button class="seg-mode-btn" id="align-mode-trad">Traduction</button>
+              </div>
+              <button class="btn btn-ghost btn-sm" id="cons-refresh-align" style="margin-left:auto">↺ Actualiser</button>
             </div>
-            <div class="acts-split">
+            <!-- Vue Inspection -->
+            <div id="align-view-inspect" class="acts-split" style="flex:1;min-height:0;overflow:hidden">
               <div class="acts-ep-list">
                 <div class="align-ep-wrap cons-loading">Chargement…</div>
               </div>
@@ -6671,6 +6666,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 <div class="acts-text-empty">← Sélectionnez un épisode</div>
               </div>
             </div>
+            <!-- Vue Traduction (déplacée depuis Segmentation — S-5/A-3) -->
+            <div id="align-view-trad" style="display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden"></div>
           </div>
 
         </div><!-- /section actions -->
@@ -6941,21 +6938,36 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       if (trdv) trdv.style.display = "none";
     });
 
-  container.querySelector<HTMLButtonElement>("#seg-mode-trad")
+  // ── Alignement pane wiring ─────────────────────────────────────────────────
+
+  // Mode toggle Inspection / Traduction dans Alignement
+  container.querySelector<HTMLButtonElement>("#align-mode-inspect")
     ?.addEventListener("click", () => {
-      container.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
-      container.querySelector("#seg-mode-trad")?.classList.add("active");
-      const tv   = container.querySelector<HTMLElement>("#seg-view-table");
-      const trdv = container.querySelector<HTMLElement>("#seg-view-trad");
-      if (tv)   tv.style.display   = "none";
-      if (trdv) {
-        trdv.style.display = "flex";
-        const episodes = _cachedEpisodes?.episodes ?? [];
-        loadTradView(trdv, episodes);
-      }
+      const alignPane = container.querySelector<HTMLElement>('.cons-actions-pane[data-subview="alignement"]');
+      if (!alignPane) return;
+      alignPane.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
+      alignPane.querySelector("#align-mode-inspect")?.classList.add("active");
+      const inspectV = alignPane.querySelector<HTMLElement>("#align-view-inspect");
+      const tradV    = alignPane.querySelector<HTMLElement>("#align-view-trad");
+      if (inspectV) inspectV.style.display = "";
+      if (tradV)    tradV.style.display    = "none";
     });
 
-  // ── Alignement pane wiring ─────────────────────────────────────────────────
+  container.querySelector<HTMLButtonElement>("#align-mode-trad")
+    ?.addEventListener("click", () => {
+      const alignPane = container.querySelector<HTMLElement>('.cons-actions-pane[data-subview="alignement"]');
+      if (!alignPane) return;
+      alignPane.querySelectorAll(".seg-mode-btn").forEach((b) => b.classList.remove("active"));
+      alignPane.querySelector("#align-mode-trad")?.classList.add("active");
+      const inspectV = alignPane.querySelector<HTMLElement>("#align-view-inspect");
+      const tradV    = alignPane.querySelector<HTMLElement>("#align-view-trad");
+      if (inspectV) inspectV.style.display = "none";
+      if (tradV) {
+        tradV.style.display = "flex";
+        const episodes = _cachedEpisodes?.episodes ?? [];
+        loadTradView(tradV, episodes);
+      }
+    });
 
   // Confidence slider live display (hub)
   container.querySelector<HTMLInputElement>("#hub-align-conf")
