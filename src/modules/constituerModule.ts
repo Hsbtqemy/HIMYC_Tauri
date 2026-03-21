@@ -3838,10 +3838,10 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const epId   = btn.dataset.ep!;
-      const segKind = container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "sentence";
+      const langHint = container.querySelector<HTMLSelectElement>("#seg-lang-hint")?.value ?? "en";
       btn.disabled = true; btn.textContent = "…";
       try {
-        await createJob("segment_transcript", epId, "transcript", { segment_kind: segKind });
+        await createJob("segment_transcript", epId, "transcript", { lang_hint: langHint });
         startJobPoll(container);
         btn.textContent = "✓ en queue";
       } catch (e2) {
@@ -6617,13 +6617,21 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <span class="cons-toolbar-title">Segmentation — épisode</span>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-seg">↺ Actualiser</button>
             </div>
-            <!-- Params panel : affichage seulement -->
+            <!-- Params panel -->
             <div class="acts-params">
               <div class="acts-params-group">
-                <span class="acts-params-label">Afficher</span>
+                <span class="acts-params-label" title="Filtre d'affichage — les deux modes sont toujours générés">Afficher</span>
                 <select class="acts-params-select" id="seg-kind">
                   <option value="utterance">Utterances</option>
                   <option value="sentence">Phrases</option>
+                </select>
+              </div>
+              <div class="acts-params-group" title="Langue des règles de ponctuation utilisées à la segmentation">
+                <span class="acts-params-label">Langue</span>
+                <select class="acts-params-select" id="seg-lang-hint">
+                  <option value="en">EN</option>
+                  <option value="fr">FR</option>
+                  <option value="it">IT</option>
                 </select>
               </div>
             </div>
