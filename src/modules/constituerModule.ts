@@ -19,6 +19,7 @@ import {
   deleteTranscript,
   deleteSrt,
   patchTranscript,
+  fetchNormalizePreview,
   setAlignLinkNote,
   fetchJobs,
   createJob,
@@ -1111,6 +1112,12 @@ const CSS = `
 .cur-w-del { background:#fef2f2; color:#dc2626; text-decoration:line-through; border-radius:2px; padding:0 1px; }
 .cur-w-ins { background:#f0fdf4; color:#16a34a; border-radius:2px; padding:0 1px; }
 
+/* Surlignage recherche find/replace */
+.cur-search-hl { background:#fef08a; color:#713f12; border-radius:2px; padding:0 1px; }
+
+/* Marqueur de ligne vide dans le raw pane */
+.cur-blank-line { color:var(--text-muted,#94a3b8); opacity:0.45; font-size:0.75em; user-select:none; }
+
 /* ── Chips règles actives (C-4) ──────────────────────────────── */
 .cur-rule-chip {
   padding: 2px 8px; border-radius: 20px; font-size: 0.68rem; font-weight: 600;
@@ -2030,7 +2037,25 @@ async function refreshJobs(container: HTMLElement) {
       stopJobPoll();
       // Refresh the active sub-view episode list so badges reflect actual job results
       if (_activeSection === "actions") {
-        if (_activeActionsSubView === "curation")     loadAndRender(container);
+        if (_activeActionsSubView === "curation") {
+          await loadAndRender(container);
+          // Re-marquer l'épisode actif après le re-rendu de la liste
+          if (_curPreviewEpId && !_curEditMode) {
+            const listEl   = container.querySelector<HTMLElement>("#cur-ep-list");
+            const epItem   = listEl?.querySelector<HTMLElement>(`[data-ep-id="${_curPreviewEpId}"]`);
+            if (epItem) epItem.classList.add("active");
+            const panes    = container.querySelector<HTMLElement>("#cur-preview-panes");
+            const epTitle  = epItem?.dataset.epTitle ?? _curPreviewEpId;
+            const mode     = container.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
+            if (panes) {
+              _curPreviewData = null; // forcer le rechargement depuis le serveur
+              await loadCurationPreview(panes, _curPreviewEpId, epTitle, mode);
+            }
+            // Remettre le bouton normaliser à "Re-normaliser" après job terminé
+            const normBtn = container.querySelector<HTMLButtonElement>("#cur-apply-normalize");
+            if (normBtn) { normBtn.disabled = false; normBtn.textContent = "Re-normaliser et sauvegarder"; }
+          }
+        }
         if (_activeActionsSubView === "segmentation") loadAndRenderSegmentation(container);
         if (_activeActionsSubView === "alignement")   loadAndRenderAlignement(container);
       }
@@ -2048,13 +2073,16 @@ function stopJobPoll() {
 }
 
 function collectNormalizeOpts(cnt: HTMLElement): Record<string, unknown> {
+  const cb = (id: string) => cnt.querySelector<HTMLInputElement>(id)?.checked ?? false;
   return {
-    merge_subtitle_breaks:  cnt.querySelector<HTMLInputElement>("#cur-opt-merge")?.checked ?? true,
-    fix_double_spaces:      cnt.querySelector<HTMLInputElement>("#cur-opt-double")?.checked ?? true,
-    fix_french_punctuation: cnt.querySelector<HTMLInputElement>("#cur-opt-french")?.checked ?? false,
-    normalize_apostrophes:  cnt.querySelector<HTMLInputElement>("#cur-opt-apos")?.checked ?? false,
-    normalize_quotes:       cnt.querySelector<HTMLInputElement>("#cur-opt-quotes")?.checked ?? false,
-    strip_line_spaces:      cnt.querySelector<HTMLInputElement>("#cur-opt-strip")?.checked ?? true,
+    merge_subtitle_breaks:  cb("#cur-opt-merge"),
+    fix_double_spaces:      cb("#cur-opt-double"),
+    fix_french_punctuation: cb("#cur-opt-french"),
+    fix_english_punctuation:cb("#cur-opt-en-punct"),
+    normalize_apostrophes:  cb("#cur-opt-apos"),
+    normalize_quotes:       cb("#cur-opt-quotes"),
+    strip_line_spaces:      cb("#cur-opt-strip"),
+    strip_empty_lines:      cb("#cur-opt-strip-empty"),
     case_transform:         cnt.querySelector<HTMLSelectElement>("#cur-opt-case")?.value ?? "none",
   };
 }
@@ -2064,12 +2092,14 @@ function applyNormalizeOptsToPanel(cnt: HTMLElement, opts: NormalizeOptions) {
     const el = cnt.querySelector<HTMLInputElement>(id);
     if (el) el.checked = val;
   };
-  set("#cur-opt-merge",  opts.merge_subtitle_breaks);
-  set("#cur-opt-double", opts.fix_double_spaces);
-  set("#cur-opt-french", opts.fix_french_punctuation);
-  set("#cur-opt-apos",   opts.normalize_apostrophes);
-  set("#cur-opt-quotes", opts.normalize_quotes);
-  set("#cur-opt-strip",  opts.strip_line_spaces);
+  set("#cur-opt-merge",       opts.merge_subtitle_breaks);
+  set("#cur-opt-double",      opts.fix_double_spaces);
+  set("#cur-opt-french",      opts.fix_french_punctuation);
+  set("#cur-opt-en-punct",    opts.fix_english_punctuation);
+  set("#cur-opt-apos",        opts.normalize_apostrophes);
+  set("#cur-opt-quotes",      opts.normalize_quotes);
+  set("#cur-opt-strip",       opts.strip_line_spaces);
+  set("#cur-opt-strip-empty", opts.strip_empty_lines);
   const caseEl = cnt.querySelector<HTMLSelectElement>("#cur-opt-case");
   if (caseEl) caseEl.value = opts.case_transform;
 }
@@ -2469,9 +2499,11 @@ const OPTION_CHIP_MAP: Array<{
   { optKey: "merge_subtitle_breaks",  label: "Fusion lignes",    checkboxId: "#cur-opt-merge" },
   { optKey: "fix_double_spaces",      label: "Espaces doubles",  checkboxId: "#cur-opt-double" },
   { optKey: "fix_french_punctuation", label: "Ponctuation fine", checkboxId: "#cur-opt-french" },
+  { optKey: "fix_english_punctuation",label: "Ponct. EN",        checkboxId: "#cur-opt-en-punct" },
   { optKey: "normalize_apostrophes",  label: "Apostrophes",      checkboxId: "#cur-opt-apos" },
   { optKey: "normalize_quotes",       label: "Guillemets",       checkboxId: "#cur-opt-quotes" },
   { optKey: "strip_line_spaces",      label: "Marges ligne",     checkboxId: "#cur-opt-strip" },
+  { optKey: "strip_empty_lines",      label: "Lignes vides",     checkboxId: "#cur-opt-strip-empty" },
 ];
 
 /** Rend les chips règles actives à partir de l'état courant du panneau options.
@@ -2492,6 +2524,7 @@ function renderCurationRuleChips(container: HTMLElement) {
       const cb = container.querySelector<HTMLInputElement>(cbId);
       if (cb) { cb.checked = !cb.checked; }
       renderCurationRuleChips(container); // re-render to reflect new state
+      scheduleCurationPreview(container); // déclencher l'aperçu normalisé
     });
   });
 }
@@ -2557,11 +2590,24 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
       const srcAvail = _curPreviewEpSources.find((s) => s.source_key === _curPreviewSourceKey && s.available);
       if (!srcAvail) _curPreviewSourceKey = "transcript";
       _curPreviewData = null;
+      _curSearchRegex = null;
+      _clientPreviewClean = null;
+      if (_clientPreviewTimer) { clearTimeout(_clientPreviewTimer); _clientPreviewTimer = null; }
       if (_curEditMode) exitEditMode(container);
       if (srcBar) renderCurSourceBar(srcBar, _curPreviewEpSources, container);
       updateCurationModeTabsForSource(container, _curPreviewSourceKey);
 
       await loadCurationPreview(previewPanes, epId, epTitle, activeMode());
+      // Bouton normaliser : activer + libellé selon état
+      const normBtn = container.querySelector<HTMLButtonElement>("#cur-apply-normalize");
+      if (normBtn) {
+        normBtn.disabled = false;
+        normBtn.textContent = (epState === "normalized" || epState === "segmented" || epState === "ready_for_alignment")
+          ? "Re-normaliser et sauvegarder"
+          : "Normaliser et sauvegarder";
+      }
+      // Déclencher l'aperçu avec les paramètres courants dès qu'un épisode est sélectionné
+      scheduleCurationPreview(container);
     });
   });
 
@@ -2608,6 +2654,85 @@ let _curPreviewData: { raw: string; clean: string } | null = null;
 let _curPreviewSourceKey: string = "transcript";
 let _curPreviewEpSources: EpisodeSource[] = [];
 let _curEditMode = false;
+let _curSearchRegex: RegExp | null = null; // Regex active pour le surlignage Rechercher
+let _clientPreviewClean: string | null = null; // Aperçu client-side (paramètres modifiés, non sauvegardé)
+let _clientPreviewTimer: ReturnType<typeof setTimeout> | null = null; // Debounce timer aperçu
+
+/**
+ * Déclenche un aperçu normalisé (via /normalize/preview) avec debounce de 300ms.
+ * Met à jour _clientPreviewClean et rafraîchit le preview sans sauvegarder.
+ */
+/**
+ * Implémentation client-side du normalize (miroir du Python profiles.py).
+ * Permet un aperçu instantané sans appel réseau.
+ */
+function _clientShouldMerge(prev: string, next: string): boolean {
+  const p = prev.trimEnd();
+  if (!p || !next.trim()) return false;
+  if (".?!".includes(p[p.length - 1])) return false;
+  if (/^[A-Z][A-Z0-9 _'.-]*: /i.test(next.trimStart())) return false;
+  return true;
+}
+
+function normalizeTextClient(text: string, opts: Record<string, unknown>): { clean: string; merges: number } {
+  const bool = (k: string) => opts[k] === true;
+  let lines = text.split("\n");
+
+  if (bool("strip_empty_lines")) lines = lines.filter((l) => l.trim() !== "");
+
+  let merges = 0;
+  const result: string[] = [];
+
+  for (const rawLine of lines) {
+    let line = rawLine;
+    if (bool("strip_line_spaces"))       line = line.trim();
+    if (bool("fix_double_spaces"))       line = line.replace(/ {2,}/g, " ");
+    if (bool("fix_french_punctuation"))  line = line.replace(/\s*([;:!?])/g, "\u00a0$1");
+    if (bool("fix_english_punctuation")) line = line.replace(/\s+([;:!?])/g, "$1");
+    if (bool("normalize_apostrophes"))   line = line.replace(/'/g, "\u2019");
+    if (bool("normalize_quotes"))        line = line.replace(/"([^"]+)"/g, "\u00ab\u00a0$1\u00a0\u00bb");
+
+    if (bool("merge_subtitle_breaks") && result.length > 0 && _clientShouldMerge(result[result.length - 1], line)) {
+      result[result.length - 1] = result[result.length - 1].trimEnd() + " " + line.trimStart();
+      merges++;
+    } else {
+      result.push(line);
+    }
+  }
+
+  const caseOpt = (opts["case_transform"] as string) ?? "none";
+  const finalLines = result.map((l) => {
+    if (caseOpt === "lowercase")     return l.toLowerCase();
+    if (caseOpt === "UPPERCASE")     return l.toUpperCase();
+    if (caseOpt === "Title Case")    return l.replace(/\b\w/g, (c) => c.toUpperCase());
+    if (caseOpt === "Sentence case") return l.length > 0 ? l[0].toUpperCase() + l.slice(1).toLowerCase() : l;
+    return l;
+  });
+
+  return { clean: finalLines.join("\n"), merges };
+}
+
+function scheduleCurationPreview(container: HTMLElement) {
+  if (_clientPreviewTimer) clearTimeout(_clientPreviewTimer);
+  _clientPreviewTimer = setTimeout(() => {
+    _clientPreviewTimer = null;
+    if (!_curPreviewData || _curEditMode || !_curPreviewEpId || _curPreviewSourceKey !== "transcript") return;
+    const opts = collectNormalizeOpts(container);
+    const { clean, merges } = normalizeTextClient(_curPreviewData.raw, opts);
+    _clientPreviewClean = clean;
+    const panes   = container.querySelector<HTMLElement>("#cur-preview-panes");
+    const mode    = container.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
+    const epTitle = container.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
+    if (panes) renderCurationPreviewMode(panes, { raw: _curPreviewData.raw, clean }, mode, epTitle, _curSearchRegex);
+    const fb = container.querySelector<HTMLElement>("#cur-preview-feedback");
+    if (fb) {
+      fb.style.color = merges > 0 ? "var(--accent,#6366f1)" : "var(--text-muted)";
+      fb.textContent = merges > 0
+        ? `⟳ aperçu · ${merges} fusion${merges > 1 ? "s" : ""} de lignes`
+        : `⟳ aperçu · aucune fusion — si le texte a des lignes vides entre les répliques, coche « Supprimer lignes vides »`;
+    }
+  }, 150);
+}
 
 /** Passe en mode édition : remplace le preview par un textarea avec le texte clean. */
 function enterEditMode(container: HTMLElement) {
@@ -2745,9 +2870,28 @@ function highlightSpeakerTags(text: string): string {
   return text
     .split("\n")
     .map((line) => {
+      if (line.trim() === "") return `<span class="cur-blank-line">¶</span>`;
       const m = line.match(/^([A-Z][A-Z0-9 _'.-]*)(: )/i);
       if (!m) return escapeHtml(line);
       return `<span class="cur-speaker-tag">${escapeHtml(m[1])}${escapeHtml(m[2])}</span>${escapeHtml(line.slice(m[0].length))}`;
+    })
+    .join("\n");
+}
+
+/**
+ * Combine surlignage locuteur + surlignage recherche sur du texte brut.
+ * Utiliser à la place de highlightSpeakerTags quand une recherche est active.
+ */
+function renderRawText(text: string, searchRegex?: RegExp | null): string {
+  if (!searchRegex) return highlightSpeakerTags(text);
+  const applyH = (t: string) => highlightInText(t, searchRegex);
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.trim() === "") return `<span class="cur-blank-line">¶</span>`;
+      const m = line.match(/^([A-Z][A-Z0-9 _'.-]*)(: )/i);
+      if (!m) return applyH(line);
+      return `<span class="cur-speaker-tag">${applyH(m[1])}${escapeHtml(m[2])}</span>${applyH(line.slice(m[0].length))}`;
     })
     .join("\n");
 }
@@ -2824,6 +2968,8 @@ async function loadCurationPreview(
         const s = src as SrtSourceContent;
         _curPreviewData = { raw: s.content ?? "", clean: "" };
       }
+      // Réinitialiser l'aperçu client lors d'un rechargement depuis le serveur
+      _clientPreviewClean = null;
     } catch (e) {
       panes.innerHTML = `<div class="acts-text-empty" style="width:100%">${escapeHtml(e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e))}</div>`;
       return;
@@ -2832,7 +2978,11 @@ async function loadCurationPreview(
 
   // Pour SRT, forcer mode "raw" (pas de diff/clean)
   const effectiveMode = sourceKey !== "transcript" ? "raw" : mode;
-  renderCurationPreviewMode(panes, _curPreviewData, effectiveMode, epTitle);
+  // Si aperçu client actif, l'utiliser comme texte "clean"
+  const displayData = _clientPreviewClean !== null
+    ? { raw: _curPreviewData.raw, clean: _clientPreviewClean }
+    : _curPreviewData;
+  renderCurationPreviewMode(panes, displayData, effectiveMode, epTitle, _curSearchRegex);
 }
 
 // ── Word-level diff (LCS sur tokens) ────────────────────────────────────────
@@ -2906,6 +3056,22 @@ function buildDiffHtml(raw: string, clean: string): { html: string; nChanges: nu
   return { html: parts.join(""), nChanges };
 }
 
+/** Surligne les occurrences d'un pattern dans du texte brut → HTML échappé avec <mark>. */
+function highlightInText(text: string, regex: RegExp): string {
+  const parts: string[] = [];
+  let lastIdx = 0;
+  const r = new RegExp(regex.source, regex.flags.includes("g") ? regex.flags : regex.flags + "g");
+  let m: RegExpExecArray | null;
+  while ((m = r.exec(text)) !== null) {
+    if (m.index > lastIdx) parts.push(escapeHtml(text.slice(lastIdx, m.index)));
+    parts.push(`<mark class="cur-search-hl">${escapeHtml(m[0])}</mark>`);
+    lastIdx = r.lastIndex;
+    if (m[0].length === 0) r.lastIndex++;
+  }
+  parts.push(escapeHtml(text.slice(lastIdx)));
+  return parts.join("");
+}
+
 /** Construit le HTML du panneau clean avec changements surlignés en vert. */
 function buildCleanHighlighted(raw: string, clean: string): string {
   const rawLines   = raw.split("\n");
@@ -2924,26 +3090,33 @@ function renderCurationPreviewMode(
   data: { raw: string; clean: string },
   mode: string,
   epTitle: string,
+  searchRegex?: RegExp | null,
 ) {
   const hasClean = !!data.clean && data.clean !== data.raw;
+  /** Applique le surlignage de recherche si une regex est active. */
+  const applyHL = (text: string) =>
+    searchRegex ? highlightInText(text, searchRegex) : escapeHtml(text);
+
+  const isPreview = _clientPreviewClean !== null;
+  const previewTag = isPreview
+    ? ` <span style="color:var(--warning,#f59e0b);font-size:0.6rem;font-style:italic">⟳ aperçu</span>`
+    : "";
   if (mode === "side") {
-    const cleanHtml = hasClean
-      ? buildCleanHighlighted(data.raw, data.clean)
-      : escapeHtml(data.raw);
+    const cleanText = data.clean || data.raw;
     panes.innerHTML = `
       <div class="cur-pane">
         <div class="cur-pane-head">Brut — ${escapeHtml(epTitle)}</div>
-        <div class="cur-pane-text">${highlightSpeakerTags(data.raw)}</div>
+        <div class="cur-pane-text">${renderRawText(data.raw, searchRegex)}</div>
       </div>
       <div class="cur-pane">
-        <div class="cur-pane-head">Normalisé${hasClean ? " <span style='color:var(--accent);font-size:0.6rem'>● modifié</span>" : ""}</div>
-        <div class="cur-pane-text">${cleanHtml}</div>
+        <div class="cur-pane-head">Normalisé${hasClean ? " <span style='color:var(--accent);font-size:0.6rem'>● modifié</span>" : ""}${previewTag}</div>
+        <div class="cur-pane-text">${renderRawText(cleanText, searchRegex)}</div>
       </div>`;
   } else if (mode === "raw") {
     panes.innerHTML = `
       <div class="cur-pane">
         <div class="cur-pane-head">Texte brut — ${escapeHtml(epTitle)}</div>
-        <div class="cur-pane-text">${highlightSpeakerTags(data.raw)}</div>
+        <div class="cur-pane-text">${renderRawText(data.raw, searchRegex)}</div>
       </div>`;
   } else if (mode === "diff") {
     const cleanText = data.clean || data.raw;
@@ -2960,13 +3133,15 @@ function renderCurationPreviewMode(
       </div>`;
   } else {
     // mode "clean"
-    const cleanHtml = hasClean
-      ? buildCleanHighlighted(data.raw, data.clean)
-      : escapeHtml(data.clean || data.raw);
+    const cleanText = data.clean || data.raw;
+    const notNormBanner = !hasClean
+      ? `<div style="font-size:0.75rem;color:var(--text-muted);padding:4px 0 8px;font-style:italic">Texte non encore normalisé — cliquez ⚡ sur un épisode pour normaliser.</div>`
+      : "";
     panes.innerHTML = `
       <div class="cur-pane">
-        <div class="cur-pane-head">Normalisé — ${escapeHtml(epTitle)}</div>
-        <div class="cur-pane-text">${cleanHtml}</div>
+        <div class="cur-pane-head">Normalisé — ${escapeHtml(epTitle)}${previewTag}</div>
+        ${notNormBanner}
+        <div class="cur-pane-text">${renderRawText(cleanText, searchRegex)}</div>
       </div>`;
   }
 }
@@ -3517,25 +3692,31 @@ interface NormalizeOptions {
   merge_subtitle_breaks: boolean;
   fix_double_spaces: boolean;
   fix_french_punctuation: boolean;
+  fix_english_punctuation: boolean;
   normalize_apostrophes: boolean;
   normalize_quotes: boolean;
   strip_line_spaces: boolean;
+  strip_empty_lines: boolean;
   case_transform: string;
 }
 
 const NORMALIZE_PROFILES: Array<{ id: string; label: string; options: NormalizeOptions }> = [
   { id: "default_en_v1",   label: "default_en_v1 — Anglais standard",
-    options: { merge_subtitle_breaks: true,  fix_double_spaces: true, fix_french_punctuation: false,
-               normalize_apostrophes: false, normalize_quotes: false,  strip_line_spaces: true,  case_transform: "none" } },
+    options: { merge_subtitle_breaks: true,  fix_double_spaces: true,  fix_french_punctuation: false,
+               fix_english_punctuation: false, normalize_apostrophes: false, normalize_quotes: false,
+               strip_line_spaces: true,  strip_empty_lines: false, case_transform: "none" } },
   { id: "default_fr_v1",   label: "default_fr_v1 — Français standard",
-    options: { merge_subtitle_breaks: true,  fix_double_spaces: true, fix_french_punctuation: true,
-               normalize_apostrophes: true,  normalize_quotes: false,  strip_line_spaces: true,  case_transform: "none" } },
+    options: { merge_subtitle_breaks: true,  fix_double_spaces: true,  fix_french_punctuation: true,
+               fix_english_punctuation: false, normalize_apostrophes: true,  normalize_quotes: false,
+               strip_line_spaces: true,  strip_empty_lines: false, case_transform: "none" } },
   { id: "conservative_v1", label: "conservative_v1 — Conservateur",
-    options: { merge_subtitle_breaks: true,  fix_double_spaces: true, fix_french_punctuation: false,
-               normalize_apostrophes: false, normalize_quotes: false,  strip_line_spaces: true,  case_transform: "none" } },
+    options: { merge_subtitle_breaks: true,  fix_double_spaces: true,  fix_french_punctuation: false,
+               fix_english_punctuation: false, normalize_apostrophes: false, normalize_quotes: false,
+               strip_line_spaces: true,  strip_empty_lines: false, case_transform: "none" } },
   { id: "aggressive_v1",   label: "aggressive_v1 — Agressif",
-    options: { merge_subtitle_breaks: true,  fix_double_spaces: true, fix_french_punctuation: false,
-               normalize_apostrophes: false, normalize_quotes: false,  strip_line_spaces: true,  case_transform: "lowercase" } },
+    options: { merge_subtitle_breaks: true,  fix_double_spaces: true,  fix_french_punctuation: false,
+               fix_english_punctuation: false, normalize_apostrophes: false, normalize_quotes: false,
+               strip_line_spaces: true,  strip_empty_lines: true,  case_transform: "lowercase" } },
 ];
 
 const SOURCE_IDS = [
@@ -6730,15 +6911,17 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
                 <div class="cur-param-section">
                   <div class="cur-param-label" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" id="cur-opts-toggle">
-                    Options avancées <span id="cur-opts-caret" style="font-size:0.7rem;color:var(--text-muted)">▶</span>
+                    Options avancées <span id="cur-opts-caret" style="font-size:0.7rem;color:var(--text-muted)">▼</span>
                   </div>
-                  <div id="cur-opts-panel" style="display:none;margin-top:6px">
-                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-merge"> Fusionner sauts de ligne (sous-titres)</label>
-                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-double"> Supprimer espaces doubles</label>
-                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-french"> Typographie française (espaces avant : ; ! ?)</label>
+                  <div id="cur-opts-panel" style="margin-top:6px">
+                    <label class="cur-opt-row" title="Fusionne les coupures de ligne au milieu d'une phrase (style sous-titres). Ex : « I can't↵believe you » → « I can't believe you »"><input type="checkbox" id="cur-opt-merge" checked> Fusionner sauts de ligne (sous-titres)</label>
+                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-double" checked> Supprimer espaces doubles</label>
+                    <label class="cur-opt-row" title="Ajoute une espace insécable avant : ; ! ? (typographie française)"><input type="checkbox" id="cur-opt-french"> Typographie française (espaces avant : ; ! ?)</label>
+                    <label class="cur-opt-row" title="Supprime les espaces avant : ; ! ? (anglais standard)"><input type="checkbox" id="cur-opt-en-punct"> Ponctuation anglaise (suppr. espaces avant : ; ! ?)</label>
                     <label class="cur-opt-row"><input type="checkbox" id="cur-opt-apos"> Normaliser apostrophes (' → ')</label>
                     <label class="cur-opt-row"><input type="checkbox" id="cur-opt-quotes"> Normaliser guillemets ("" → « »)</label>
-                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-strip"> Supprimer espaces bord de ligne</label>
+                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-strip" checked> Supprimer espaces bord de ligne</label>
+                    <label class="cur-opt-row" title="Supprime les lignes vides avant la fusion, permettant de merger des phrases à travers les paragraphes"><input type="checkbox" id="cur-opt-strip-empty"> Supprimer lignes vides (fusion inter-paragraphe)</label>
                     <div class="cur-opt-row" style="display:flex;align-items:center;gap:6px;margin-top:4px">
                       <span style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap">Casse</span>
                       <select id="cur-opt-case" style="font-size:0.78rem;flex:1;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
@@ -6753,8 +6936,13 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 </div>
 
                 <div class="cur-param-section">
-                  <div class="cur-param-label">Règles actives</div>
+                  <div class="cur-param-label" style="display:flex;justify-content:space-between;align-items:center">
+                    Règles actives
+                    <span style="font-size:0.68rem;color:var(--text-muted);font-weight:400;font-style:italic">cliquer pour activer/désactiver</span>
+                  </div>
                   <div class="cur-rule-chips" id="cur-rule-chips"></div>
+                  <div id="cur-preview-feedback" style="font-size:0.68rem;color:var(--text-muted);margin-top:4px;font-style:italic">Sélectionnez un épisode pour voir l'aperçu.</div>
+                  <button class="btn btn-primary" id="cur-apply-normalize" disabled style="margin-top:8px;width:100%;font-size:0.85rem">Normaliser et sauvegarder</button>
                 </div>
 
                 <div class="cur-param-section">
@@ -6766,7 +6954,10 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                     <label><input type="checkbox" id="cur-fr-nocase"> Aa insensible</label>
                   </div>
                   <div class="cur-fr-count" id="cur-fr-count"></div>
-                  <button class="btn btn-secondary btn-sm" id="cur-fr-apply" style="width:100%">Appliquer et sauvegarder</button>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px">
+                    <button class="btn btn-ghost btn-sm" id="cur-fr-search">🔍 Rechercher</button>
+                    <button class="btn btn-secondary btn-sm" id="cur-fr-apply">Remplacer et sauvegarder</button>
+                  </div>
                 </div>
 
               </div>
@@ -7023,15 +7214,43 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         const open = panel.style.display === "none";
         panel.style.display = open ? "" : "none";
         caret.textContent = open ? "▼" : "▶";
+        // Refresh chips when panel becomes visible
+        if (open) renderCurationRuleChips(cnt);
       });
     }
 
-    // Wire option checkboxes → re-render chips (bidirectionnel avec C-4)
+    // Wire option checkboxes → re-render chips + aperçu live (bidirectionnel avec C-4)
     OPTION_CHIP_MAP.forEach(({ checkboxId }) => {
       cnt.querySelector<HTMLInputElement>(checkboxId)
-        ?.addEventListener("change", () => renderCurationRuleChips(cnt));
+        ?.addEventListener("change", () => { renderCurationRuleChips(cnt); scheduleCurationPreview(cnt); });
     });
+    // Case transform
+    cnt.querySelector<HTMLSelectElement>("#cur-opt-case")
+      ?.addEventListener("change", () => scheduleCurationPreview(cnt));
     renderCurationRuleChips(cnt); // état initial
+
+    // Bouton "Normaliser et sauvegarder" principal
+    cnt.querySelector<HTMLButtonElement>("#cur-apply-normalize")?.addEventListener("click", async () => {
+      const btn = cnt.querySelector<HTMLButtonElement>("#cur-apply-normalize")!;
+      if (!_curPreviewEpId) return;
+      const profile = cnt.querySelector<HTMLSelectElement>("#cur-profile")?.value ?? "default_en_v1";
+      const normalizeOpts = collectNormalizeOpts(cnt);
+      btn.disabled = true;
+      btn.textContent = "Normalisation en cours…";
+      try {
+        await createJob("normalize_transcript", _curPreviewEpId, "transcript", {
+          normalize_profile: profile,
+          normalize_options: normalizeOpts,
+        });
+        startJobPoll(cnt);
+        btn.textContent = "✓ Lancé — actualisation en cours…";
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "⚠ Erreur — réessayer";
+        const fb = cnt.querySelector<HTMLElement>("#cur-preview-feedback");
+        if (fb) { fb.style.color = "var(--danger,#dc2626)"; fb.textContent = e instanceof Error ? e.message : String(e); }
+      }
+    });
 
     // Wire C-3: édition manuelle (edit / save / cancel)
     cnt.querySelector<HTMLButtonElement>("#cur-edit-btn")?.addEventListener("click", () => enterEditMode(cnt));
@@ -7065,26 +7284,79 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       }
     });
 
+    // ── Helper : construit une regex depuis les champs find/replace ───────────
+    function buildFRRegex(pattern: string): RegExp | null {
+      const useRegex = cnt.querySelector<HTMLInputElement>("#cur-fr-regex")!.checked;
+      const noCase   = cnt.querySelector<HTMLInputElement>("#cur-fr-nocase")!.checked;
+      const flags    = "g" + (noCase ? "i" : "");
+      try {
+        return useRegex
+          ? new RegExp(pattern, flags)
+          : new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
+      } catch { return null; }
+    }
+
+    // ── Bouton Rechercher : surlignage dans le preview sans remplacer ─────────
+    cnt.querySelector<HTMLButtonElement>("#cur-fr-search")?.addEventListener("click", () => {
+      const findInput = cnt.querySelector<HTMLInputElement>("#cur-fr-find")!;
+      const countEl   = cnt.querySelector<HTMLElement>("#cur-fr-count")!;
+      const pattern   = findInput.value.trim();
+      if (!pattern) {
+        // Effacer le surlignage si vide
+        _curSearchRegex = null;
+        countEl.textContent = "";
+        if (_curPreviewData && _curPreviewEpId) {
+          const mode = cnt.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
+          const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
+          const dd0 = _clientPreviewClean !== null ? { raw: _curPreviewData.raw, clean: _clientPreviewClean } : _curPreviewData;
+          renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, dd0, mode, epTitle, null);
+        }
+        return;
+      }
+      const regex = buildFRRegex(pattern);
+      if (!regex) {
+        countEl.style.color = "var(--danger,#dc2626)";
+        countEl.textContent = "RegEx invalide.";
+        return;
+      }
+      if (!_curPreviewData || !_curPreviewEpId) {
+        countEl.style.color = "var(--danger,#dc2626)";
+        countEl.textContent = "Aucun épisode sélectionné.";
+        return;
+      }
+      const displayData = _clientPreviewClean !== null ? { raw: _curPreviewData.raw, clean: _clientPreviewClean } : _curPreviewData;
+      const text = displayData.clean || displayData.raw;
+      const matches = text.match(new RegExp(regex.source, regex.flags));
+      const count = matches ? matches.length : 0;
+      _curSearchRegex = count > 0 ? regex : null;
+      if (count === 0) {
+        countEl.style.color = "var(--text-muted)";
+        countEl.textContent = "Aucune occurrence.";
+      } else {
+        countEl.style.color = "var(--accent,#6366f1)";
+        countEl.textContent = `${count} occurrence${count > 1 ? "s" : ""} trouvée${count > 1 ? "s" : ""}.`;
+      }
+      const mode = cnt.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
+      const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
+      renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, displayData, mode, epTitle, _curSearchRegex);
+    });
+
+    // ── Bouton Remplacer et sauvegarder ────────────────────────────────────────
     // Wire Rechercher / Remplacer (find/replace avec RegEx optionnel)
     cnt.querySelector<HTMLButtonElement>("#cur-fr-apply")?.addEventListener("click", async () => {
       const findInput    = cnt.querySelector<HTMLInputElement>("#cur-fr-find")!;
       const replaceInput = cnt.querySelector<HTMLInputElement>("#cur-fr-replace")!;
-      const useRegex     = cnt.querySelector<HTMLInputElement>("#cur-fr-regex")!.checked;
-      const noCase       = cnt.querySelector<HTMLInputElement>("#cur-fr-nocase")!.checked;
       const countEl      = cnt.querySelector<HTMLElement>("#cur-fr-count")!;
       const applyBtn     = cnt.querySelector<HTMLButtonElement>("#cur-fr-apply")!;
       const pattern      = findInput.value;
       if (!pattern) { countEl.style.color = "var(--danger,#dc2626)"; countEl.textContent = "Saisissez un terme à rechercher."; return; }
       if (!_curPreviewData || !_curPreviewEpId) { countEl.style.color = "var(--danger,#dc2626)"; countEl.textContent = "Aucun épisode sélectionné."; return; }
-      let regex: RegExp;
-      try {
-        const flags = "g" + (noCase ? "i" : "");
-        regex = useRegex ? new RegExp(pattern, flags) : new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
-      } catch (e) {
-        countEl.style.color = "var(--danger,#dc2626)"; countEl.textContent = `RegEx invalide : ${e instanceof Error ? e.message : String(e)}`; return;
+      const regex = buildFRRegex(pattern);
+      if (!regex) {
+        countEl.style.color = "var(--danger,#dc2626)"; countEl.textContent = `RegEx invalide.`; return;
       }
-      const before = _curPreviewData.clean;
-      const matches = before.match(regex);
+      const before = _curPreviewData.clean || _curPreviewData.raw;
+      const matches = before.match(new RegExp(regex.source, regex.flags));
       const count = matches ? matches.length : 0;
       if (count === 0) { countEl.style.color = "var(--text-muted)"; countEl.textContent = "Aucune occurrence trouvée."; return; }
       const after = before.replace(regex, replaceInput.value);
@@ -7095,15 +7367,16 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         countEl.style.color = "var(--success,#16a34a)";
         countEl.textContent = `✓ ${count} remplacement${count > 1 ? "s" : ""} effectué${count > 1 ? "s" : ""}.`;
         // Rafraîchir la prévisualisation
+        _curSearchRegex = null; // effacer le surlignage recherche après remplacement
         const activeMode = cnt.querySelector<HTMLButtonElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
         const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
-        renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, _curPreviewData, activeMode, epTitle);
+        renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, _curPreviewData, activeMode, epTitle, null);
         setTimeout(() => { countEl.textContent = ""; }, 4000);
       } catch (err) {
         countEl.style.color = "var(--danger,#dc2626)";
         countEl.textContent = err instanceof ApiError ? `${err.errorCode} — ${err.message}` : String(err);
       } finally {
-        applyBtn.disabled = false; applyBtn.textContent = "Appliquer et sauvegarder";
+        applyBtn.disabled = false; applyBtn.textContent = "Remplacer et sauvegarder";
       }
     });
 
@@ -7115,11 +7388,13 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         if (_curPreviewData && _curPreviewEpId) {
           const activeItem = cnt.querySelector<HTMLElement>(".cur-ep-item.active");
           const epTitle = activeItem?.dataset.epTitle ?? _curPreviewEpId;
+          const tabDisplayData = _clientPreviewClean !== null ? { raw: _curPreviewData.raw, clean: _clientPreviewClean } : _curPreviewData;
           renderCurationPreviewMode(
             cnt.querySelector<HTMLElement>("#cur-preview-panes")!,
-            _curPreviewData,
+            tabDisplayData,
             tab.dataset.mode!,
             epTitle,
+            _curSearchRegex,
           );
         }
       });

@@ -162,9 +162,11 @@ class NormalizationProfile:
     # Règles de ponctuation et espaces (Phase 2)
     fix_double_spaces: bool = True  # Remplace espaces multiples par un seul
     fix_french_punctuation: bool = False  # Ajoute espace avant `;:!?` (typographie française)
+    fix_english_punctuation: bool = False  # Supprime espaces avant `;:!?` (typographie anglaise)
     normalize_apostrophes: bool = False  # ' → '
     normalize_quotes: bool = False  # "" → « » (français)
     strip_line_spaces: bool = True  # Supprime espaces début/fin de ligne
+    strip_empty_lines: bool = False  # Supprime lignes vides (permet fusion inter-paragraphes)
     
     # Règles de casse (Phase 3)
     case_transform: str = "none"  # "none" | "lowercase" | "UPPERCASE" | "Title Case" | "Sentence case"
@@ -243,6 +245,13 @@ class NormalizationProfile:
             result = re.sub(r' {2,}', ' ', result)
             if result != before:
                 counters["punctuation"] += 1
+
+        # 3b. Typographie anglaise : supprimer espace avant `;:!?`
+        if self.fix_english_punctuation:
+            before = result
+            result = re.sub(r'\s+([;:!?])', r'\1', result)
+            if result != before:
+                counters["punctuation"] += 1
         
         # 4. Normalisation apostrophes ' → '
         if self.normalize_apostrophes:
@@ -289,6 +298,9 @@ class NormalizationProfile:
         """
         t0 = time.perf_counter()
         raw_lines = [ln for ln in raw_text.splitlines()]
+        # Supprimer les lignes vides avant le traitement (permet la fusion inter-paragraphes)
+        if self.strip_empty_lines:
+            raw_lines = [ln for ln in raw_lines if ln.strip()]
         stats = TransformStats(raw_lines=len(raw_lines))
         debug: dict = {
             "merge_examples": [],

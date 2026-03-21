@@ -289,6 +289,14 @@ export async function patchTranscript(
   return apiPatch(`/episodes/${episodeId}/sources/transcript`, { clean });
 }
 
+export async function fetchNormalizePreview(
+  text: string,
+  profile: string,
+  options: Record<string, unknown>,
+): Promise<{ clean: string; merges: number }> {
+  return apiPost<{ clean: string; merges: number }>("/normalize/preview", { text, profile, options });
+}
+
 export async function importSrt(
   episodeId: string,
   lang: string,

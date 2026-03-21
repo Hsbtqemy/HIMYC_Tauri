@@ -192,6 +192,36 @@ def update_config(
     }
 
 
+# ─── /normalize/preview ───────────────────────────────────────────────────────
+
+
+class _NormalizePreviewBody(BaseModel):
+    text: str
+    profile: str = DEFAULT_NORMALIZE_PROFILE
+    options: dict = {}
+
+
+@app.post("/normalize/preview", summary="Aperçu normalisation sans sauvegarder")
+def normalize_preview(body: _NormalizePreviewBody) -> dict[str, Any]:
+    """Applique la normalisation sur un texte fourni et retourne le résultat sans sauvegarder."""
+    from howimetyourcorpus.core.normalize.profiles import get_profile, NormalizationProfile
+
+    profile = get_profile(body.profile) or NormalizationProfile(id=body.profile)
+    _bool_fields = {
+        "merge_subtitle_breaks", "fix_double_spaces", "fix_french_punctuation",
+        "fix_english_punctuation", "normalize_apostrophes", "normalize_quotes",
+        "strip_line_spaces", "strip_empty_lines",
+    }
+    _valid_cases = {"none", "lowercase", "UPPERCASE", "Title Case", "Sentence case"}
+    for key, val in body.options.items():
+        if key in _bool_fields and isinstance(val, bool):
+            setattr(profile, key, val)
+        elif key == "case_transform" and val in _valid_cases:
+            profile.case_transform = val
+    clean, stats, _ = profile.apply(body.text)
+    return {"clean": clean, "merges": stats.merges}
+
+
 # ─── /series_index ────────────────────────────────────────────────────────────
 
 
@@ -954,12 +984,14 @@ def get_episode_segments(
     episode_id: str,
     kind: str = Query("sentence", pattern="^(sentence|utterance)$"),
     q: str | None = Query(None, max_length=200),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB | None = Depends(_get_db_optional),
 ) -> dict[str, Any]:
     """
     Retourne les segments d'un épisode (kind=sentence|utterance).
     Filtre optionnel full-text q (FTS si DB dispo, sinon LIKE).
     """
+    if db is None:
+        return {"episode_id": episode_id, "kind": kind, "total": 0, "segments": []}
     from howimetyourcorpus.core.storage import db_segments as _db_seg
     conn = db._conn()
     try:

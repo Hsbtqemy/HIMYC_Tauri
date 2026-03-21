@@ -278,7 +278,8 @@ class NormalizeEpisodeStep(Step):
         # Appliquer les surcharges par-job (options individuelles)
         _bool_fields = {
             "merge_subtitle_breaks", "fix_double_spaces", "fix_french_punctuation",
-            "normalize_apostrophes", "normalize_quotes", "strip_line_spaces",
+            "fix_english_punctuation", "normalize_apostrophes", "normalize_quotes",
+            "strip_line_spaces", "strip_empty_lines",
         }
         _valid_cases = {"none", "lowercase", "UPPERCASE", "Title Case", "Sentence case"}
         for key, val in self.normalize_options.items():
