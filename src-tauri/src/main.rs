@@ -84,7 +84,17 @@ fn open_log(log_path: Option<&PathBuf>) -> Stdio {
         .unwrap_or_else(Stdio::null)
 }
 
+/// Tue tout process occupant le port 8765 (ancien uvicorn d'une session précédente).
+fn kill_port_8765() {
+    let _ = Command::new("sh")
+        .args(["-c", "lsof -ti tcp:8765 2>/dev/null | xargs kill -9 2>/dev/null"])
+        .output();
+    // Laisser le port se libérer
+    std::thread::sleep(std::time::Duration::from_millis(400));
+}
+
 fn spawn_uvicorn(project_path: &str, log_path: Option<&PathBuf>) -> Result<Child, String> {
+    kill_port_8765();
     let mut candidates: Vec<String> = Vec::new();
     if let Some(p) = find_python_via_login_shell() {
         candidates.push(p);

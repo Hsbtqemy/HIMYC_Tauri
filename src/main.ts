@@ -55,10 +55,13 @@ async function pollHealth(maxTries = POLL_MAX_TRIES): Promise<boolean> {
   for (let i = 0; i < maxTries; i++) {
     try {
       await fetchHealth();
+      // Amener l'image à 100% et laisser la transition se faire avant de cacher l'overlay
       setProgress(1);
+      await new Promise((r) => setTimeout(r, 700));
       return true;
     } catch { /* pas encore prêt */ }
-    setProgress((i + 1) / maxTries);
+    // Progression linéaire sur les 70% premiers — réservé 30% pour la fin (burst)
+    setProgress(0.05 + (i / maxTries) * 0.65);
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
   setProgress(0);
@@ -82,7 +85,12 @@ async function startupTauri() {
     const ready = await pollHealth();
     if (ready) {
       hideOverlay();
-      initShell().catch(console.error);
+      initShell().catch((e) => {
+        document.body.innerHTML = `<div style="position:fixed;inset:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#fff;font-family:system-ui">
+          <div style="font-size:1.4rem;font-weight:700">HIMYC</div>
+          <div style="color:#f87171;font-size:0.85rem;max-width:480px;text-align:center">Erreur au lancement de l'interface :<br>${String(e)}</div>
+        </div>`;
+      });
     } else {
       // Lire le log pour afficher l'erreur réelle
       let logContent = "";
