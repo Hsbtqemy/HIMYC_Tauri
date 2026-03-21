@@ -5,6 +5,8 @@
  *   1. Lire le projet sauvegardé (invoke get_project_path)
  *   2. Si aucun projet : afficher le sélecteur de dossier
  *   3. Sinon : attendre que le backend réponde sur /health (poll 500ms × 60)
+ *      → le backend est déjà spawné par setup() Rust ; on ne le re-spawn PAS
+ *        pour éviter le double-start qui allonge le démarrage de ~3 s.
  *   4. Une fois prêt : cacher l'overlay, lancer initShell()
  *
  * En mode VITE_E2E=true : bypass direct vers initShell() (tests Playwright).
@@ -41,16 +43,25 @@ function hideOverlay() {
   el("startup-overlay").style.display = "none";
 }
 
+/** Met à jour l'opacité de l'image hero (0 → 1 au fil du poll). */
+function setProgress(fraction: number) {
+  const img = el<HTMLImageElement>("startup-hero");
+  if (img) img.style.opacity = String(Math.min(0.92, Math.max(0, fraction)));
+}
+
 // ─── Health poll ──────────────────────────────────────────────────────────────
 
 async function pollHealth(maxTries = POLL_MAX_TRIES): Promise<boolean> {
   for (let i = 0; i < maxTries; i++) {
     try {
       await fetchHealth();
+      setProgress(1);
       return true;
     } catch { /* pas encore prêt */ }
+    setProgress((i + 1) / maxTries);
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
+  setProgress(0);
   return false;
 }
 
@@ -63,25 +74,11 @@ async function startupTauri() {
   const pickBtn  = el<HTMLButtonElement>("startup-pick-btn");
   const retryBtn = el<HTMLButtonElement>("startup-retry-btn");
 
-  // ── Fonction : lancer le backend avec un chemin donné ──────────────────────
-  async function launchWithPath(path: string) {
-    setStatus(`Démarrage du backend…`);
+  // ── Fonction : attendre que le backend soit prêt ───────────────────────────
+  async function awaitBackend() {
+    setStatus(`Backend en cours de démarrage…`);
     setError("");
     showSpinner(true);
-    pickBtn.style.display  = "none";
-    retryBtn.style.display = "none";
-
-    try {
-      await invoke("set_project_path", { path });
-    } catch (e) {
-      setError(`Impossible de lancer le backend : ${e}`);
-      showSpinner(false);
-      pickBtn.style.display  = "inline-block";
-      retryBtn.style.display = "inline-block";
-      return;
-    }
-
-    setStatus(`Backend en cours de démarrage…`);
     const ready = await pollHealth();
     if (ready) {
       hideOverlay();
@@ -94,6 +91,25 @@ async function startupTauri() {
     }
   }
 
+  // ── Fonction : spawner un nouveau backend avec un chemin donné ─────────────
+  async function spawnWithPath(path: string) {
+    setStatus(`Démarrage du backend…`);
+    setError("");
+    showSpinner(true);
+    pickBtn.style.display  = "none";
+    retryBtn.style.display = "none";
+    try {
+      await invoke("set_project_path", { path });
+    } catch (e) {
+      setError(`Impossible de lancer le backend : ${e}`);
+      showSpinner(false);
+      pickBtn.style.display  = "inline-block";
+      retryBtn.style.display = "inline-block";
+      return;
+    }
+    await awaitBackend();
+  }
+
   // ── Bouton "Choisir un projet" ─────────────────────────────────────────────
   async function pickProject() {
     const selected = await openDialog({
@@ -102,13 +118,13 @@ async function startupTauri() {
     });
     if (!selected) return;
     const path = typeof selected === "string" ? selected : (selected as string[])[0];
-    if (path) await launchWithPath(path);
+    if (path) await spawnWithPath(path);
   }
 
   pickBtn.addEventListener("click",  pickProject);
   retryBtn.addEventListener("click", async () => {
     const savedPath = await invoke<string | null>("get_project_path");
-    if (savedPath) await launchWithPath(savedPath);
+    if (savedPath) await spawnWithPath(savedPath); // re-spawn si le process a crashé
     else           await pickProject();
   });
 
@@ -127,8 +143,9 @@ async function startupTauri() {
     return;
   }
 
-  // Chemin connu — démarrer directement
-  await launchWithPath(savedPath);
+  // Chemin connu : le backend est DÉJÀ spawné par setup() dans main.rs.
+  // On poll directement sans re-spawn pour éviter le double-démarrage (~3 s de délai).
+  await awaitBackend();
 }
 
 // ─── Point d'entrée ───────────────────────────────────────────────────────────
