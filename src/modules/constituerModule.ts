@@ -980,6 +980,11 @@ const CSS = `
 }
 .cur-ep-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 0.78rem; }
 .cur-rule-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.cur-fr-input { width:100%;box-sizing:border-box;font-size:0.78rem;padding:4px 7px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);margin-bottom:4px; }
+.cur-fr-input:focus { outline:none;border-color:var(--accent); }
+.cur-fr-options { display:flex;align-items:center;gap:10px;font-size:0.76rem;color:var(--text-muted);margin-bottom:6px; }
+.cur-fr-options label { display:flex;align-items:center;gap:3px;cursor:pointer; }
+.cur-fr-count { font-size:0.72rem;min-height:1.2em;color:var(--text-muted);margin-bottom:4px; }
 .cur-rule-chip {
   padding: 2px 8px;
   border-radius: 20px;
@@ -3670,9 +3675,11 @@ function wireSubslikeBatchUI(
   container: HTMLElement,
   setFeedback: (msg: string, ok?: boolean) => void,
 ) {
-  const checkAll  = container.querySelector<HTMLInputElement>("#sl-check-all")!;
+  const checkAll  = container.querySelector<HTMLInputElement>("#sl-check-all");
+  if (!checkAll) return; // aucun épisode à afficher;
   const selCount  = container.querySelector<HTMLElement>("#sl-sel-count")!;
-  const batchBtn  = container.querySelector<HTMLButtonElement>("#sl-batch-btn")!;
+  const batchBtn  = container.querySelector<HTMLButtonElement>("#sl-batch-btn");
+  if (!batchBtn) return;
   const allChecks = () => Array.from(container.querySelectorAll<HTMLInputElement>(".sl-ep-check"));
 
   const updateCount = () => {
@@ -6750,6 +6757,18 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                   <div class="cur-rule-chips" id="cur-rule-chips"></div>
                 </div>
 
+                <div class="cur-param-section">
+                  <div class="cur-param-label">Rechercher / Remplacer</div>
+                  <input class="cur-fr-input" id="cur-fr-find"    type="text" placeholder="Rechercher…" spellcheck="false">
+                  <input class="cur-fr-input" id="cur-fr-replace" type="text" placeholder="Remplacer par…" spellcheck="false">
+                  <div class="cur-fr-options">
+                    <label><input type="checkbox" id="cur-fr-regex"> <code style="font-size:0.72rem">.*</code> RegEx</label>
+                    <label><input type="checkbox" id="cur-fr-nocase"> Aa insensible</label>
+                  </div>
+                  <div class="cur-fr-count" id="cur-fr-count"></div>
+                  <button class="btn btn-secondary btn-sm" id="cur-fr-apply" style="width:100%">Appliquer et sauvegarder</button>
+                </div>
+
               </div>
 
               <!-- Preview (centre) -->
@@ -7043,6 +7062,48 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         status.style.color = "var(--danger, #dc2626)";
         saveBtn.disabled = false;
         saveBtn.textContent = "💾 Sauvegarder";
+      }
+    });
+
+    // Wire Rechercher / Remplacer (find/replace avec RegEx optionnel)
+    cnt.querySelector<HTMLButtonElement>("#cur-fr-apply")?.addEventListener("click", async () => {
+      const findInput    = cnt.querySelector<HTMLInputElement>("#cur-fr-find")!;
+      const replaceInput = cnt.querySelector<HTMLInputElement>("#cur-fr-replace")!;
+      const useRegex     = cnt.querySelector<HTMLInputElement>("#cur-fr-regex")!.checked;
+      const noCase       = cnt.querySelector<HTMLInputElement>("#cur-fr-nocase")!.checked;
+      const countEl      = cnt.querySelector<HTMLElement>("#cur-fr-count")!;
+      const applyBtn     = cnt.querySelector<HTMLButtonElement>("#cur-fr-apply")!;
+      const pattern      = findInput.value;
+      if (!pattern) { countEl.style.color = "var(--danger,#dc2626)"; countEl.textContent = "Saisissez un terme à rechercher."; return; }
+      if (!_curPreviewData || !_curPreviewEpId) { countEl.style.color = "var(--danger,#dc2626)"; countEl.textContent = "Aucun épisode sélectionné."; return; }
+      let regex: RegExp;
+      try {
+        const flags = "g" + (noCase ? "i" : "");
+        regex = useRegex ? new RegExp(pattern, flags) : new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
+      } catch (e) {
+        countEl.style.color = "var(--danger,#dc2626)"; countEl.textContent = `RegEx invalide : ${e instanceof Error ? e.message : String(e)}`; return;
+      }
+      const before = _curPreviewData.clean;
+      const matches = before.match(regex);
+      const count = matches ? matches.length : 0;
+      if (count === 0) { countEl.style.color = "var(--text-muted)"; countEl.textContent = "Aucune occurrence trouvée."; return; }
+      const after = before.replace(regex, replaceInput.value);
+      applyBtn.disabled = true; applyBtn.textContent = "…";
+      try {
+        await patchTranscript(_curPreviewEpId, after);
+        _curPreviewData.clean = after;
+        countEl.style.color = "var(--success,#16a34a)";
+        countEl.textContent = `✓ ${count} remplacement${count > 1 ? "s" : ""} effectué${count > 1 ? "s" : ""}.`;
+        // Rafraîchir la prévisualisation
+        const activeMode = cnt.querySelector<HTMLButtonElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
+        const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
+        renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, _curPreviewData, activeMode, epTitle);
+        setTimeout(() => { countEl.textContent = ""; }, 4000);
+      } catch (err) {
+        countEl.style.color = "var(--danger,#dc2626)";
+        countEl.textContent = err instanceof ApiError ? `${err.errorCode} — ${err.message}` : String(err);
+      } finally {
+        applyBtn.disabled = false; applyBtn.textContent = "Appliquer et sauvegarder";
       }
     });
 

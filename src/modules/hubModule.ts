@@ -286,9 +286,12 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
     <div class="hub-root">
 
       <!-- Titre -->
-      <div class="hub-hero">
-        <h1 class="hub-hero-title">HIMYC</h1>
-        <p class="hub-hero-sub">How I Met Your Corpus</p>
+      <div class="hub-hero" style="display:flex;align-items:center;gap:2.5rem;justify-content:center">
+        <img src="/ted-barney.png" alt="How I Met Your Mother" style="height:160px;width:auto;border-radius:14px;opacity:0.88;flex-shrink:0;box-shadow:0 4px 18px rgba(0,0,0,0.13)">
+        <div style="text-align:left">
+          <h1 class="hub-hero-title">HIMYC</h1>
+          <p class="hub-hero-sub">How I Met Your Corpus</p>
+        </div>
       </div>
 
       <!-- Cartes de navigation -->

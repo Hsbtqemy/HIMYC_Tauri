@@ -582,13 +582,7 @@ export async function initShell() {
   _sidebarEl = document.getElementById("shell-sidebar")!;
   _appEl     = document.getElementById("app")!;
 
-  // Restaurer le dernier mode (hors hub et hors sous-vues)
-  const saved = localStorage.getItem("himyc_last_mode");
-  if (saved && saved in MODE_CONFIGS && saved !== "hub" && !SUB_VIEWS.has(saved as Mode)) {
-    _currentMode = saved as Mode;
-    _prevNavMode = saved as NavMode;
-  }
-
+  // Toujours démarrer sur le hub (pas de restauration du dernier mode)
   _buildHeader();
   _buildSidebar();
 
