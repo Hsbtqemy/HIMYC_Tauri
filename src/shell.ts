@@ -12,7 +12,7 @@
  * - Healthcheck + polling 30s
  */
 
-import type { ShellContext, BackendStatus, AlignerHandoff, InspecterTarget } from "./context.ts";
+import type { ShellContext, BackendStatus, AlignerHandoff } from "./context.ts";
 import { fetchHealth, API_BASE } from "./api.ts";
 
 const IS_TAURI = import.meta.env.VITE_E2E !== "true" && "__TAURI_INTERNALS__" in window;
@@ -20,7 +20,6 @@ import { mountHub,           disposeHub }           from "./modules/hubModule.ts
 import { mountConcordancier, disposeConcordancier } from "./modules/concordancierModule.ts";
 import { mountConstituer,    disposeConstituer }    from "./modules/constituerModule.ts";
 import { mountExporter,      disposeExporter }      from "./modules/exporterModule.ts";
-import { mountInspecter,     disposeInspecter }     from "./modules/inspecterModule.ts";
 import { mountAligner,       disposeAligner }       from "./modules/alignerModule.ts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,7 +27,7 @@ import { mountAligner,       disposeAligner }       from "./modules/alignerModul
 /** Modes top-level affichés dans la nav */
 type NavMode = "concordancier" | "constituer" | "exporter";
 /** Tous les modes possibles (hub + nav + sous-vues) */
-type Mode = "hub" | NavMode | "inspecter" | "aligner";
+type Mode = "hub" | NavMode | "aligner";
 
 interface ModeConfig {
   mount:   (el: HTMLElement, ctx: ShellContext) => void;
@@ -40,7 +39,6 @@ const MODE_CONFIGS: Record<Mode, ModeConfig> = {
   concordancier: { mount: mountConcordancier, dispose: disposeConcordancier },
   constituer:    { mount: mountConstituer,    dispose: disposeConstituer },
   exporter:      { mount: mountExporter,      dispose: disposeExporter },
-  inspecter:     { mount: mountInspecter,     dispose: disposeInspecter },
   aligner:       { mount: mountAligner,       dispose: disposeAligner },
 };
 
@@ -51,14 +49,13 @@ const NAV_MODES: Array<{ mode: NavMode; label: string; badge: string }> = [
 ];
 
 // Modes de sous-vue : pas d'onglet, retour vers constituer
-const SUB_VIEWS = new Set<Mode>(["inspecter", "aligner"]);
+const SUB_VIEWS = new Set<Mode>(["aligner"]);
 // Accent couleur par mode
 const MODE_ACCENT: Partial<Record<Mode, string>> = {
   hub:           "#1a1a2e",
   concordancier: "#2c5f9e",
   constituer:    "#1a7f4e",
   exporter:      "#b45309",
-  inspecter:     "#2c5f9e",
   aligner:       "#7c3aed",
 };
 const MODE_ACCENT_HEADER: Partial<Record<Mode, string>> = {
@@ -66,7 +63,6 @@ const MODE_ACCENT_HEADER: Partial<Record<Mode, string>> = {
   concordancier: "#1e4a80",
   constituer:    "#145a38",
   exporter:      "#92400e",
-  inspecter:     "#1e4a80",
   aligner:       "#4c1d95",
 };
 
@@ -300,7 +296,6 @@ let _backendStatus: BackendStatus = { online: false };
 const _statusListeners: Array<(s: BackendStatus) => void> = [];
 let _pollInterval: ReturnType<typeof setInterval> | null = null;
 let _handoff: AlignerHandoff | null = null;
-let _inspecterTarget: InspecterTarget | null = null;
 
 // ─── ShellContext ─────────────────────────────────────────────────────────────
 
@@ -317,9 +312,7 @@ const shellContext: ShellContext = {
   navigateTo(mode) { _navigateTo(mode as Mode); },
   setHandoff(data)  { _handoff = data; },
   getHandoff()      { const h = _handoff; _handoff = null; return h; },
-  setInspecterTarget(t) { _inspecterTarget = t; },
-  getInspecterTarget()  { const t = _inspecterTarget; _inspecterTarget = null; return t; },
-  changeProject()       { void _changeProject(); },
+  changeProject()   { void _changeProject(); },
 };
 
 function _setBackendStatus(status: BackendStatus) {
@@ -469,7 +462,7 @@ function _rebuildNav() {
 
     const breadcrumb = document.createElement("div");
     breadcrumb.className = "shell-breadcrumb";
-    const modeLabel   = _currentMode === "inspecter" ? "Inspecter" : "Aligner";
+    const modeLabel   = "Aligner";
     const parentLabel = _prevNavMode.charAt(0).toUpperCase() + _prevNavMode.slice(1);
     breadcrumb.innerHTML = `${parentLabel} <span style="opacity:0.4">›</span> <span class="shell-breadcrumb-current">${modeLabel}</span>`;
     _headerEl.insertBefore(breadcrumb, insertBefore);

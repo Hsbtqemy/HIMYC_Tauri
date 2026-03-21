@@ -38,12 +38,6 @@ export interface AlignerHandoff {
   use_similarity_for_cues?: boolean;
 }
 
-/** Cible de pré-sélection pour l'Inspecter (depuis Documents — MX-021). */
-export interface InspecterTarget {
-  episode_id: string;
-  source_key?: string;
-}
-
 export interface ShellContext {
   /** URL de base de l'API backend HIMYC (ex: "http://localhost:8765"). */
   getApiBase(): string;
@@ -60,9 +54,9 @@ export interface ShellContext {
   /**
    * Naviguer programmatiquement vers un mode.
    * hub/concordancier/constituer/exporter = modes top-level.
-   * inspecter/aligner = sous-vues (pas d'onglet top-level, MX-020).
+   * aligner = sous-vue (pas d'onglet top-level, MX-020).
    */
-  navigateTo(mode: "hub" | "concordancier" | "constituer" | "exporter" | "inspecter" | "aligner"): void;
+  navigateTo(mode: "hub" | "concordancier" | "constituer" | "exporter" | "aligner"): void;
 
   /**
    * Stocker les données de handoff Inspecter → Aligner (MX-009).
@@ -72,11 +66,6 @@ export interface ShellContext {
 
   /** Lire les données de handoff (null si navigation directe). */
   getHandoff(): AlignerHandoff | null;
-
-  /** Définir l'épisode/source à pré-sélectionner à l'ouverture de l'Inspecter. */
-  setInspecterTarget(t: InspecterTarget | null): void;
-  /** Lire et consommer la cible Inspecter (null si navigation directe). */
-  getInspecterTarget(): InspecterTarget | null;
 
   /**
    * Ouvre le sélecteur de dossier Tauri pour changer de projet.

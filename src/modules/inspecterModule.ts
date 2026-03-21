@@ -544,10 +544,9 @@ export function mountInspecter(container: HTMLElement, ctx: ShellContext) {
     _styleInjected = true;
   }
 
-  // Réinitialiser l'état à chaque montage
-  const target = ctx.getInspecterTarget();
-  _selectedEpId   = target?.episode_id  ?? "";
-  _selectedSrcKey = target?.source_key  ?? "";
+  // Réinitialiser l'état à chaque montage (InspecterTarget supprimé — N-1)
+  _selectedEpId   = "";
+  _selectedSrcKey = "";
   _activeTab      = "raw";
   _episodes       = [];
 
