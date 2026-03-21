@@ -997,6 +997,53 @@ def get_episode_segments(
     return {"episode_id": episode_id, "kind": kind, "total": len(segments), "segments": segments}
 
 
+class _SegmentPatch(BaseModel):
+    text: str | None = None
+    speaker_explicit: str | None = None
+
+
+@app.patch(
+    "/episodes/{episode_id}/segments/{segment_id}",
+    summary="Éditer le texte ou le locuteur d'un segment (P2-4)",
+)
+def patch_segment(
+    episode_id: str,
+    segment_id: str,
+    body: _SegmentPatch,
+    db: CorpusDB | None = Depends(_get_db),
+) -> dict[str, Any]:
+    """
+    Met à jour text et/ou speaker_explicit d'un segment.
+    Retourne le segment mis à jour.
+    """
+    from howimetyourcorpus.core.storage import db_segments as _db_seg
+    if body.text is None and body.speaker_explicit is None:
+        raise HTTPException(status_code=422, detail="Au moins text ou speaker_explicit requis.")
+    conn = db._conn()
+    try:
+        # Vérifier que le segment appartient bien à l'épisode
+        conn.row_factory = __import__("sqlite3").Row
+        row = conn.execute(
+            "SELECT segment_id FROM segments WHERE segment_id = ? AND episode_id = ?",
+            [segment_id, episode_id],
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Segment {segment_id!r} non trouvé pour l'épisode {episode_id!r}.")
+        if body.text is not None:
+            _db_seg.update_segment_text(conn, segment_id, body.text.strip())
+        if body.speaker_explicit is not None:
+            val = body.speaker_explicit.strip() or None
+            _db_seg.update_segment_speaker(conn, segment_id, val)
+        conn.commit()
+        updated = conn.execute(
+            "SELECT segment_id, episode_id, kind, n, text, speaker_explicit FROM segments WHERE segment_id = ?",
+            [segment_id],
+        ).fetchone()
+        return dict(updated)
+    finally:
+        conn.close()
+
+
 # ─── /jobs (MX-006) ───────────────────────────────────────────────────────────
 
 

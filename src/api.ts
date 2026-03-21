@@ -613,6 +613,14 @@ export async function fetchEpisodeSegments(
   return apiGet<SegmentsResponse>(`/episodes/${episodeId}/segments?${qs}`);
 }
 
+export async function patchSegment(
+  episodeId: string,
+  segmentId: string,
+  patch: { text?: string; speaker_explicit?: string | null },
+): Promise<SegmentRow> {
+  return apiPatch<SegmentRow>(`/episodes/${episodeId}/segments/${segmentId}`, patch);
+}
+
 export async function cancelJob(jobId: string): Promise<{ job_id: string; status: string }> {
   return apiDelete(`/jobs/${jobId}`);
 }

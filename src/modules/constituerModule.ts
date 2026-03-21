@@ -42,6 +42,7 @@ import {
   retargetAlignLink,
   fetchConcordance,
   fetchEpisodeSegments,
+  patchSegment,
   propagateCharacters,
   type PropagateResult,
   fetchQaReport,
@@ -1642,7 +1643,8 @@ const CSS = `
 .seg-segments-table th { position: sticky; top: 0; background: var(--surface2); z-index: 1; }
 .seg-cell-n     { width: 36px; text-align: right; color: var(--text-muted); padding: 3px 6px; font-family: ui-monospace,monospace; }
 .seg-cell-speaker { width: 90px; padding: 3px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.seg-cell-text  { padding: 3px 6px; line-height: 1.5; }
+.seg-cell-text    { padding: 3px 6px; line-height: 1.5; cursor: text; }
+.seg-cell-text:hover, .seg-cell-speaker:hover { background: var(--surface2); }
 .seg-cell-len   { width: 46px; text-align: right; padding: 3px 6px; font-family: ui-monospace,monospace; font-size: 0.72rem; }
 /* S-3 : warning utterance */
 .seg-warn-utterance {
@@ -3991,21 +3993,21 @@ async function loadSegmentsTable(
 
     const rows = segs.map((s) => {
       const speaker = s.speaker_explicit
-        ? `<span style="color:var(--accent);font-weight:600">${escapeHtml(s.speaker_explicit)}</span>`
-        : `<span style="color:var(--text-muted)">—</span>`;
+        ? `<span class="seg-spk" style="color:var(--accent);font-weight:600">${escapeHtml(s.speaker_explicit)}</span>`
+        : `<span class="seg-spk" style="color:var(--text-muted)">—</span>`;
       const len = s.text.length;
       const lenStyle = len > 200 ? "color:var(--danger,#dc2626)" : len > 120 ? "color:var(--warning,#b45309)" : "";
-      return `<tr>
+      return `<tr data-seg-id="${escapeHtml(s.segment_id)}" data-seg-text="${escapeHtml(s.text)}" data-seg-spk="${escapeHtml(s.speaker_explicit ?? "")}">
         <td class="seg-cell-n">${s.n}</td>
-        <td class="seg-cell-speaker">${speaker}</td>
-        <td class="seg-cell-text">${escapeHtml(s.text)}</td>
+        <td class="seg-cell-speaker" title="Double-clic pour éditer le locuteur">${speaker}</td>
+        <td class="seg-cell-text" title="Double-clic pour éditer le texte">${escapeHtml(s.text)}</td>
         <td class="seg-cell-len" style="${lenStyle}">${len}</td>
       </tr>`;
     }).join("");
 
     panel.innerHTML = `
       ${utteranceWarn}
-      <div class="seg-table-info">${escapeHtml(epTitle)} — ${segs.length} segment(s) · mode <em>${kind}</em></div>
+      <div class="seg-table-info">${escapeHtml(epTitle)} — ${segs.length} segment(s) · mode <em>${kind}</em> · <em style="font-style:normal;color:var(--text-muted);font-size:0.72rem">double-clic pour éditer</em></div>
       <div class="seg-segments-scroll">
         <table class="cons-table seg-segments-table">
           <thead><tr><th>#</th><th>Locuteur</th><th>Texte</th><th>Long.</th></tr></thead>
@@ -4015,6 +4017,79 @@ async function loadSegmentsTable(
 
     panel.querySelector<HTMLButtonElement>("#seg-warn-go-curation")?.addEventListener("click", () => {
       container.querySelector<HTMLButtonElement>('.cons-nav-tree-link[data-subview="curation"]')?.click();
+    });
+
+    // P2-4 : inline edit — double-clic sur cellule texte ou locuteur
+    panel.querySelectorAll<HTMLTableRowElement>("tr[data-seg-id]").forEach((tr) => {
+      const startCellEdit = async (
+        cell: HTMLElement,
+        field: "text" | "speaker_explicit",
+        currentVal: string,
+      ) => {
+        if (cell.querySelector("input")) return; // déjà en édition
+        cell.dataset.orig = cell.innerHTML;
+        const input = document.createElement("input");
+        input.type = "text";
+        input.value = currentVal;
+        input.className = "docs-edit-input";
+        input.style.cssText = "width:100%;box-sizing:border-box;font-size:0.76rem;padding:2px 5px";
+        cell.innerHTML = "";
+        cell.appendChild(input);
+        input.focus();
+        input.select();
+
+        const commit = async () => {
+          const newVal = input.value.trim();
+          const segId = tr.dataset.segId!;
+          if (newVal === currentVal) { cancelEdit(); return; }
+          input.disabled = true;
+          try {
+            const patch: { text?: string; speaker_explicit?: string | null } = {};
+            if (field === "text") patch.text = newVal;
+            else patch.speaker_explicit = newVal || null;
+            const updated = await patchSegment(epId, segId, patch);
+            // Mettre à jour le DOM
+            tr.dataset.segText = updated.text;
+            tr.dataset.segSpk = updated.speaker_explicit ?? "";
+            if (field === "text") {
+              cell.textContent = updated.text;
+              const lenCell = cell.nextElementSibling as HTMLElement | null;
+              if (lenCell) {
+                const len = updated.text.length;
+                lenCell.textContent = String(len);
+                lenCell.style.color = len > 200 ? "var(--danger,#dc2626)" : len > 120 ? "var(--warning,#b45309)" : "";
+              }
+            } else {
+              const spkCell = cell;
+              if (updated.speaker_explicit) {
+                spkCell.innerHTML = `<span class="seg-spk" style="color:var(--accent);font-weight:600">${escapeHtml(updated.speaker_explicit)}</span>`;
+              } else {
+                spkCell.innerHTML = `<span class="seg-spk" style="color:var(--text-muted)">—</span>`;
+              }
+            }
+          } catch (err) {
+            cell.innerHTML = cell.dataset.orig ?? currentVal;
+            const msg = err instanceof ApiError ? err.message : String(err);
+            cell.title = `Erreur : ${msg}`;
+            setTimeout(() => { cell.title = "Double-clic pour éditer"; }, 3000);
+          }
+        };
+        const cancelEdit = () => { cell.innerHTML = cell.dataset.orig ?? currentVal; };
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Enter")  { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+        });
+        input.addEventListener("blur", () => { setTimeout(commit, 80); });
+      };
+
+      tr.querySelector<HTMLElement>(".seg-cell-text")?.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        startCellEdit(e.currentTarget as HTMLElement, "text", tr.dataset.segText ?? "");
+      });
+      tr.querySelector<HTMLElement>(".seg-cell-speaker")?.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        startCellEdit(e.currentTarget as HTMLElement, "speaker_explicit", tr.dataset.segSpk ?? "");
+      });
     });
   } catch (e) {
     panel.innerHTML = `<div class="acts-text-empty" style="color:var(--danger)">${escapeHtml(e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e))}</div>`;
