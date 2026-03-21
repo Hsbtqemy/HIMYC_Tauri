@@ -32,6 +32,7 @@ import {
   discoverSubslikescript,
   fetchSubslikescriptTranscript,
   fetchAlignmentRuns,
+  fetchAllAlignmentRuns,
   fetchAlignRunStats,
   fetchAuditLinks,
   fetchAlignCollisions,
@@ -1151,6 +1152,19 @@ const CSS = `
 .cur-speaker-chip:hover { background:var(--accent,#3b82f6); color:#fff; border-color:transparent; }
 /* Highlight speaker prefix in preview panes */
 .cur-speaker-tag { color:var(--accent,#3b82f6); font-weight:600; }
+
+/* ── A-1 : badges statut alignement par langue ─────────────── */
+.align-lang-badge {
+  display: inline-block; font-size: 0.68rem; font-weight: 600;
+  padding: 1px 6px; border-radius: 10px; margin-right: 3px; white-space: nowrap;
+}
+.align-lang-badge.done    { background: color-mix(in srgb, var(--success,#16a34a) 15%, transparent); color: var(--success,#16a34a); border: 1px solid color-mix(in srgb, var(--success,#16a34a) 35%, transparent); }
+.align-lang-badge.pending { background: color-mix(in srgb, var(--danger,#dc2626) 10%, transparent);  color: var(--danger-text,#991b1b); border: 1px solid color-mix(in srgb, var(--danger,#dc2626) 25%, transparent); }
+.align-ep-blocked { font-size: 0.74rem; color: var(--text-muted); font-style: italic; }
+.align-ep-table .align-cell-id    { white-space: nowrap; font-family: ui-monospace,monospace; font-size: 0.76rem; width: 68px; }
+.align-ep-table .align-cell-title { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.align-ep-table .align-cell-status { }
+.align-ep-table .align-cell-action { white-space: nowrap; }
 
 /* ── Alignment run history + audit view ──────────────────────── */
 .align-runs-panel {
@@ -4244,7 +4258,11 @@ function renderLongtextSegments(
 
 // ── Sous-vue Alignement ──────────────────────────────────────────────────────
 
-function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
+function renderAlignementPane(
+  container: HTMLElement,
+  episodes: Episode[],
+  alignedLangs: Map<string, Set<string>> = new Map(),
+) {
   const wrap = container.querySelector<HTMLElement>(".align-ep-wrap");
   if (!wrap) return;
   if (episodes.length === 0) {
@@ -4253,26 +4271,34 @@ function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
   }
   const rows = episodes.map((ep) => {
     const t = ep.sources.find((s) => s.source_key === "transcript");
-    const srts = ep.sources.filter((s) => s.source_key.startsWith("srt_"));
+    const srts = ep.sources.filter((s) => s.source_key.startsWith("srt_") && s.available);
     const isSegmented = t?.state === "segmented";
-    const srtList = srts.length > 0
-      ? srts.map((s) => `<span class="cons-badge">${escapeHtml(s.source_key.replace("srt_", ""))}</span>`).join(" ")
+    const epAligned = alignedLangs.get(ep.episode_id) ?? new Set();
+
+    // A-1 : statut par langue SRT (✓ si lang dans un run d'alignement)
+    const srtStatus = srts.length > 0
+      ? srts.map((s) => {
+          const lang = s.source_key.replace("srt_", "");
+          const done = epAligned.has(lang);
+          return `<span class="align-lang-badge ${done ? "done" : "pending"}">${escapeHtml(lang)} ${done ? "✓" : "✗"}</span>`;
+        }).join("")
       : `<span style="color:var(--text-muted);font-size:0.78rem">—</span>`;
+
     const canAlign = isSegmented && srts.length > 0;
     const action = canAlign
       ? `<button class="btn btn-primary btn-sm align-ep-btn" data-ep="${escapeHtml(ep.episode_id)}" data-title="${escapeHtml(ep.title)}" data-srts="${escapeHtml(srts.map((s) => s.source_key).join(","))}">→ Aligner</button>`
-      : `<span style="color:var(--text-muted);font-size:0.78rem" title="${!isSegmented ? "Segmenter d'abord" : "Importer un SRT"}">${!isSegmented ? "seg. manquante" : "SRT manquant"}</span>`;
-    return `<tr data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}">
-      <td style="white-space:nowrap;font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
-      <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(ep.title)}</td>
-      <td>${isSegmented ? `<span class="cons-badge segmented">✓</span>` : `<span class="cons-badge raw">—</span>`}</td>
-      <td>${srtList}</td>
-      <td>${action}</td>
+      : `<span class="align-ep-blocked" title="${!isSegmented ? "Segmenter d'abord" : "Importer un SRT"}">${!isSegmented ? "seg. manquante" : "SRT manquant"}</span>`;
+
+    return `<tr data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}" style="cursor:pointer">
+      <td class="align-cell-id">${escapeHtml(ep.episode_id)}</td>
+      <td class="align-cell-title">${escapeHtml(ep.title)}</td>
+      <td class="align-cell-status">${srtStatus}</td>
+      <td class="align-cell-action">${action}</td>
     </tr>`;
   }).join("");
   wrap.innerHTML = `
-    <table class="cons-table">
-      <thead><tr><th>ID</th><th>Titre</th><th>Segments</th><th>SRTs</th><th></th></tr></thead>
+    <table class="cons-table align-ep-table">
+      <thead><tr><th>ID</th><th>Titre</th><th>Alignement</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
   wrap.querySelectorAll<HTMLButtonElement>(".align-ep-btn").forEach((btn) => {
@@ -5723,9 +5749,19 @@ async function loadAndRenderAlignement(container: HTMLElement) {
   const wrap = container.querySelector<HTMLElement>(".align-ep-wrap");
   if (wrap) wrap.innerHTML = `<div class="cons-loading">Chargement…</div>`;
   try {
-    const data = await fetchEpisodes();
-    _cachedEpisodes = data;
-    renderAlignementPane(container, data.episodes);
+    const [episodesData, runsData] = await Promise.all([
+      fetchEpisodes(),
+      fetchAllAlignmentRuns().catch(() => ({ runs: [] })),
+    ]);
+    _cachedEpisodes = episodesData;
+    // Build per-episode set of aligned target langs (from the most recent run per lang)
+    const alignedLangs = new Map<string, Set<string>>(); // episode_id → Set<lang>
+    for (const run of runsData.runs) {
+      if (!run.episode_id) continue;
+      if (!alignedLangs.has(run.episode_id)) alignedLangs.set(run.episode_id, new Set());
+      (run.target_langs ?? []).forEach((l: string) => alignedLangs.get(run.episode_id)!.add(l));
+    }
+    renderAlignementPane(container, episodesData.episodes, alignedLangs);
   } catch (e) {
     if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
   }
