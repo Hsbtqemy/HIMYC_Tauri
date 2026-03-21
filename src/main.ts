@@ -84,7 +84,15 @@ async function startupTauri() {
       hideOverlay();
       initShell().catch(console.error);
     } else {
-      setError("Le backend n'a pas répondu après 30 s. Vérifiez que HIMYC est installé (pip install howimetyourcorpus).");
+      // Lire le log pour afficher l'erreur réelle
+      let logContent = "";
+      try {
+        logContent = await invoke<string>("get_backend_log");
+      } catch { /* commande absente dans les vieilles builds */ }
+      const detail = logContent && !logContent.startsWith("(")
+        ? `\n\nLog backend :\n${logContent.slice(0, 600)}`
+        : "\n\nVérifiez que HIMYC est installé : pip install howimetyourcorpus";
+      setError(`Le backend n'a pas répondu après 30 s.${detail}`);
       showSpinner(false);
       pickBtn.style.display  = "inline-block";
       retryBtn.style.display = "inline-block";
