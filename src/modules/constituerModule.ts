@@ -42,6 +42,8 @@ import {
   retargetAlignLink,
   fetchConcordance,
   fetchEpisodeSegments,
+  propagateCharacters,
+  type PropagateResult,
   fetchQaReport,
   runExport,
   saveConfig,
@@ -4378,10 +4380,12 @@ async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle
             <span style="color:var(--text-muted);font-size:0.72rem">→</span>
             ${targetBadges}
           </div>
-          <div style="display:flex;gap:6px;align-items:center;margin-top:2px">
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
             <span class="align-run-kind">${escapeHtml(r.segment_kind ?? "utterance")}</span>
+            <button class="btn btn-ghost btn-sm align-propagate-btn" data-run-id="${escapeHtml(r.run_id)}" style="font-size:0.68rem;margin-left:2px" title="Propager les noms de personnages dans les segments et les SRTs">🔁 Propager</button>
             <span style="margin-left:auto;font-size:0.68rem;color:var(--accent)">Auditer →</span>
           </div>
+          <div class="align-propagate-status" data-prop-run="${escapeHtml(r.run_id)}" style="display:none;font-size:0.72rem;margin-top:3px"></div>
         </div>`;
     }).join("");
     panel.innerHTML = `
@@ -4392,10 +4396,37 @@ async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle
 
     // Wire run card clicks → open audit view
     panel.querySelectorAll<HTMLElement>(".align-run-card").forEach((card) => {
-      card.addEventListener("click", () => {
+      card.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest(".align-propagate-btn")) return; // handled below
         panel.querySelectorAll(".align-run-card").forEach((c) => c.classList.remove("active"));
         card.classList.add("active");
         openAuditView(panel, epId, epTitle, card.dataset.runId!);
+      });
+    });
+
+    // A-4 : Wire boutons "Propager personnages"
+    panel.querySelectorAll<HTMLButtonElement>(".align-propagate-btn").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const runId   = btn.dataset.runId!;
+        const statusEl = panel.querySelector<HTMLElement>(`.align-propagate-status[data-prop-run="${runId}"]`);
+        btn.disabled = true;
+        btn.textContent = "…";
+        if (statusEl) { statusEl.style.display = ""; statusEl.style.color = "var(--text-muted)"; statusEl.textContent = "Propagation en cours…"; }
+        try {
+          const res: PropagateResult = await propagateCharacters(epId, runId);
+          if (statusEl) {
+            statusEl.style.color = "var(--success, #16a34a)";
+            statusEl.textContent = `✓ ${res.nb_segments_updated} segment(s), ${res.nb_cues_updated} cue(s) mis à jour`;
+          }
+          btn.textContent = "✓";
+          setTimeout(() => { btn.disabled = false; btn.textContent = "🔁 Propager"; }, 3000);
+        } catch (err) {
+          const msg = err instanceof ApiError ? `${err.errorCode} — ${err.message}` : String(err);
+          if (statusEl) { statusEl.style.color = "var(--danger, #dc2626)"; statusEl.textContent = msg; }
+          btn.disabled = false;
+          btn.textContent = "🔁 Propager";
+        }
       });
     });
   } catch (e) {
