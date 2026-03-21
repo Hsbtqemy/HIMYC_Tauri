@@ -311,9 +311,14 @@ def _execute_job(
                 "Importez un transcript avant de normaliser."
             )
         extra = store.load_config_extra()
-        profile_id = extra.get("normalize_profile", DEFAULT_NORMALIZE_PROFILE)
+        # Priorité : paramètre du job > config globale > défaut
+        profile_id = (
+            job.params.get("normalize_profile")
+            or extra.get("normalize_profile", DEFAULT_NORMALIZE_PROFILE)
+        )
+        normalize_options = job.params.get("normalize_options") or {}
         runner = PipelineRunner()
-        step   = NormalizeEpisodeStep(job.episode_id, profile_id)
+        step   = NormalizeEpisodeStep(job.episode_id, profile_id, normalize_options=normalize_options)
         ctx: dict[str, Any] = {"store": store}
         results = runner.run([step], ctx, force=True)
         if results and not results[0].success:
@@ -328,8 +333,9 @@ def _execute_job(
                 f"Transcript normalisé introuvable pour {job.episode_id!r}. "
                 "Normalisez le transcript avant de segmenter."
             )
+        lang_hint = job.params.get("lang_hint", "en")
         runner = PipelineRunner()
-        step   = SegmentEpisodeStep(job.episode_id)
+        step   = SegmentEpisodeStep(job.episode_id, lang_hint=lang_hint)
         ctx = {"store": store}
         results = runner.run([step], ctx, force=True)
         if results and not results[0].success:

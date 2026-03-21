@@ -251,9 +251,15 @@ class NormalizeEpisodeStep(Step):
 
     name = "normalize_episode"
 
-    def __init__(self, episode_id: str, profile_id: str) -> None:
+    def __init__(
+        self,
+        episode_id: str,
+        profile_id: str,
+        normalize_options: dict | None = None,
+    ) -> None:
         self.episode_id = episode_id
         self.profile_id = profile_id
+        self.normalize_options: dict = normalize_options or {}
 
     def run(
         self,
@@ -269,6 +275,17 @@ class NormalizeEpisodeStep(Step):
         profile = get_profile(self.profile_id, custom)
         if not profile:
             return StepResult(False, f"Profile not found: {self.profile_id}")
+        # Appliquer les surcharges par-job (options individuelles)
+        _bool_fields = {
+            "merge_subtitle_breaks", "fix_double_spaces", "fix_french_punctuation",
+            "normalize_apostrophes", "normalize_quotes", "strip_line_spaces",
+        }
+        _valid_cases = {"none", "lowercase", "UPPERCASE", "Title Case", "Sentence case"}
+        for key, val in self.normalize_options.items():
+            if key in _bool_fields and isinstance(val, bool):
+                setattr(profile, key, val)
+            elif key == "case_transform" and val in _valid_cases:
+                profile.case_transform = val
         if not force and store.has_episode_clean(self.episode_id):
             if on_progress:
                 on_progress(self.name, 1.0, f"Skip (already normalized): {self.episode_id}")
