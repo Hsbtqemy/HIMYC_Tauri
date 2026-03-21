@@ -443,6 +443,7 @@ const CSS = `
 .acts-hub-step-title { font-size:0.82rem; font-weight:600; color:var(--text); padding:8px 12px 6px; border-bottom:1px solid var(--border); letter-spacing:.02em; text-transform:uppercase; }
 .acts-hub-step-body { display:flex; flex-direction:column; gap:0; }
 .acts-hub-status { font-size:0.75rem; color:var(--text-muted); padding:4px 12px 8px; min-height:1.4em; font-style:italic; }
+.hub-step-stat { margin-left:auto; font-size:0.72rem; font-weight:400; color:var(--text-muted); letter-spacing:0; text-transform:none; float:right; }
 
 /* Options avancées curation */
 .cur-opt-row { display:flex; align-items:center; gap:5px; padding:2px 0; font-size:0.78rem; color:var(--text); user-select:none; cursor:default; }
@@ -2963,6 +2964,31 @@ function renderCurationPreviewMode(
   }
 }
 
+/** P2-3 : Injecte les compteurs d'état dans les titres du hub. */
+function updateHubStats(cnt: HTMLElement) {
+  const episodes = _cachedEpisodes?.episodes ?? [];
+  if (episodes.length === 0) return;
+
+  const transcripts = episodes.map((ep) => ep.sources.find((s) => s.source_key === "transcript"));
+  const nRaw        = transcripts.filter((t) => t?.available && (t.state === "raw" || t.state === "unknown")).length;
+  const nNormalized = transcripts.filter((t) => t?.available && t.state === "normalized").length;
+  const nSegmented  = transcripts.filter((t) => t?.available && t.state === "segmented").length;
+  const nTotal      = transcripts.filter((t) => t?.available).length;
+  const nWithSrt    = episodes.filter((ep) => ep.sources.some((s) => s.source_key.startsWith("srt_") && s.available)).length;
+
+  const curStat   = cnt.querySelector<HTMLElement>("#hub-stat-cur");
+  const segStat   = cnt.querySelector<HTMLElement>("#hub-stat-seg");
+  const alignStat = cnt.querySelector<HTMLElement>("#hub-stat-align");
+
+  if (curStat)   curStat.textContent   = nRaw > 0
+    ? `${nRaw} brut${nRaw > 1 ? "s" : ""} · ${nNormalized} norm. · ${nSegmented} seg. / ${nTotal}`
+    : `${nNormalized} norm. · ${nSegmented} seg. / ${nTotal}`;
+  if (segStat)   segStat.textContent   = nNormalized > 0
+    ? `${nNormalized} à segmenter · ${nSegmented} / ${nTotal}`
+    : `${nSegmented} / ${nTotal} segmentés`;
+  if (alignStat) alignStat.textContent = `${nWithSrt} avec SRT${nWithSrt > 1 ? "s" : ""} / ${nTotal}`;
+}
+
 async function loadAndRender(container: HTMLElement) {
   const epListEl = container.querySelector<HTMLElement>("#cur-ep-list");
   if (epListEl) {
@@ -2983,6 +3009,9 @@ async function loadAndRender(container: HTMLElement) {
 
     const profileSel = container.querySelector<HTMLSelectElement>("#cur-profile");
     if (profileSel) renderCurationRuleChips(container);
+
+    // P2-3 : mise à jour des stats hub
+    updateHubStats(container);
   } catch (e) {
     const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
     if (epListEl) epListEl.innerHTML = `<div style="color:var(--danger);font-size:0.78rem">${escapeHtml(msg)}</div>`;
@@ -3999,6 +4028,7 @@ async function loadAndRenderSegmentation(container: HTMLElement) {
     const data = await fetchEpisodes();
     _cachedEpisodes = data;
     renderSegmentationPane(container, data.episodes);
+    updateHubStats(container);
   } catch (e) {
     if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
   }
@@ -5812,6 +5842,7 @@ async function loadAndRenderAlignement(container: HTMLElement) {
       (run.target_langs ?? []).forEach((l: string) => alignedLangs.get(run.episode_id)!.add(l));
     }
     renderAlignementPane(container, episodesData.episodes, alignedLangs);
+    updateHubStats(container);
   } catch (e) {
     if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
   }
@@ -6485,7 +6516,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
               <!-- Étape 1 : Curation -->
               <div class="acts-hub-step">
-                <div class="acts-hub-step-title">1 — Curation</div>
+                <div class="acts-hub-step-title">1 — Curation<span class="hub-step-stat" id="hub-stat-cur"></span></div>
                 <div class="acts-hub-step-body">
                   <div class="acts-params">
                     <div class="acts-params-group">
@@ -6510,7 +6541,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
               <!-- Étape 2 : Segmentation -->
               <div class="acts-hub-step">
-                <div class="acts-hub-step-title">2 — Segmentation</div>
+                <div class="acts-hub-step-title">2 — Segmentation<span class="hub-step-stat" id="hub-stat-seg"></span></div>
                 <div class="acts-hub-step-body">
                   <div class="acts-params">
                     <div class="acts-params-group">
@@ -6546,7 +6577,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
               <!-- Étape 3 : Alignement -->
               <div class="acts-hub-step">
-                <div class="acts-hub-step-title">3 — Alignement</div>
+                <div class="acts-hub-step-title">3 — Alignement<span class="hub-step-stat" id="hub-stat-align"></span></div>
                 <div class="acts-hub-step-body">
                   <div class="acts-params">
                     <div class="acts-params-group">
@@ -6816,7 +6847,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       if (wrap?.classList.contains("cons-loading")) loadAndRenderAlignement(container);
     }
     // Init params panels on first show
-    if (subview === "hub")      initHubParams(container);
+    if (subview === "hub")      { initHubParams(container); updateHubStats(container); }
     if (subview === "curation") initCurationParams(container);
   }
 
