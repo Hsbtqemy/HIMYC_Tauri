@@ -1136,6 +1136,21 @@ const CSS = `
   font-family:ui-monospace,monospace; font-size:0.74rem; line-height:1.8;
   background:var(--surface); color:var(--text); white-space:pre-wrap;
 }
+.cur-speaker-strip {
+  display:flex; flex-wrap:wrap; gap:4px; padding:4px 10px;
+  background:color-mix(in srgb,var(--surface2,#f3f4f6) 80%,transparent);
+  border-bottom:1px solid var(--border); align-items:center; flex-shrink:0;
+  font-size:0.7rem;
+}
+.cur-speaker-strip-label { color:var(--text-muted); margin-right:2px; white-space:nowrap; }
+.cur-speaker-chip {
+  padding:1px 9px; border-radius:12px; border:1px solid var(--border);
+  background:var(--surface3,#e5e7eb); cursor:pointer; font-size:0.7rem;
+  transition:background .12s, color .12s;
+}
+.cur-speaker-chip:hover { background:var(--accent,#3b82f6); color:#fff; border-color:transparent; }
+/* Highlight speaker prefix in preview panes */
+.cur-speaker-tag { color:var(--accent,#3b82f6); font-weight:600; }
 
 /* ── Alignment run history + audit view ──────────────────────── */
 .align-runs-panel {
@@ -2566,6 +2581,9 @@ function enterEditMode(container: HTMLElement) {
   textarea.focus();
 
   status.textContent = "Édition du texte normalisé — les modifications invalideront les segments existants.";
+
+  // C-5 : charger les personnages pour l'annotation locuteurs
+  renderSpeakerStrip(container);
 }
 
 /** Quitte le mode édition et restaure le preview. */
@@ -2584,6 +2602,10 @@ function exitEditMode(container: HTMLElement) {
   previewBar.style.pointerEvents = "";
   status.textContent = "";
 
+  // C-5 : masquer le strip locuteurs
+  const strip = container.querySelector<HTMLElement>("#cur-speaker-strip");
+  if (strip) strip.style.display = "none";
+
   // Restaurer le preview
   const panes = container.querySelector<HTMLElement>("#cur-preview-panes")!;
   const activeMode = (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
@@ -2593,6 +2615,85 @@ function exitEditMode(container: HTMLElement) {
   } else {
     panes.innerHTML = `<div class="acts-text-empty" style="width:100%">← Sélectionnez un épisode</div>`;
   }
+}
+
+/**
+ * Insère ou remplace le préfixe "NOM: " en début de la ligne courante dans le textarea.
+ * Si la ligne commence déjà par "QUELQUECHOSE: ", le préfixe existant est remplacé.
+ */
+function insertSpeakerPrefix(textarea: HTMLTextAreaElement, name: string) {
+  const val   = textarea.value;
+  const pos   = textarea.selectionStart ?? 0;
+  const start = val.lastIndexOf("\n", pos - 1) + 1; // début de ligne courante
+  const end   = val.indexOf("\n", pos);              // fin de ligne courante (-1 si dernière)
+  const lineEnd = end === -1 ? val.length : end;
+  const line  = val.slice(start, lineEnd);
+
+  // Remplacer le préfixe "EXISTING: " s'il existe, sinon préfixer
+  const newLine = /^[A-Z][A-Z0-9 _'.-]*:\s/i.test(line)
+    ? line.replace(/^[^:]+:\s*/, `${name}: `)
+    : `${name}: ${line}`;
+
+  const newVal = val.slice(0, start) + newLine + val.slice(lineEnd);
+  textarea.value = newVal;
+
+  // Repositionner le curseur après le préfixe inséré
+  const newCursorPos = start + name.length + 2; // "NOM: " = name + ": "
+  textarea.setSelectionRange(newCursorPos, newCursorPos);
+  textarea.focus();
+}
+
+/**
+ * Charge les personnages et affiche les chips dans le strip.
+ * Chaque chip insère le préfixe locuteur dans le textarea actif.
+ */
+async function renderSpeakerStrip(container: HTMLElement) {
+  const strip = container.querySelector<HTMLElement>("#cur-speaker-strip");
+  if (!strip) return;
+  strip.style.display = "";
+  strip.innerHTML = `<span class="cur-speaker-strip-label">Locuteur :</span><span style="font-size:0.7rem;color:var(--text-muted)">Chargement…</span>`;
+
+  let characters: import("../api").Character[] = [];
+  try {
+    const res = await fetchCharacters();
+    characters = res.characters;
+  } catch {
+    strip.innerHTML = `<span class="cur-speaker-strip-label">Locuteur :</span><span style="font-size:0.7rem;color:var(--danger,#dc2626)">Erreur chargement personnages</span>`;
+    return;
+  }
+
+  if (characters.length === 0) {
+    strip.innerHTML = `<span class="cur-speaker-strip-label">Locuteur :</span><span style="font-size:0.7rem;color:var(--text-muted);font-style:italic">Aucun personnage défini — configurer dans <strong>Personnages</strong></span>`;
+    return;
+  }
+
+  strip.innerHTML = `<span class="cur-speaker-strip-label">Locuteur :</span>`;
+  characters.forEach((ch) => {
+    const btn = document.createElement("button");
+    btn.className = "cur-speaker-chip";
+    btn.textContent = ch.canonical;
+    btn.title = `Insérer "${ch.canonical}: " en début de ligne`;
+    btn.addEventListener("click", () => {
+      const textarea = container.querySelector<HTMLTextAreaElement>("#cur-edit-textarea");
+      if (textarea) insertSpeakerPrefix(textarea, ch.canonical);
+    });
+    strip.appendChild(btn);
+  });
+}
+
+/**
+ * Surligne les préfixes "NOM: " dans un bloc de texte brut (pour le preview).
+ * Retourne du HTML avec <span class="cur-speaker-tag"> sur le préfixe.
+ */
+function highlightSpeakerTags(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const m = line.match(/^([A-Z][A-Z0-9 _'.-]*)(: )/i);
+      if (!m) return escapeHtml(line);
+      return `<span class="cur-speaker-tag">${escapeHtml(m[1])}${escapeHtml(m[2])}</span>${escapeHtml(line.slice(m[0].length))}`;
+    })
+    .join("\n");
 }
 
 /** Met à jour la barre de sélection de source pour l'épisode courant. */
@@ -2776,7 +2877,7 @@ function renderCurationPreviewMode(
     panes.innerHTML = `
       <div class="cur-pane">
         <div class="cur-pane-head">Brut — ${escapeHtml(epTitle)}</div>
-        <div class="cur-pane-text">${escapeHtml(data.raw)}</div>
+        <div class="cur-pane-text">${highlightSpeakerTags(data.raw)}</div>
       </div>
       <div class="cur-pane">
         <div class="cur-pane-head">Normalisé${hasClean ? " <span style='color:var(--accent);font-size:0.6rem'>● modifié</span>" : ""}</div>
@@ -2786,7 +2887,7 @@ function renderCurationPreviewMode(
     panes.innerHTML = `
       <div class="cur-pane">
         <div class="cur-pane-head">Texte brut — ${escapeHtml(epTitle)}</div>
-        <div class="cur-pane-text">${escapeHtml(data.raw)}</div>
+        <div class="cur-pane-text">${highlightSpeakerTags(data.raw)}</div>
       </div>`;
   } else if (mode === "diff") {
     const cleanText = data.clean || data.raw;
@@ -6361,6 +6462,9 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                   <span class="cur-edit-status" id="cur-edit-status">Édition du texte normalisé</span>
                   <button class="btn btn-primary btn-sm" id="cur-save-btn">💾 Sauvegarder</button>
                   <button class="btn btn-ghost btn-sm" id="cur-cancel-btn">✕ Annuler</button>
+                </div>
+                <div class="cur-speaker-strip" id="cur-speaker-strip" style="display:none">
+                  <span class="cur-speaker-strip-label">Locuteur :</span>
                 </div>
                 <div class="cur-preview-panes" id="cur-preview-panes">
                   <div class="acts-text-empty" style="width:100%">← Sélectionnez un épisode</div>
