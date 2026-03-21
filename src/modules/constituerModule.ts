@@ -434,6 +434,17 @@ const CSS = `
 }
 .cur-ep-normalize:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); border-color: var(--accent); }
 
+/* ── Actions hub (lot) ──────────────────────────────────────── */
+.acts-hub { display:flex; flex-direction:column; gap:12px; padding:16px; overflow-y:auto; flex:1; min-height:0; }
+.acts-hub-step { border:1px solid var(--border); border-radius:8px; background:var(--surface); }
+.acts-hub-step-title { font-size:0.82rem; font-weight:600; color:var(--text); padding:8px 12px 6px; border-bottom:1px solid var(--border); letter-spacing:.02em; text-transform:uppercase; }
+.acts-hub-step-body { display:flex; flex-direction:column; gap:0; }
+.acts-hub-status { font-size:0.75rem; color:var(--text-muted); padding:4px 12px 8px; min-height:1.4em; font-style:italic; }
+
+/* Options avancées curation */
+.cur-opt-row { display:flex; align-items:center; gap:5px; padding:2px 0; font-size:0.78rem; color:var(--text); user-select:none; cursor:default; }
+.cur-opt-row input[type="checkbox"] { accent-color:var(--accent); flex-shrink:0; cursor:pointer; }
+
 /* ── Cards (Importer) ───────────────────────────────────────── */
 .cons-card {
   background: var(--surface);
@@ -1085,6 +1096,45 @@ const CSS = `
   color: #16a34a;
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* Inline word-level diff tokens */
+.cur-w-del { background:#fef2f2; color:#dc2626; text-decoration:line-through; border-radius:2px; padding:0 1px; }
+.cur-w-ins { background:#f0fdf4; color:#16a34a; border-radius:2px; padding:0 1px; }
+
+/* ── Chips règles actives (C-4) ──────────────────────────────── */
+.cur-rule-chip {
+  padding: 2px 8px; border-radius: 20px; font-size: 0.68rem; font-weight: 600;
+  cursor: pointer; border: 1px solid transparent; font-family: inherit;
+  transition: background .12s, color .12s, opacity .12s;
+}
+.cur-rule-chip.on  { background:#dbeafe; color:#1d4ed8; border-color:#93c5fd; }
+.cur-rule-chip.off { background:var(--surface2); color:var(--text-muted); border-color:var(--border); opacity:.65; }
+
+/* ── Source selector bar (C-1) ───────────────────────────────── */
+.cur-src-bar {
+  display:flex; align-items:center; gap:4px; padding:4px 12px;
+  border-bottom:1px solid var(--border); background:var(--surface2);
+  flex-shrink:0; flex-wrap:wrap;
+}
+.cur-src-tab {
+  padding:2px 9px; font-size:0.72rem; border:1px solid var(--border);
+  border-radius:4px; background:transparent; color:var(--text-muted);
+  cursor:pointer; font-family:inherit; transition:background .1s;
+}
+.cur-src-tab.active { background:var(--accent,#0f766e); color:#fff; border-color:var(--accent,#0f766e); }
+.cur-src-tab:hover:not(.active) { background:var(--surface); color:var(--text); }
+
+/* ── Edit mode bar (C-3) ────────────────────────────────────── */
+.cur-edit-bar {
+  display:flex; align-items:center; gap:6px; padding:4px 12px;
+  border-bottom:1px solid var(--border); background:color-mix(in srgb,var(--accent) 6%,var(--surface));
+  flex-shrink:0;
+}
+.cur-edit-status { flex:1; font-size:0.74rem; color:var(--text-muted); font-style:italic; }
+.cur-pane-textarea {
+  flex:1; resize:none; border:none; outline:none; padding:1rem 1.25rem;
+  font-family:ui-monospace,monospace; font-size:0.74rem; line-height:1.8;
+  background:var(--surface); color:var(--text); white-space:pre-wrap;
 }
 
 /* ── Alignment run history + audit view ──────────────────────── */
@@ -1774,7 +1824,7 @@ let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _jobsExpanded = true;
 let _activeSection = "actions";
-let _activeActionsSubView: "curation" | "segmentation" | "alignement" = "curation";
+let _activeActionsSubView: "hub" | "curation" | "segmentation" | "alignement" = "hub";
 let _navCollapsed = false;
 let _page = 0;
 /** Données épisodes en cache pour Documents (rechargées à chaque mount section) */
@@ -1939,11 +1989,40 @@ function stopJobPoll() {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
 }
 
+function collectNormalizeOpts(cnt: HTMLElement): Record<string, unknown> {
+  return {
+    merge_subtitle_breaks:  cnt.querySelector<HTMLInputElement>("#cur-opt-merge")?.checked ?? true,
+    fix_double_spaces:      cnt.querySelector<HTMLInputElement>("#cur-opt-double")?.checked ?? true,
+    fix_french_punctuation: cnt.querySelector<HTMLInputElement>("#cur-opt-french")?.checked ?? false,
+    normalize_apostrophes:  cnt.querySelector<HTMLInputElement>("#cur-opt-apos")?.checked ?? false,
+    normalize_quotes:       cnt.querySelector<HTMLInputElement>("#cur-opt-quotes")?.checked ?? false,
+    strip_line_spaces:      cnt.querySelector<HTMLInputElement>("#cur-opt-strip")?.checked ?? true,
+    case_transform:         cnt.querySelector<HTMLSelectElement>("#cur-opt-case")?.value ?? "none",
+  };
+}
+
+function applyNormalizeOptsToPanel(cnt: HTMLElement, opts: NormalizeOptions) {
+  const set = (id: string, val: boolean) => {
+    const el = cnt.querySelector<HTMLInputElement>(id);
+    if (el) el.checked = val;
+  };
+  set("#cur-opt-merge",  opts.merge_subtitle_breaks);
+  set("#cur-opt-double", opts.fix_double_spaces);
+  set("#cur-opt-french", opts.fix_french_punctuation);
+  set("#cur-opt-apos",   opts.normalize_apostrophes);
+  set("#cur-opt-quotes", opts.normalize_quotes);
+  set("#cur-opt-strip",  opts.strip_line_spaces);
+  const caseEl = cnt.querySelector<HTMLSelectElement>("#cur-opt-case");
+  if (caseEl) caseEl.value = opts.case_transform;
+}
+
 async function queueBatchNormalize(
   episodes: Episode[],
   container: HTMLElement,
 ) {
-  const scopeAll = (container.querySelector<HTMLInputElement>("input[name='cur-scope'][value='all']")?.checked) ?? false;
+  const scopeAll = (container.querySelector<HTMLInputElement>("input[name='hub-scope'][value='all']")?.checked) ?? false;
+  const profile  = container.querySelector<HTMLSelectElement>("#hub-profile")?.value ?? "default_en_v1";
+  const normalizeOpts = collectNormalizeOpts(container);
   // Garde côté handler — rejetée même si bouton appelé programmatiquement (MX-008)
   await guardedAction(
     guardBatchNormalize(episodes),
@@ -1954,7 +2033,10 @@ async function queueBatchNormalize(
         return scopeAll ? true : (t.state === "raw" || t.state === "unknown");
       });
       for (const ep of toNormalize) {
-        await createJob("normalize_transcript", ep.episode_id);
+        await createJob("normalize_transcript", ep.episode_id, "transcript", {
+          normalize_profile: profile,
+          normalize_options: normalizeOpts,
+        });
       }
       await refreshJobs(container);
       startJobPoll(container);
@@ -2320,20 +2402,40 @@ function wireTextPanelRows(tableScope: HTMLElement, panel: HTMLElement, tabs: { 
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PROFILE_RULES: Record<string, string[]> = {
-  default_en_v1:   ["Espaces", "Guillemets", "Ponctuation", "Invisibles"],
-  default_fr_v1:   ["Espaces", "Guillemets typo.", "Ponctuation fine", "Invisibles", "Numérotation"],
-  conservative_v1: ["Espaces", "Invisibles"],
-  aggressive_v1:   ["Espaces", "Guillemets", "Ponctuation", "Invisibles", "Numérotation", "Casse forte"],
-};
+// Mapping option → chip label et ID checkbox correspondant
+const OPTION_CHIP_MAP: Array<{
+  optKey: keyof NormalizeOptions;
+  label: string;
+  checkboxId: string;
+}> = [
+  { optKey: "merge_subtitle_breaks",  label: "Fusion lignes",    checkboxId: "#cur-opt-merge" },
+  { optKey: "fix_double_spaces",      label: "Espaces doubles",  checkboxId: "#cur-opt-double" },
+  { optKey: "fix_french_punctuation", label: "Ponctuation fine", checkboxId: "#cur-opt-french" },
+  { optKey: "normalize_apostrophes",  label: "Apostrophes",      checkboxId: "#cur-opt-apos" },
+  { optKey: "normalize_quotes",       label: "Guillemets",       checkboxId: "#cur-opt-quotes" },
+  { optKey: "strip_line_spaces",      label: "Marges ligne",     checkboxId: "#cur-opt-strip" },
+];
 
-function renderCurationRuleChips(container: HTMLElement, profileId: string) {
+/** Rend les chips règles actives à partir de l'état courant du panneau options.
+ *  Chaque chip est un bouton toggle bidirectionnel avec sa checkbox. */
+function renderCurationRuleChips(container: HTMLElement) {
   const el = container.querySelector<HTMLElement>("#cur-rule-chips");
   if (!el) return;
-  const rules = PROFILE_RULES[profileId] ?? [];
-  el.innerHTML = rules.length > 0
-    ? rules.map((r) => `<span class="cur-rule-chip">${escapeHtml(r)}</span>`).join("")
-    : `<span style="font-size:0.75rem;color:var(--text-muted);font-style:italic">—</span>`;
+  el.innerHTML = OPTION_CHIP_MAP.map(({ optKey, label, checkboxId }) => {
+    const cb = container.querySelector<HTMLInputElement>(checkboxId);
+    const on = cb?.checked ?? false;
+    return `<button class="cur-rule-chip ${on ? "on" : "off"}" data-opt-key="${escapeHtml(optKey)}" data-cb-id="${escapeHtml(checkboxId)}" title="${on ? "Désactiver" : "Activer"}">${escapeHtml(label)}</button>`;
+  }).join("");
+
+  // Wire toggle clicks
+  el.querySelectorAll<HTMLButtonElement>(".cur-rule-chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const cbId = chip.dataset.cbId!;
+      const cb = container.querySelector<HTMLInputElement>(cbId);
+      if (cb) { cb.checked = !cb.checked; }
+      renderCurationRuleChips(container); // re-render to reflect new state
+    });
+  });
 }
 
 function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
@@ -2367,6 +2469,8 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
   const activeMode   = () =>
     (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
 
+  const srcBar = container.querySelector<HTMLElement>("#cur-src-bar");
+
   listEl.querySelectorAll<HTMLElement>(".cur-ep-item").forEach((item) => {
     item.addEventListener("click", async () => {
       listEl.querySelectorAll(".cur-ep-item").forEach((i) => i.classList.remove("active"));
@@ -2388,6 +2492,17 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
           <div class="cur-stat-row"><span style="color:var(--text-muted)">État</span><span class="cur-stat-val">${escapeHtml(stateLabel)}</span></div>`;
       }
 
+      // Mettre à jour la barre de source (C-1)
+      const ep = _cachedEpisodes?.episodes.find((e) => e.episode_id === epId);
+      _curPreviewEpSources = ep?.sources ?? [];
+      // Revenir au transcript si la source courante n'est pas disponible pour cet épisode
+      const srcAvail = _curPreviewEpSources.find((s) => s.source_key === _curPreviewSourceKey && s.available);
+      if (!srcAvail) _curPreviewSourceKey = "transcript";
+      _curPreviewData = null;
+      if (_curEditMode) exitEditMode(container);
+      if (srcBar) renderCurSourceBar(srcBar, _curPreviewEpSources, container);
+      updateCurationModeTabsForSource(container, _curPreviewSourceKey);
+
       await loadCurationPreview(previewPanes, epId, epTitle, activeMode());
     });
   });
@@ -2398,10 +2513,14 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
       e.stopPropagation();
       const epId = btn.dataset.ep!;
       const profile = container.querySelector<HTMLSelectElement>("#cur-profile")?.value ?? "default_en_v1";
+      const normalizeOpts = collectNormalizeOpts(container);
       btn.disabled = true;
       btn.textContent = "…";
       try {
-        await createJob("normalize_transcript", epId, "transcript", { normalize_profile: profile });
+        await createJob("normalize_transcript", epId, "transcript", {
+          normalize_profile: profile,
+          normalize_options: normalizeOpts,
+        });
         startJobPoll(container);
         btn.textContent = "✓";
         setTimeout(() => btn.remove(), 800);
@@ -2415,6 +2534,117 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
 
 let _curPreviewEpId: string | null = null;
 let _curPreviewData: { raw: string; clean: string } | null = null;
+let _curPreviewSourceKey: string = "transcript";
+let _curPreviewEpSources: EpisodeSource[] = [];
+let _curEditMode = false;
+
+/** Passe en mode édition : remplace le preview par un textarea avec le texte clean. */
+function enterEditMode(container: HTMLElement) {
+  if (_curEditMode) return;
+  if (!_curPreviewData || _curPreviewSourceKey !== "transcript") return;
+  _curEditMode = true;
+
+  const editBar = container.querySelector<HTMLElement>("#cur-edit-bar")!;
+  const editBtn = container.querySelector<HTMLButtonElement>("#cur-edit-btn")!;
+  const panes   = container.querySelector<HTMLElement>("#cur-preview-panes")!;
+  const status  = container.querySelector<HTMLElement>("#cur-edit-status")!;
+
+  editBar.style.display = "";
+  editBtn.style.display = "none";
+
+  // Masquer les preview tabs (ne pas les supprimer, juste les cacher)
+  container.querySelector<HTMLElement>(".cur-preview-bar")!.style.opacity = "0.4";
+  container.querySelector<HTMLElement>(".cur-preview-bar")!.style.pointerEvents = "none";
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "cur-pane-textarea";
+  textarea.value = _curPreviewData.clean;
+  textarea.id = "cur-edit-textarea";
+
+  panes.innerHTML = "";
+  panes.appendChild(textarea);
+  textarea.focus();
+
+  status.textContent = "Édition du texte normalisé — les modifications invalideront les segments existants.";
+}
+
+/** Quitte le mode édition et restaure le preview. */
+function exitEditMode(container: HTMLElement) {
+  if (!_curEditMode) return;
+  _curEditMode = false;
+
+  const editBar = container.querySelector<HTMLElement>("#cur-edit-bar")!;
+  const editBtn = container.querySelector<HTMLButtonElement>("#cur-edit-btn")!;
+  const status  = container.querySelector<HTMLElement>("#cur-edit-status")!;
+  const previewBar = container.querySelector<HTMLElement>(".cur-preview-bar")!;
+
+  editBar.style.display = "none";
+  editBtn.style.display = _curPreviewSourceKey === "transcript" ? "" : "none";
+  previewBar.style.opacity = "";
+  previewBar.style.pointerEvents = "";
+  status.textContent = "";
+
+  // Restaurer le preview
+  const panes = container.querySelector<HTMLElement>("#cur-preview-panes")!;
+  const activeMode = (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
+  if (_curPreviewData && _curPreviewEpId) {
+    const epTitle = container.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
+    renderCurationPreviewMode(panes, _curPreviewData, activeMode, epTitle);
+  } else {
+    panes.innerHTML = `<div class="acts-text-empty" style="width:100%">← Sélectionnez un épisode</div>`;
+  }
+}
+
+/** Met à jour la barre de sélection de source pour l'épisode courant. */
+function renderCurSourceBar(bar: HTMLElement, sources: EpisodeSource[], container: HTMLElement) {
+  const available = sources.filter((s) => s.available);
+  if (available.length === 0) {
+    bar.innerHTML = `<span style="font-size:0.72rem;color:var(--text-muted);font-style:italic">Aucun document</span>`;
+    return;
+  }
+  bar.innerHTML = available.map((s) => {
+    const label = s.source_key === "transcript"
+      ? "📄 Transcript"
+      : `🌐 SRT ${s.language?.toUpperCase() ?? s.source_key.replace("srt_", "")}`;
+    const active = s.source_key === _curPreviewSourceKey;
+    return `<button class="cur-src-tab${active ? " active" : ""}" data-src-key="${escapeHtml(s.source_key)}">${escapeHtml(label)}</button>`;
+  }).join("");
+
+  bar.querySelectorAll<HTMLButtonElement>(".cur-src-tab").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (btn.dataset.srcKey === _curPreviewSourceKey) return;
+      _curPreviewSourceKey = btn.dataset.srcKey!;
+      _curPreviewData = null; // invalide le cache
+      // Quitter le mode édition si actif
+      if (_curEditMode) exitEditMode(container);
+      const panes = container.querySelector<HTMLElement>("#cur-preview-panes")!;
+      const activeItem = container.querySelector<HTMLElement>(".cur-ep-item.active");
+      const epId = activeItem?.dataset.epId ?? _curPreviewEpId ?? "";
+      const epTitle = activeItem?.dataset.epTitle ?? epId;
+      const mode = (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
+      renderCurSourceBar(bar, _curPreviewEpSources, container);
+      await loadCurationPreview(panes, epId, epTitle, mode);
+      updateCurationModeTabsForSource(container, _curPreviewSourceKey);
+    });
+  });
+}
+
+/** Masque/affiche les tabs modes selon le type de source sélectionné. */
+function updateCurationModeTabsForSource(container: HTMLElement, sourceKey: string) {
+  const isTranscript = sourceKey === "transcript";
+  container.querySelectorAll<HTMLButtonElement>(".cur-preview-tab").forEach((t) => {
+    const mode = t.dataset.mode!;
+    // Diff et côte-à-côte n'ont de sens que pour transcript (raw+clean)
+    const hide = !isTranscript && (mode === "diff" || mode === "side");
+    t.style.display = hide ? "none" : "";
+    // Si le mode actif est masqué, passer à "raw"
+    if (hide && t.classList.contains("active")) {
+      t.classList.remove("active");
+      const rawTab = container.querySelector<HTMLButtonElement>('.cur-preview-tab[data-mode="raw"]');
+      if (rawTab) rawTab.classList.add("active");
+    }
+  });
+}
 
 async function loadCurationPreview(
   panes: HTMLElement,
@@ -2423,23 +2653,76 @@ async function loadCurationPreview(
   mode: string,
 ) {
   _curPreviewEpId = epId;
+  const sourceKey = _curPreviewSourceKey;
 
-  if (!_curPreviewData || _curPreviewEpId !== epId) {
+  if (!_curPreviewData) {
     panes.innerHTML = `<div class="acts-text-empty" style="width:100%">Chargement…</div>`;
     try {
-      const src = await fetchEpisodeSource(epId, "transcript") as TranscriptSourceContent;
-      _curPreviewData = { raw: src.raw ?? "", clean: src.clean ?? src.raw ?? "" };
+      const src = await fetchEpisodeSource(epId, sourceKey);
+      if (sourceKey === "transcript") {
+        const t = src as TranscriptSourceContent;
+        _curPreviewData = { raw: t.raw ?? "", clean: t.clean ?? t.raw ?? "" };
+      } else {
+        // SRT : pas de raw/clean, on met le content dans les deux
+        const s = src as SrtSourceContent;
+        _curPreviewData = { raw: s.content ?? "", clean: "" };
+      }
     } catch (e) {
       panes.innerHTML = `<div class="acts-text-empty" style="width:100%">${escapeHtml(e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e))}</div>`;
       return;
     }
   }
 
-  renderCurationPreviewMode(panes, _curPreviewData, mode, epTitle);
+  // Pour SRT, forcer mode "raw" (pas de diff/clean)
+  const effectiveMode = sourceKey !== "transcript" ? "raw" : mode;
+  renderCurationPreviewMode(panes, _curPreviewData, effectiveMode, epTitle);
 }
 
-// ── Line-level diff (raw vs clean) ──────────────────────────────────────────
+// ── Word-level diff (LCS sur tokens) ────────────────────────────────────────
 
+/** Tokenise une chaîne en mots + séparateurs pour le diff. */
+function tokenize(s: string): string[] {
+  return s.match(/\S+|\s+/g) ?? (s ? [s] : []);
+}
+
+/** LCS-diff sur tableau de tokens → retourne opérations {eq|del|ins}. */
+function tokenDiff(
+  a: string[], b: string[],
+): Array<{ type: "eq" | "del" | "ins"; text: string }> {
+  const m = a.length, n = b.length;
+  // Limiter les calculs sur de très longues lignes
+  if (m > 400 || n > 400) {
+    const ops: Array<{ type: "eq" | "del" | "ins"; text: string }> = [];
+    a.forEach((t) => ops.push({ type: "del", text: t }));
+    b.forEach((t) => ops.push({ type: "ins", text: t }));
+    return ops;
+  }
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--)
+    for (let j = n - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const result: Array<{ type: "eq" | "del" | "ins"; text: string }> = [];
+  let i = 0, j = 0;
+  while (i < m || j < n) {
+    if (i < m && j < n && a[i] === b[j]) { result.push({ type: "eq",  text: a[i++] }); j++; }
+    else if (j < n && (i >= m || dp[i][j + 1] >= dp[i + 1][j])) { result.push({ type: "ins", text: b[j++] }); }
+    else { result.push({ type: "del", text: a[i++] }); }
+  }
+  return result;
+}
+
+/** Retourne le HTML d'une ligne avec changements inline surlignés. */
+function inlineLineDiff(rawLine: string, cleanLine: string): string {
+  const ops = tokenDiff(tokenize(rawLine), tokenize(cleanLine));
+  return ops.map(({ type, text }) => {
+    const t = escapeHtml(text);
+    if (type === "del") return `<span class="cur-w-del">${t}</span>`;
+    if (type === "ins") return `<span class="cur-w-ins">${t}</span>`;
+    return t;
+  }).join("");
+}
+
+/** Construit le HTML du panneau diff. */
 function buildDiffHtml(raw: string, clean: string): { html: string; nChanges: number } {
   const rawLines   = raw.split("\n");
   const cleanLines = clean.split("\n");
@@ -2450,21 +2733,33 @@ function buildDiffHtml(raw: string, clean: string): { html: string; nChanges: nu
     const r = rawLines[i];
     const c = cleanLines[i];
     if (r === undefined) {
-      // inserted line
       nChanges++;
       parts.push(`<div class="cur-diff-changed"><div class="cur-diff-ins">+ ${escapeHtml(c)}</div></div>`);
     } else if (c === undefined) {
-      // deleted line
       nChanges++;
       parts.push(`<div class="cur-diff-changed"><div class="cur-diff-del">- ${escapeHtml(r)}</div></div>`);
     } else if (r === c) {
       parts.push(`<div class="cur-diff-same">${escapeHtml(r)}</div>`);
     } else {
       nChanges++;
-      parts.push(`<div class="cur-diff-changed"><div class="cur-diff-del">- ${escapeHtml(r)}</div><div class="cur-diff-ins">+ ${escapeHtml(c)}</div></div>`);
+      // Inline word diff
+      parts.push(`<div class="cur-diff-changed"><div class="cur-diff-ins" style="text-decoration:none">${inlineLineDiff(r, c)}</div></div>`);
     }
   }
   return { html: parts.join(""), nChanges };
+}
+
+/** Construit le HTML du panneau clean avec changements surlignés en vert. */
+function buildCleanHighlighted(raw: string, clean: string): string {
+  const rawLines   = raw.split("\n");
+  const cleanLines = clean.split("\n");
+  const maxLen = Math.max(rawLines.length, cleanLines.length);
+  return cleanLines.slice(0, maxLen).map((c, i) => {
+    const r = rawLines[i] ?? "";
+    if (r === c) return escapeHtml(c);
+    if (!r) return `<span class="cur-w-ins">${escapeHtml(c)}</span>`;
+    return inlineLineDiff(r, c);
+  }).join("\n");
 }
 
 function renderCurationPreviewMode(
@@ -2473,20 +2768,24 @@ function renderCurationPreviewMode(
   mode: string,
   epTitle: string,
 ) {
+  const hasClean = !!data.clean && data.clean !== data.raw;
   if (mode === "side") {
+    const cleanHtml = hasClean
+      ? buildCleanHighlighted(data.raw, data.clean)
+      : escapeHtml(data.raw);
     panes.innerHTML = `
       <div class="cur-pane">
-        <div class="cur-pane-head">Texte brut (source)</div>
+        <div class="cur-pane-head">Brut — ${escapeHtml(epTitle)}</div>
         <div class="cur-pane-text">${escapeHtml(data.raw)}</div>
       </div>
       <div class="cur-pane">
-        <div class="cur-pane-head">Texte normalisé</div>
-        <div class="cur-pane-text">${escapeHtml(data.clean || "(non normalisé)")}</div>
+        <div class="cur-pane-head">Normalisé${hasClean ? " <span style='color:var(--accent);font-size:0.6rem'>● modifié</span>" : ""}</div>
+        <div class="cur-pane-text">${cleanHtml}</div>
       </div>`;
   } else if (mode === "raw") {
     panes.innerHTML = `
       <div class="cur-pane">
-        <div class="cur-pane-head">Texte brut (source) — ${escapeHtml(epTitle)}</div>
+        <div class="cur-pane-head">Texte brut — ${escapeHtml(epTitle)}</div>
         <div class="cur-pane-text">${escapeHtml(data.raw)}</div>
       </div>`;
   } else if (mode === "diff") {
@@ -2495,18 +2794,22 @@ function renderCurationPreviewMode(
     const totalLines = data.raw.split("\n").length;
     panes.innerHTML = `
       <div class="cur-pane" style="overflow:hidden;display:flex;flex-direction:column">
-        <div class="cur-pane-head">Diff brut → normalisé — ${escapeHtml(epTitle)}</div>
+        <div class="cur-pane-head">Diff mot-à-mot — ${escapeHtml(epTitle)}</div>
         <div class="cur-diff-summary">
           <strong>${nChanges}</strong> ligne(s) modifiée(s) sur ${totalLines}
-          ${!data.clean ? ' <span style="color:var(--text-muted)">(pas encore normalisé — diff identique)</span>' : ""}
+          ${!hasClean ? ' <span style="color:var(--text-muted)">(pas encore normalisé)</span>' : ""}
         </div>
         <div class="cur-diff-view">${html}</div>
       </div>`;
   } else {
+    // mode "clean"
+    const cleanHtml = hasClean
+      ? buildCleanHighlighted(data.raw, data.clean)
+      : escapeHtml(data.clean || data.raw);
     panes.innerHTML = `
       <div class="cur-pane">
-        <div class="cur-pane-head">Texte normalisé — ${escapeHtml(epTitle)}</div>
-        <div class="cur-pane-text">${escapeHtml(data.clean || data.raw)}</div>
+        <div class="cur-pane-head">Normalisé — ${escapeHtml(epTitle)}</div>
+        <div class="cur-pane-text">${cleanHtml}</div>
       </div>`;
   }
 }
@@ -2530,7 +2833,7 @@ async function loadAndRender(container: HTMLElement) {
     renderCurationEpList(container, data.episodes);
 
     const profileSel = container.querySelector<HTMLSelectElement>("#cur-profile");
-    if (profileSel) renderCurationRuleChips(container, profileSel.value);
+    if (profileSel) renderCurationRuleChips(container);
   } catch (e) {
     const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
     if (epListEl) epListEl.innerHTML = `<div style="color:var(--danger);font-size:0.78rem">${escapeHtml(msg)}</div>`;
@@ -3019,11 +3322,29 @@ function renderImporterSection(pane: HTMLElement) {
   wireImporterButtons(pane);
 }
 
-const NORMALIZE_PROFILES = [
-  { id: "default_en_v1",   label: "default_en_v1 — Anglais standard" },
-  { id: "default_fr_v1",   label: "default_fr_v1 — Français standard" },
-  { id: "conservative_v1", label: "conservative_v1 — Conservateur" },
-  { id: "aggressive_v1",   label: "aggressive_v1 — Agressif" },
+interface NormalizeOptions {
+  merge_subtitle_breaks: boolean;
+  fix_double_spaces: boolean;
+  fix_french_punctuation: boolean;
+  normalize_apostrophes: boolean;
+  normalize_quotes: boolean;
+  strip_line_spaces: boolean;
+  case_transform: string;
+}
+
+const NORMALIZE_PROFILES: Array<{ id: string; label: string; options: NormalizeOptions }> = [
+  { id: "default_en_v1",   label: "default_en_v1 — Anglais standard",
+    options: { merge_subtitle_breaks: true,  fix_double_spaces: true, fix_french_punctuation: false,
+               normalize_apostrophes: false, normalize_quotes: false,  strip_line_spaces: true,  case_transform: "none" } },
+  { id: "default_fr_v1",   label: "default_fr_v1 — Français standard",
+    options: { merge_subtitle_breaks: true,  fix_double_spaces: true, fix_french_punctuation: true,
+               normalize_apostrophes: true,  normalize_quotes: false,  strip_line_spaces: true,  case_transform: "none" } },
+  { id: "conservative_v1", label: "conservative_v1 — Conservateur",
+    options: { merge_subtitle_breaks: true,  fix_double_spaces: true, fix_french_punctuation: false,
+               normalize_apostrophes: false, normalize_quotes: false,  strip_line_spaces: true,  case_transform: "none" } },
+  { id: "aggressive_v1",   label: "aggressive_v1 — Agressif",
+    options: { merge_subtitle_breaks: true,  fix_double_spaces: true, fix_french_punctuation: false,
+               normalize_apostrophes: false, normalize_quotes: false,  strip_line_spaces: true,  case_transform: "lowercase" } },
 ];
 
 const SOURCE_IDS = [
@@ -3743,11 +4064,12 @@ function renderAlignementPane(container: HTMLElement, episodes: Episode[]) {
       const epId       = btn.dataset.ep!;
       const epTitle    = btn.dataset.title!;
       const srtKeys    = (btn.dataset.srts || "").split(",").filter(Boolean);
-      const pane       = wrap.closest(".cons-actions-pane");
-      const segKind    = (pane?.querySelector<HTMLSelectElement>("#align-segment-kind-pre")?.value ?? "utterance") as "utterance" | "sentence";
-      const pivotLang  = (pane?.querySelector<HTMLInputElement>("#align-pivot-lang-pre")?.value.trim() ?? "fr") || "fr";
-      const minConf    = parseFloat(pane?.querySelector<HTMLInputElement>("#align-min-conf-pre")?.value ?? "0.3");
-      const useSim     = pane?.querySelector<HTMLInputElement>("#align-use-sim-pre")?.checked ?? false;
+      // Read params from hub (batch settings used as defaults for per-episode align)
+      const root       = wrap.closest(".cons-root") ?? wrap.getRootNode() as HTMLElement;
+      const segKind    = (root.querySelector<HTMLSelectElement>("#hub-align-seg-kind")?.value ?? "utterance") as "utterance" | "sentence";
+      const pivotLang  = (root.querySelector<HTMLInputElement>("#hub-align-lang")?.value.trim() ?? "fr") || "fr";
+      const minConf    = parseFloat(root.querySelector<HTMLInputElement>("#hub-align-conf")?.value ?? "0.3");
+      const useSim     = root.querySelector<HTMLInputElement>("#hub-align-sim")?.checked ?? false;
       const targetLangs = srtKeys.map((k) => k.replace("srt_", ""));
       const handoff = {
         episode_id:              epId,
@@ -5773,7 +6095,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   // Restore persisted nav state
   _navCollapsed = localStorage.getItem("cons-nav-collapsed") === "1";
   const _savedSubView = localStorage.getItem("cons-active-subview");
-  if (_savedSubView === "curation" || _savedSubView === "segmentation" || _savedSubView === "alignement") {
+  if (_savedSubView === "hub" || _savedSubView === "curation" || _savedSubView === "segmentation" || _savedSubView === "alignement") {
     _activeActionsSubView = _savedSubView;
   }
   const _savedSection = localStorage.getItem("cons-active-section");
@@ -5849,19 +6171,132 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         <!-- Section : Actions -->
         <div class="cons-section-pane${_activeSection === "actions" ? " active" : ""}" data-section="actions">
 
+          <!-- Hub : traitement par lot ─────────────────────────────────── -->
+          <div class="cons-actions-pane${_activeActionsSubView === "hub" ? " active" : ""}" data-subview="hub">
+            <div class="cons-toolbar">
+              <span class="cons-toolbar-title">Traitement par lot</span>
+              <button class="btn btn-ghost btn-sm" id="cons-hub-refresh">↺ Statut</button>
+              <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
+            </div>
+            <div class="cons-error hub-error" style="display:none"></div>
+            <div class="acts-hub">
+
+              <!-- Étape 1 : Curation -->
+              <div class="acts-hub-step">
+                <div class="acts-hub-step-title">1 — Curation</div>
+                <div class="acts-hub-step-body">
+                  <div class="acts-params">
+                    <div class="acts-params-group">
+                      <span class="acts-params-label">Profil</span>
+                      <select class="acts-params-select" id="hub-profile">
+                        ${NORMALIZE_PROFILES.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.label)}</option>`).join("")}
+                      </select>
+                      <span class="acts-params-feedback" id="hub-profile-fb"></span>
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <div class="acts-params-group">
+                      <span class="acts-params-label">Portée</span>
+                      <label class="acts-params-radio"><input type="radio" name="hub-scope" value="pending" checked> Non norm.</label>
+                      <label class="acts-params-radio"><input type="radio" name="hub-scope" value="all"> Tous</label>
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <button class="btn btn-primary btn-sm" id="cons-batch-normalize">⚡ Normaliser tout</button>
+                  </div>
+                  <div class="acts-hub-status" id="hub-norm-status"></div>
+                </div>
+              </div>
+
+              <!-- Étape 2 : Segmentation -->
+              <div class="acts-hub-step">
+                <div class="acts-hub-step-title">2 — Segmentation</div>
+                <div class="acts-hub-step-body">
+                  <div class="acts-params">
+                    <div class="acts-params-group">
+                      <span class="acts-params-label">Type</span>
+                      <select class="acts-params-select" id="hub-seg-kind">
+                        <option value="utterance">Utterance (locuteur)</option>
+                        <option value="sentence">Phrase</option>
+                      </select>
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <div class="acts-params-group">
+                      <span class="acts-params-label">Langue</span>
+                      <select class="acts-params-select" id="hub-seg-lang">
+                        <option value="en">Anglais (en)</option>
+                        <option value="fr">Français (fr)</option>
+                        <option value="de">Allemand (de)</option>
+                        <option value="es">Espagnol (es)</option>
+                        <option value="it">Italien (it)</option>
+                      </select>
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <div class="acts-params-group">
+                      <span class="acts-params-label">Portée</span>
+                      <label class="acts-params-radio"><input type="radio" name="hub-seg-scope" value="normalized" checked> Norm. seulement</label>
+                      <label class="acts-params-radio"><input type="radio" name="hub-seg-scope" value="all"> Tous</label>
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <button class="btn btn-secondary btn-sm" id="cons-batch-segment">🔤 Segmenter tout</button>
+                  </div>
+                  <div class="acts-hub-status" id="hub-seg-status"></div>
+                </div>
+              </div>
+
+              <!-- Étape 3 : Alignement -->
+              <div class="acts-hub-step">
+                <div class="acts-hub-step-title">3 — Alignement</div>
+                <div class="acts-hub-step-body">
+                  <div class="acts-params">
+                    <div class="acts-params-group">
+                      <span class="acts-params-label">Pivot lang</span>
+                      <input class="acts-params-select" id="hub-align-lang" type="text" value="fr"
+                        style="width:44px;padding:3px 6px;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"
+                        title="Code langue du transcript pivot (fr, en, de…)">
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <div class="acts-params-group">
+                      <span class="acts-params-label">Segments</span>
+                      <select class="acts-params-select" id="hub-align-seg-kind">
+                        <option value="utterance">Utterance</option>
+                        <option value="sentence">Phrase</option>
+                      </select>
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <div class="acts-params-group">
+                      <span class="acts-params-label">Conf. min.</span>
+                      <input type="range" class="acts-params-range" id="hub-align-conf"
+                        min="0.1" max="0.95" step="0.05" value="0.3">
+                      <span class="acts-params-range-val" id="hub-align-conf-val">0.30</span>
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <div class="acts-params-group">
+                      <label class="acts-params-check">
+                        <input type="checkbox" id="hub-align-sim">
+                        Similarité textuelle
+                      </label>
+                    </div>
+                    <div class="acts-params-sep"></div>
+                    <button class="btn btn-secondary btn-sm" id="cons-batch-align">⚡ Aligner tout</button>
+                  </div>
+                  <div class="acts-hub-status" id="hub-align-status"></div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
           <!-- Curation sub-pane -->
           <div class="cons-actions-pane${_activeActionsSubView === "curation" ? " active" : ""}" data-subview="curation">
             <div class="cons-toolbar">
-              <span class="cons-toolbar-title">Curation</span>
-              <span class="cons-toolbar-series"></span>
-              <span class="cons-api-dot ${ctx.getBackendStatus().online ? "online" : "offline"}" id="cons-api-dot"></span>
+              <span class="cons-toolbar-title">Curation — épisode</span>
+              <button class="btn btn-ghost btn-sm" id="cons-refresh">↺ Actualiser</button>
             </div>
             <div class="cons-error" style="display:none"></div>
             <div class="cur-3col">
 
               <!-- Params (gauche) -->
               <div class="cur-params-col">
-                <div class="cur-col-head">Paramètres curation</div>
+                <div class="cur-col-head">Paramètres</div>
 
                 <div class="cur-param-section">
                   <div class="cur-param-label">Épisodes</div>
@@ -5879,9 +6314,27 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 </div>
 
                 <div class="cur-param-section">
-                  <div class="cur-param-label">Portée</div>
-                  <label class="acts-params-radio"><input type="radio" name="cur-scope" value="pending" checked> Non normalisés</label>
-                  <label class="acts-params-radio"><input type="radio" name="cur-scope" value="all"> Tous</label>
+                  <div class="cur-param-label" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" id="cur-opts-toggle">
+                    Options avancées <span id="cur-opts-caret" style="font-size:0.7rem;color:var(--text-muted)">▶</span>
+                  </div>
+                  <div id="cur-opts-panel" style="display:none;margin-top:6px">
+                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-merge"> Fusionner sauts de ligne (sous-titres)</label>
+                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-double"> Supprimer espaces doubles</label>
+                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-french"> Typographie française (espaces avant : ; ! ?)</label>
+                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-apos"> Normaliser apostrophes (' → ')</label>
+                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-quotes"> Normaliser guillemets ("" → « »)</label>
+                    <label class="cur-opt-row"><input type="checkbox" id="cur-opt-strip"> Supprimer espaces bord de ligne</label>
+                    <div class="cur-opt-row" style="display:flex;align-items:center;gap:6px;margin-top:4px">
+                      <span style="font-size:0.78rem;color:var(--text-muted);white-space:nowrap">Casse</span>
+                      <select id="cur-opt-case" style="font-size:0.78rem;flex:1;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+                        <option value="none">— inchangée —</option>
+                        <option value="lowercase">minuscules</option>
+                        <option value="UPPERCASE">MAJUSCULES</option>
+                        <option value="Title Case">Title Case</option>
+                        <option value="Sentence case">Sentence case</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
                 <div class="cur-param-section">
@@ -5889,20 +6342,25 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                   <div class="cur-rule-chips" id="cur-rule-chips"></div>
                 </div>
 
-                <div class="cur-param-section">
-                  <button class="btn btn-primary btn-sm" id="cons-batch-normalize" style="width:100%">⚡ Normaliser tout</button>
-                  <button class="btn btn-ghost btn-sm" id="cons-refresh" style="width:100%;margin-top:4px">↺ Actualiser</button>
-                </div>
               </div>
 
               <!-- Preview (centre) -->
               <div class="cur-preview-col">
+                <div class="cur-src-bar" id="cur-src-bar">
+                  <span style="font-size:0.72rem;color:var(--text-muted);font-style:italic">← Sélectionnez un épisode</span>
+                </div>
                 <div class="cur-preview-bar">
                   <button class="cur-preview-tab active" data-mode="side">Côte à côte</button>
                   <button class="cur-preview-tab" data-mode="raw">Brut seul</button>
                   <button class="cur-preview-tab" data-mode="clean">Normalisé seul</button>
-                  <button class="cur-preview-tab" data-mode="diff">Diff</button>
+                  <button class="cur-preview-tab" data-mode="diff">Diff mot</button>
                   <span class="cur-preview-badge" id="cur-preview-badge"></span>
+                  <button class="btn btn-ghost btn-sm" id="cur-edit-btn" style="margin-left:auto;font-size:0.72rem" title="Éditer le texte normalisé">✏ Éditer</button>
+                </div>
+                <div class="cur-edit-bar" id="cur-edit-bar" style="display:none">
+                  <span class="cur-edit-status" id="cur-edit-status">Édition du texte normalisé</span>
+                  <button class="btn btn-primary btn-sm" id="cur-save-btn">💾 Sauvegarder</button>
+                  <button class="btn btn-ghost btn-sm" id="cur-cancel-btn">✕ Annuler</button>
                 </div>
                 <div class="cur-preview-panes" id="cur-preview-panes">
                   <div class="acts-text-empty" style="width:100%">← Sélectionnez un épisode</div>
@@ -5937,23 +6395,16 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           <!-- Segmentation sub-pane -->
           <div class="cons-actions-pane${_activeActionsSubView === "segmentation" ? " active" : ""}" data-subview="segmentation">
             <div class="cons-toolbar">
-              <span class="cons-toolbar-title">Segmentation</span>
-              <button class="btn btn-secondary btn-sm" id="cons-batch-segment">🔤 Segmenter tout</button>
+              <span class="cons-toolbar-title">Segmentation — épisode</span>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-seg">↺ Actualiser</button>
             </div>
-            <!-- Params panel -->
+            <!-- Params panel : affichage seulement -->
             <div class="acts-params">
               <div class="acts-params-group">
-                <span class="acts-params-label">Portée</span>
-                <label class="acts-params-radio"><input type="radio" name="seg-scope" value="normalized" checked> Normalisés seulement</label>
-                <label class="acts-params-radio"><input type="radio" name="seg-scope" value="all"> Tous</label>
-              </div>
-              <div class="acts-params-sep"></div>
-              <div class="acts-params-group">
-                <span class="acts-params-label">Type</span>
+                <span class="acts-params-label">Afficher</span>
                 <select class="acts-params-select" id="seg-kind">
-                  <option value="utterance">Utterance (locuteur)</option>
-                  <option value="sentence">Phrase</option>
+                  <option value="utterance">Utterances</option>
+                  <option value="sentence">Phrases</option>
                 </select>
               </div>
             </div>
@@ -5985,40 +6436,8 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           <!-- Alignement sub-pane -->
           <div class="cons-actions-pane${_activeActionsSubView === "alignement" ? " active" : ""}" data-subview="alignement">
             <div class="cons-toolbar">
-              <span class="cons-toolbar-title">Alignement</span>
-              <button class="btn btn-secondary btn-sm" id="cons-batch-align">⚡ Aligner tout</button>
+              <span class="cons-toolbar-title">Alignement — épisode</span>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-align">↺ Actualiser</button>
-            </div>
-            <!-- Params panel (MX-037) -->
-            <div class="acts-params">
-              <div class="acts-params-group">
-                <span class="acts-params-label">Pivot lang</span>
-                <input class="acts-params-select" id="align-pivot-lang-pre" type="text" value="fr"
-                  style="width:44px;padding:3px 6px;font-size:0.8rem;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"
-                  title="Code langue du transcript pivot (fr, en, de…)">
-              </div>
-              <div class="acts-params-sep"></div>
-              <div class="acts-params-group">
-                <span class="acts-params-label">Segments</span>
-                <select class="acts-params-select" id="align-segment-kind-pre">
-                  <option value="utterance">Utterance</option>
-                  <option value="sentence">Phrase</option>
-                </select>
-              </div>
-              <div class="acts-params-sep"></div>
-              <div class="acts-params-group">
-                <span class="acts-params-label">Confiance min.</span>
-                <input type="range" class="acts-params-range" id="align-min-conf-pre"
-                  min="0.1" max="0.95" step="0.05" value="0.3">
-                <span class="acts-params-range-val" id="align-min-conf-val">0.30</span>
-              </div>
-              <div class="acts-params-sep"></div>
-              <div class="acts-params-group">
-                <label class="acts-params-check">
-                  <input type="checkbox" id="align-use-sim-pre">
-                  Similarité textuelle
-                </label>
-              </div>
             </div>
             <div class="acts-split">
               <div class="acts-ep-list">
@@ -6068,10 +6487,12 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
     if (sec === "importer"    && pane.querySelector(".cons-placeholder")) renderImporterSection(pane);
     if (sec === "personnages" && pane.querySelector(".cons-placeholder")) renderPersonnagesSection(pane);
     if (sec === "exporter"    && pane.querySelector(".cons-placeholder")) renderExporterSection(pane);
+    // Clicking the "Actions" tab always returns to the batch hub
+    if (sec === "actions") activateSubView("hub");
   }
 
   // ── Helper: switch Actions sub-view ──────────────────────────────────────
-  function activateSubView(subview: "curation" | "segmentation" | "alignement") {
+  function activateSubView(subview: "hub" | "curation" | "segmentation" | "alignement") {
     _activeActionsSubView = subview;
     localStorage.setItem("cons-active-subview", subview);
     container.querySelectorAll<HTMLElement>(".cons-actions-pane")
@@ -6087,8 +6508,44 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       const wrap = container.querySelector(".align-ep-wrap");
       if (wrap?.classList.contains("cons-loading")) loadAndRenderAlignement(container);
     }
-    // Init Curation params panel on first show
+    // Init params panels on first show
+    if (subview === "hub")      initHubParams(container);
     if (subview === "curation") initCurationParams(container);
+  }
+
+  // ── Hub params : initialisation au premier affichage ────────────────────
+  async function initHubParams(cnt: HTMLElement) {
+    const profileSel = cnt.querySelector<HTMLSelectElement>("#hub-profile");
+    if (!profileSel || profileSel.dataset.wired) return;
+    profileSel.dataset.wired = "1";
+
+    if (!_cachedConfig) {
+      try { _cachedConfig = await fetchConfig(); } catch { return; }
+    }
+    profileSel.value = _cachedConfig.normalize_profile;
+
+    // Save profile to config when changed from hub
+    const fb = cnt.querySelector<HTMLElement>("#hub-profile-fb")!;
+    profileSel.addEventListener("change", async () => {
+      fb.textContent = "…";
+      fb.style.color = "var(--text-muted)";
+      try {
+        _cachedConfig = await saveConfig({ normalize_profile: profileSel.value });
+        fb.textContent = "✓";
+        fb.style.color = "var(--success, #16a34a)";
+        setTimeout(() => { fb.textContent = ""; }, 1500);
+      } catch (e) {
+        fb.textContent = e instanceof ApiError ? e.message : "Erreur";
+        fb.style.color = "var(--danger, #dc2626)";
+      }
+    });
+
+    // Pre-fill pivot lang from project languages
+    const alignLang = cnt.querySelector<HTMLInputElement>("#hub-align-lang");
+    if (alignLang) {
+      const lang = _cachedConfig.languages?.[0] ?? "";
+      if (lang) alignLang.value = lang;
+    }
   }
 
   // ── Curation params : profil de normalisation ─────────────────────────────
@@ -6101,20 +6558,78 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       try { _cachedConfig = await fetchConfig(); } catch { return; }
     }
     sel.value = _cachedConfig.normalize_profile;
-    renderCurationRuleChips(cnt, sel.value);
+    renderCurationRuleChips(cnt);
+    // Populate checkboxes from current profile defaults
+    const initProfile = NORMALIZE_PROFILES.find((p) => p.id === sel.value);
+    if (initProfile) applyNormalizeOptsToPanel(cnt, initProfile.options);
+
     sel.addEventListener("change", async () => {
       const fb = cnt.querySelector<HTMLElement>("#cur-profile-fb")!;
       fb.textContent = "Enregistrement…";
       fb.style.color = "var(--text-muted)";
+      // Auto-populate checkboxes when profile changes
+      const prof = NORMALIZE_PROFILES.find((p) => p.id === sel.value);
+      if (prof) applyNormalizeOptsToPanel(cnt, prof.options);
       try {
         _cachedConfig = await saveConfig({ normalize_profile: sel.value });
-        renderCurationRuleChips(cnt, sel.value);
+        renderCurationRuleChips(cnt);
         fb.textContent = "✓";
         fb.style.color = "var(--success, #16a34a)";
         setTimeout(() => { fb.textContent = ""; }, 1500);
       } catch (e) {
         fb.textContent = e instanceof ApiError ? e.message : "Erreur";
         fb.style.color = "var(--danger, #dc2626)";
+      }
+    });
+
+    // Wire options toggle (collapsible panel)
+    const toggle = cnt.querySelector<HTMLElement>("#cur-opts-toggle");
+    const panel  = cnt.querySelector<HTMLElement>("#cur-opts-panel");
+    const caret  = cnt.querySelector<HTMLElement>("#cur-opts-caret");
+    if (toggle && panel && caret) {
+      toggle.addEventListener("click", () => {
+        const open = panel.style.display === "none";
+        panel.style.display = open ? "" : "none";
+        caret.textContent = open ? "▼" : "▶";
+      });
+    }
+
+    // Wire option checkboxes → re-render chips (bidirectionnel avec C-4)
+    OPTION_CHIP_MAP.forEach(({ checkboxId }) => {
+      cnt.querySelector<HTMLInputElement>(checkboxId)
+        ?.addEventListener("change", () => renderCurationRuleChips(cnt));
+    });
+    renderCurationRuleChips(cnt); // état initial
+
+    // Wire C-3: édition manuelle (edit / save / cancel)
+    cnt.querySelector<HTMLButtonElement>("#cur-edit-btn")?.addEventListener("click", () => enterEditMode(cnt));
+    cnt.querySelector<HTMLButtonElement>("#cur-cancel-btn")?.addEventListener("click", () => exitEditMode(cnt));
+    cnt.querySelector<HTMLButtonElement>("#cur-save-btn")?.addEventListener("click", async () => {
+      const textarea = cnt.querySelector<HTMLTextAreaElement>("#cur-edit-textarea");
+      if (!textarea || !_curPreviewEpId) return;
+      const newClean = textarea.value;
+      const saveBtn  = cnt.querySelector<HTMLButtonElement>("#cur-save-btn")!;
+      const status   = cnt.querySelector<HTMLElement>("#cur-edit-status")!;
+      saveBtn.disabled = true;
+      saveBtn.textContent = "…";
+      try {
+        await patchTranscript(_curPreviewEpId, newClean);
+        if (_curPreviewData) _curPreviewData.clean = newClean;
+        exitEditMode(cnt);
+        // Avertissement : segments invalidés
+        const panes = cnt.querySelector<HTMLElement>("#cur-preview-panes")!;
+        const warn = document.createElement("div");
+        warn.className = "acts-text-empty";
+        warn.style.cssText = "width:100%;background:color-mix(in srgb,var(--warning,#f59e0b) 12%,transparent);color:var(--warning,#b45309);padding:8px 12px;border-radius:4px;font-size:0.8rem;";
+        warn.innerHTML = `⚠ Texte sauvegardé — les segments ont été invalidés. Pensez à relancer la <strong>segmentation</strong>.`;
+        panes.prepend(warn);
+        // Rafraîchir la liste des épisodes pour mettre à jour le statut
+        await loadAndRender(cnt);
+      } catch (err) {
+        status.textContent = err instanceof ApiError ? `${err.errorCode} — ${err.message}` : String(err);
+        status.style.color = "var(--danger, #dc2626)";
+        saveBtn.disabled = false;
+        saveBtn.textContent = "💾 Sauvegarder";
       }
     });
 
@@ -6172,8 +6687,9 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   container.querySelector<HTMLButtonElement>("#cons-batch-segment")
     ?.addEventListener("click", async () => {
       const episodes = _cachedEpisodes?.episodes ?? [];
-      const scopeAll = (container.querySelector<HTMLInputElement>("input[name='seg-scope'][value='all']")?.checked) ?? false;
-      const segKind  = (container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "utterance");
+      const scopeAll = (container.querySelector<HTMLInputElement>("input[name='hub-seg-scope'][value='all']")?.checked) ?? false;
+      const segKind  = (container.querySelector<HTMLSelectElement>("#hub-seg-kind")?.value ?? "utterance");
+      const langHint = (container.querySelector<HTMLSelectElement>("#hub-seg-lang")?.value ?? "en");
       const toSegment = episodes.filter((ep) => {
         const t = ep.sources.find((s) => s.source_key === "transcript");
         if (!t?.available) return false;
@@ -6181,7 +6697,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       });
       if (toSegment.length === 0) return;
       for (const ep of toSegment) {
-        try { await createJob("segment_transcript", ep.episode_id, "transcript", { segment_kind: segKind }); } catch { /* skip */ }
+        try { await createJob("segment_transcript", ep.episode_id, "transcript", { segment_kind: segKind, lang_hint: langHint }); } catch { /* skip */ }
       }
       startJobPoll(container);
       await loadAndRenderSegmentation(container);
@@ -6240,11 +6756,11 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
   // ── Alignement pane wiring ─────────────────────────────────────────────────
 
-  // Confidence slider live display
-  container.querySelector<HTMLInputElement>("#align-min-conf-pre")
+  // Confidence slider live display (hub)
+  container.querySelector<HTMLInputElement>("#hub-align-conf")
     ?.addEventListener("input", (e) => {
       const val = (e.target as HTMLInputElement).value;
-      const display = container.querySelector<HTMLElement>("#align-min-conf-val");
+      const display = container.querySelector<HTMLElement>("#hub-align-conf-val");
       if (display) display.textContent = parseFloat(val).toFixed(2);
     });
 
@@ -6254,10 +6770,10 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   container.querySelector<HTMLButtonElement>("#cons-batch-align")
     ?.addEventListener("click", async () => {
       const episodes   = _cachedEpisodes?.episodes ?? [];
-      const segKind    = (container.querySelector<HTMLSelectElement>("#align-segment-kind-pre")?.value ?? "utterance") as "utterance" | "sentence";
-      const pivotLang  = (container.querySelector<HTMLInputElement>("#align-pivot-lang-pre")?.value.trim() ?? "fr") || "fr";
-      const minConf    = parseFloat(container.querySelector<HTMLInputElement>("#align-min-conf-pre")?.value ?? "0.3");
-      const useSim     = container.querySelector<HTMLInputElement>("#align-use-sim-pre")?.checked ?? false;
+      const segKind    = (container.querySelector<HTMLSelectElement>("#hub-align-seg-kind")?.value ?? "utterance") as "utterance" | "sentence";
+      const pivotLang  = (container.querySelector<HTMLInputElement>("#hub-align-lang")?.value.trim() ?? "fr") || "fr";
+      const minConf    = parseFloat(container.querySelector<HTMLInputElement>("#hub-align-conf")?.value ?? "0.3");
+      const useSim     = container.querySelector<HTMLInputElement>("#hub-align-sim")?.checked ?? false;
 
       const toAlign = episodes.filter((ep) => {
         const t = ep.sources.find((s) => s.source_key === "transcript");
@@ -6310,15 +6826,21 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
     }
     // Lazy-load active Actions sub-view
     if (_activeSection === "actions") {
-      if (_activeActionsSubView === "segmentation") loadAndRenderSegmentation(container);
-      if (_activeActionsSubView === "alignement")   loadAndRenderAlignement(container);
+      if (_activeActionsSubView === "hub")           initHubParams(container);
+      if (_activeActionsSubView === "curation")      initCurationParams(container);
+      if (_activeActionsSubView === "segmentation")  loadAndRenderSegmentation(container);
+      if (_activeActionsSubView === "alignement")    loadAndRenderAlignement(container);
     }
   }
 
-  // ── Refresh episodes button ───────────────────────────────────────────────
+  // ── Refresh buttons ───────────────────────────────────────────────────────
   container
     .querySelector<HTMLButtonElement>("#cons-refresh")!
     .addEventListener("click", () => loadAndRender(container));
+
+  container
+    .querySelector<HTMLButtonElement>("#cons-hub-refresh")
+    ?.addEventListener("click", () => loadAndRender(container));
 
   // ── Batch normalize button ────────────────────────────────────────────────
   container
@@ -6328,7 +6850,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         const { episodes } = await fetchEpisodes();
         await queueBatchNormalize(episodes, container);
       } catch (e) {
-        const errEl = container.querySelector<HTMLElement>(".cons-error");
+        const errEl = container.querySelector<HTMLElement>(".hub-error");
         if (errEl) { errEl.textContent = formatApiError(e); errEl.style.display = "block"; }
       }
     });
