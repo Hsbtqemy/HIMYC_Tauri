@@ -46,11 +46,44 @@ fn write_project_path(app: &AppHandle, path: &str) -> Result<(), String> {
         .map_err(|e| format!("write config: {}", e))
 }
 
+/// Cherche python3 via un login shell pour obtenir le PATH complet de l'utilisateur
+/// (pyenv, conda, brew, etc.) — les apps macOS lancées depuis Finder/Dock
+/// n'héritent pas du PATH de la session shell.
+fn find_python_via_login_shell() -> Option<String> {
+    for shell in ["/bin/zsh", "/bin/bash"] {
+        if let Ok(out) = Command::new(shell)
+            .args(["-lc", "which python3 2>/dev/null || which python 2>/dev/null"])
+            .output()
+        {
+            if out.status.success() {
+                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
+}
+
 fn spawn_uvicorn(project_path: &str) -> Result<Child, String> {
-    // Essaie python3 puis python
-    let candidates = ["python3", "python"];
+    // Candidats Python par ordre de priorité :
+    // 1. Python trouvé via login shell (PATH complet — pyenv, brew, conda)
+    // 2. Chemins courants Homebrew Apple Silicon / Intel
+    // 3. Noms génériques (PATH restreint de l'app)
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(p) = find_python_via_login_shell() {
+        candidates.push(p);
+    }
+    candidates.extend([
+        "/opt/homebrew/bin/python3".into(),  // Homebrew Apple Silicon
+        "/usr/local/bin/python3".into(),     // Homebrew Intel
+        "python3".into(),
+        "python".into(),
+    ]);
+
     let mut last_err = String::new();
-    for candidate in candidates {
+    for candidate in &candidates {
         match Command::new(candidate)
             .args([
                 "-m", "uvicorn",
