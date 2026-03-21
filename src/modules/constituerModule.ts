@@ -2580,8 +2580,21 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
       }
     });
   });
+
+  // N-2 : auto-sélection de l'épisode cible (depuis Documents → "→ Curation")
+  if (_pendingCurationEpisodeId) {
+    const target = _pendingCurationEpisodeId;
+    _pendingCurationEpisodeId = null;
+    const targetItem = listEl.querySelector<HTMLElement>(`.cur-ep-item[data-ep-id="${target}"]`);
+    if (targetItem) {
+      // Simuler le clic pour déclencher le chargement du preview
+      targetItem.click();
+      targetItem.scrollIntoView({ block: "nearest" });
+    }
+  }
 }
 
+let _pendingCurationEpisodeId: string | null = null; // N-2 : pré-sélection depuis Documents
 let _curPreviewEpId: string | null = null;
 let _curPreviewData: { raw: string; clean: string } | null = null;
 let _curPreviewSourceKey: string = "transcript";
@@ -3329,14 +3342,20 @@ function renderDocPanelSource(
   actions.className = "docs-source-actions";
 
   if (src?.available) {
-    // → Inspecter
+    // N-1 : remplace "→ Inspecter" par "→ Curation" avec pré-sélection épisode (N-2)
     const inspBtn = document.createElement("button");
     inspBtn.className = "btn btn-secondary btn-sm";
-    inspBtn.textContent = "→ Inspecter";
+    inspBtn.textContent = "→ Curation";
+    inspBtn.title = "Ouvrir dans la sous-vue Curation (Constituer)";
     inspBtn.addEventListener("click", () => {
-      if (!_ctx) return;
-      _ctx.setInspecterTarget({ episode_id: ep.episode_id, source_key: sourceKey });
-      _ctx.navigateTo("inspecter");
+      // Stocker l'épisode cible pour l'auto-sélection dans loadAndRender (N-2)
+      _pendingCurationEpisodeId = ep.episode_id;
+      // Naviguer vers la sous-vue Curation en cliquant sur le link de nav
+      const root = inspBtn.closest(".cons-root") ?? inspBtn.getRootNode() as HTMLElement;
+      const curationLink = root.querySelector<HTMLButtonElement>('.cons-nav-tree-link[data-subview="curation"]');
+      if (curationLink) {
+        curationLink.click();
+      }
     });
     actions.appendChild(inspBtn);
 
