@@ -1234,6 +1234,11 @@ const CSS = `
   white-space: pre-wrap;
   word-break: break-word;
 }
+.cur-diff-lineonly {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 /* Inline word-level diff tokens */
 .cur-w-del { background:#fef2f2; color:#dc2626; text-decoration:line-through; border-radius:2px; padding:0 1px; }
 .cur-w-ins { background:#f0fdf4; color:#16a34a; border-radius:2px; padding:0 1px; }
@@ -1794,6 +1799,74 @@ const CSS = `
   /* Ne pas faire défiler tout le panneau : seul #dist-table-wrap doit scroller (évite double scroll + bugs) */
   overflow: hidden !important;
   overscroll-behavior: none;
+  width: 100%;
+  max-width: none;
+}
+.dist-body-split {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 12px 18px;
+}
+.dist-main-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dist-sidebar {
+  flex: 0 0 clamp(196px, 22vw, 288px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  box-sizing: border-box;
+}
+.dist-sidebar:has(#dist-ep-chars[hidden]) {
+  flex-basis: 0;
+  flex-grow: 0;
+  width: 0;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.dist-sidebar-head {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+@media (max-width: 880px) {
+  .dist-body-split {
+    flex-direction: column;
+  }
+  .dist-sidebar {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    max-width: none;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding: 12px 0 0;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  .dist-sidebar:has(#dist-ep-chars[hidden]) {
+    display: none;
+  }
 }
 /* Flex + scroll : wrap ne scrolle pas — c'est #dist-table-inner (sinon acts-text-empty centre le tableau → impossibilité de remonter au début). */
 #dist-table-wrap {
@@ -1863,6 +1936,70 @@ const CSS = `
 }
 .dist-sp-input.dist-sp-saved { border-color: var(--success, #16a34a); }
 .dist-sp-input.dist-sp-err { border-color: var(--danger, #dc2626); }
+
+/* ── Distribution : résumé personnages de l'épisode (source courante) — colonne droite ── */
+.dist-ep-chars {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.76rem;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface2) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  min-height: 0;
+}
+.dist-ep-chars.dist-ep-chars-sidebar {
+  margin-bottom: 0;
+  flex: 1;
+  min-height: 120px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-direction: column;
+  align-items: stretch;
+  align-content: flex-start;
+}
+.dist-ep-chars-sidebar .dist-ep-char-chip {
+  align-self: flex-start;
+}
+.dist-ep-chars[hidden] { display: none !important; }
+.dist-ep-chars-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  width: 100%;
+  margin-bottom: 2px;
+}
+.dist-ep-chars-empty {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.4;
+}
+.dist-ep-char-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent, #0f766e) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent, #0f766e) 22%, transparent);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.74rem;
+  max-width: 100%;
+}
+.dist-ep-char-n {
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: var(--text-muted);
+  opacity: 0.9;
+}
 
 /* ── Mode traduction (MX-036) ────────────────────────────────── */
 .seg-trad-toolbar {
@@ -2027,7 +2164,17 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
 }
 .seg-help-muted { font-size: 0.72rem; color: var(--text-muted); font-style: italic; }
 
-.seg-right-root { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+.seg-right-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+  /* Secours si aperçu très long : tout le panneau droit défile (sinon overflow:hidden du parent clippe le bas). */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
 .seg-preview-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
   font-size: 0.76rem; color: var(--text-muted);
@@ -2068,9 +2215,22 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
 .seg-verify-head {
   font-size: 0.72rem; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em;
   margin-bottom: 6px;
+  flex-shrink: 0;
+}
+.seg-segments-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.seg-segments-slot > .seg-warn-utterance,
+.seg-segments-slot > .seg-table-info {
+  flex-shrink: 0;
 }
 .seg-pending-msg {
   font-size: 0.74rem; color: var(--text-muted); padding: 8px 0; line-height: 1.45;
+  flex-shrink: 0;
 }
 .seg-run-actions {
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
@@ -2385,6 +2545,66 @@ function distSegmentMarker(kind: "utterance" | "sentence"): string {
   return kind === "utterance" ? ":utterance:" : ":sentence:";
 }
 
+/** Personnages distincts du catalogue assignés à au moins une ligne (courant : _distCharPick), avec nombre de lignes. */
+function distEpisodeCharacterCounts(): Array<{ id: string; name: string; count: number }> {
+  const byId = new Map(_characters.map((c) => [c.id, c] as const));
+  const countMap = new Map<string, number>();
+  if (_distSourceKind === "cue") {
+    for (const c of _distLoadedCues) {
+      const cid = _distCharPick.get(c.cue_id)?.trim();
+      if (!cid) continue;
+      countMap.set(cid, (countMap.get(cid) ?? 0) + 1);
+    }
+  } else {
+    for (const s of _distLoadedSegments) {
+      const cid = _distCharPick.get(s.segment_id)?.trim();
+      if (!cid) continue;
+      countMap.set(cid, (countMap.get(cid) ?? 0) + 1);
+    }
+  }
+  return [...countMap.entries()]
+    .map(([id, count]) => ({ id, name: byId.get(id)?.canonical ?? id, count }))
+    .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+}
+
+function clearDistributionEpisodeCharsSummary(cnt: HTMLElement): void {
+  const el = cnt.querySelector<HTMLElement>("#dist-ep-chars");
+  if (!el) return;
+  el.innerHTML = "";
+  el.hidden = true;
+}
+
+function updateDistributionEpisodeCharsSummary(cnt: HTMLElement): void {
+  const el = cnt.querySelector<HTMLElement>("#dist-ep-chars");
+  if (!el) return;
+  const epId = cnt.querySelector<HTMLSelectElement>("#dist-ep-select")?.value?.trim() ?? "";
+  if (!epId || _distLoadedEpId !== epId || _characters.length === 0) {
+    el.innerHTML = "";
+    el.hidden = true;
+    return;
+  }
+  const nRows = _distSourceKind === "cue" ? _distLoadedCues.length : _distLoadedSegments.length;
+  if (nRows === 0) {
+    el.innerHTML = "";
+    el.hidden = true;
+    return;
+  }
+  const items = distEpisodeCharacterCounts();
+  if (items.length === 0) {
+    el.innerHTML = `<span class="dist-ep-chars-empty">Aucun personnage assigné (source courante). Les sélections dans le tableau apparaissent ici ; <strong>Enregistrer</strong> pour persister.</span>`;
+    el.hidden = false;
+    return;
+  }
+  const chips = items
+    .map(
+      (x) =>
+        `<span class="dist-ep-char-chip" title="${escapeHtml(x.id)}">${escapeHtml(x.name)} <span class="dist-ep-char-n">${x.count}</span></span>`,
+    )
+    .join("");
+  el.innerHTML = chips;
+  el.hidden = false;
+}
+
 /** Réinitialise la carte des choix depuis les assignations courantes pour l’épisode et la source. */
 function distHydrateCharPick(epId: string, kind: DistSourceKind): void {
   _distCharPick.clear();
@@ -2640,6 +2860,7 @@ function wireDistributionPanel(cnt: HTMLElement): void {
     if (!id) return;
     if (v) _distCharPick.set(id, v);
     else _distCharPick.delete(id);
+    updateDistributionEpisodeCharsSummary(cnt);
   });
 
   root.addEventListener("click", (e) => {
@@ -2690,6 +2911,8 @@ async function renderDistributionTable(cnt: HTMLElement): Promise<void> {
   const summary = cnt.querySelector<HTMLElement>("#dist-summary");
   const epSel = cnt.querySelector<HTMLSelectElement>("#dist-ep-select");
   if (!tableInner || !epSel) return;
+
+  clearDistributionEpisodeCharsSummary(cnt);
 
   const setDistTableInner = (html: string) => {
     const wrap = cnt.querySelector<HTMLElement>("#dist-table-wrap");
@@ -2862,6 +3085,7 @@ async function renderDistributionTable(cnt: HTMLElement): Promise<void> {
       summary.textContent = `0 / ${totalRaw} (filtre) · ${nAssignCur} assign. · ${_characters.length} pers.`;
     }
     setDistTableInner(`<div class="acts-text-empty" style="padding:14px">Aucune ligne ne correspond au filtre.</div>`);
+    updateDistributionEpisodeCharsSummary(cnt);
     return;
   }
 
@@ -2944,6 +3168,7 @@ async function renderDistributionTable(cnt: HTMLElement): Promise<void> {
       <thead><tr>${head}</tr></thead>
       <tbody>${tableRowsFixed.join("")}</tbody>
     </table>`);
+  updateDistributionEpisodeCharsSummary(cnt);
 }
 
 async function saveDistributionAssignments(cnt: HTMLElement): Promise<void> {
@@ -3125,7 +3350,7 @@ async function refreshJobs(container: HTMLElement) {
             const mode     = container.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
             if (panes) {
               _curPreviewData = null; // forcer le rechargement depuis le serveur
-              await loadCurationPreview(panes, _curPreviewEpId, epTitle, mode);
+              await loadCurationPreview(panes, _curPreviewEpId, epTitle, mode, container);
             }
             // Remettre le bouton normaliser à "Re-normaliser" après job terminé
             const normBtn = container.querySelector<HTMLButtonElement>("#cur-apply-normalize");
@@ -3147,6 +3372,11 @@ function startJobPoll(container: HTMLElement) {
 
 function stopJobPoll() {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}
+
+/** Si vrai : pas de surlignage mot-à-mot brut/normalisé (la fusion sous-titres noie tout en « suppressions »). */
+function mergeSubtitleBreaksEnabled(cnt: HTMLElement): boolean {
+  return !!collectNormalizeOpts(cnt).merge_subtitle_breaks;
 }
 
 function collectNormalizeOpts(cnt: HTMLElement): Record<string, unknown> {
@@ -3678,7 +3908,7 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
       if (srcBar) renderCurSourceBar(srcBar, _curPreviewEpSources, container);
       updateCurationModeTabsForSource(container, _curPreviewSourceKey);
 
-      await loadCurationPreview(previewPanes, epId, epTitle, activeMode());
+      await loadCurationPreview(previewPanes, epId, epTitle, activeMode(), container);
       // Bouton normaliser : activer + libellé selon état
       const normBtn = container.querySelector<HTMLButtonElement>("#cur-apply-normalize");
       if (normBtn) {
@@ -3804,7 +4034,9 @@ function scheduleCurationPreview(container: HTMLElement) {
     const panes   = container.querySelector<HTMLElement>("#cur-preview-panes");
     const mode    = container.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
     const epTitle = container.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
-    if (panes) renderCurationPreviewMode(panes, { raw: _curPreviewData.raw, clean }, mode, epTitle, _curSearchRegex);
+    if (panes) {
+      renderCurationPreviewMode(panes, { raw: _curPreviewData.raw, clean }, mode, epTitle, _curSearchRegex, mergeSubtitleBreaksEnabled(container));
+    }
     const fb = container.querySelector<HTMLElement>("#cur-preview-feedback");
     if (fb) {
       fb.style.color = merges > 0 ? "var(--accent,#6366f1)" : "var(--text-muted)";
@@ -3873,7 +4105,7 @@ function exitEditMode(container: HTMLElement) {
   const activeMode = (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
   if (_curPreviewData && _curPreviewEpId) {
     const epTitle = container.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
-    renderCurationPreviewMode(panes, _curPreviewData, activeMode, epTitle);
+    renderCurationPreviewMode(panes, _curPreviewData, activeMode, epTitle, _curSearchRegex, mergeSubtitleBreaksEnabled(container));
   } else {
     panes.innerHTML = `<div class="acts-text-empty" style="width:100%">← Sélectionnez un épisode</div>`;
   }
@@ -4005,7 +4237,7 @@ function renderCurSourceBar(bar: HTMLElement, sources: EpisodeSource[], containe
       const epTitle = activeItem?.dataset.epTitle ?? epId;
       const mode = (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
       renderCurSourceBar(bar, _curPreviewEpSources, container);
-      await loadCurationPreview(panes, epId, epTitle, mode);
+      await loadCurationPreview(panes, epId, epTitle, mode, container);
       updateCurationModeTabsForSource(container, _curPreviewSourceKey);
     });
   });
@@ -4033,6 +4265,7 @@ async function loadCurationPreview(
   epId: string,
   epTitle: string,
   mode: string,
+  container: HTMLElement,
 ) {
   _curPreviewEpId = epId;
   const sourceKey = _curPreviewSourceKey;
@@ -4063,7 +4296,14 @@ async function loadCurationPreview(
   const displayData = _clientPreviewClean !== null
     ? { raw: _curPreviewData.raw, clean: _clientPreviewClean }
     : _curPreviewData;
-  renderCurationPreviewMode(panes, displayData, effectiveMode, epTitle, _curSearchRegex);
+  renderCurationPreviewMode(
+    panes,
+    displayData,
+    effectiveMode,
+    epTitle,
+    _curSearchRegex,
+    mergeSubtitleBreaksEnabled(container),
+  );
 }
 
 // ── Word-level diff (LCS sur tokens) ────────────────────────────────────────
@@ -4110,8 +4350,8 @@ function inlineLineDiff(rawLine: string, cleanLine: string): string {
   }).join("");
 }
 
-/** Construit le HTML du panneau diff. */
-function buildDiffHtml(raw: string, clean: string): { html: string; nChanges: number } {
+/** Construit le HTML du panneau diff. Si `lineOnly`, pas de diff inline (ex. fusion sous-titres). */
+function buildDiffHtml(raw: string, clean: string, lineOnly = false): { html: string; nChanges: number } {
   const rawLines   = raw.split("\n");
   const cleanLines = clean.split("\n");
   const maxLen = Math.max(rawLines.length, cleanLines.length);
@@ -4130,8 +4370,13 @@ function buildDiffHtml(raw: string, clean: string): { html: string; nChanges: nu
       parts.push(`<div class="cur-diff-same">${escapeHtml(r)}</div>`);
     } else {
       nChanges++;
-      // Inline word diff
-      parts.push(`<div class="cur-diff-changed"><div class="cur-diff-ins" style="text-decoration:none">${inlineLineDiff(r, c)}</div></div>`);
+      if (lineOnly) {
+        parts.push(
+          `<div class="cur-diff-changed cur-diff-lineonly"><div class="cur-diff-del">− ${escapeHtml(r)}</div><div class="cur-diff-ins">+ ${escapeHtml(c)}</div></div>`,
+        );
+      } else {
+        parts.push(`<div class="cur-diff-changed"><div class="cur-diff-ins" style="text-decoration:none">${inlineLineDiff(r, c)}</div></div>`);
+      }
     }
   }
   return { html: parts.join(""), nChanges };
@@ -4153,17 +4398,73 @@ function highlightInText(text: string, regex: RegExp): string {
   return parts.join("");
 }
 
-/** Construit le HTML du panneau clean avec changements surlignés en vert. */
-function buildCleanHighlighted(raw: string, clean: string): string {
-  const rawLines   = raw.split("\n");
+/** Une ligne : locuteur + recherche (pour panneaux avec surlignage des changements). */
+function highlightSpeakerOneLine(line: string, searchRegex?: RegExp | null): string {
+  if (line.trim() === "") return `<span class="cur-blank-line">¶</span>`;
+  const m = line.match(/^([A-Z][A-Z0-9 _'.-]*)(: )/i);
+  if (!m) return searchRegex ? highlightInText(line, searchRegex) : escapeHtml(line);
+  const rest = line.slice(m[0].length);
+  const tag = `<span class="cur-speaker-tag">${searchRegex ? highlightInText(m[1], searchRegex) : escapeHtml(m[1])}${escapeHtml(m[2])}</span>`;
+  return tag + (searchRegex ? highlightInText(rest, searchRegex) : escapeHtml(rest));
+}
+
+/** Côté brut : tokens supprimés ou modifiés (sans les insertions propres au normalisé). */
+function inlineLineDiffRaw(rawLine: string, cleanLine: string): string {
+  const ops = tokenDiff(tokenize(rawLine), tokenize(cleanLine));
+  return ops
+    .filter((op) => op.type !== "ins")
+    .map(({ type, text }) => {
+      const t = escapeHtml(text);
+      if (type === "del") return `<span class="cur-w-del">${t}</span>`;
+      return t;
+    })
+    .join("");
+}
+
+/** Panneau brut (aperçu) : rouge = texte qui disparaît ou change. */
+function buildRawHighlighted(raw: string, clean: string, searchRegex?: RegExp | null): string {
+  const rawLines = raw.split("\n");
   const cleanLines = clean.split("\n");
   const maxLen = Math.max(rawLines.length, cleanLines.length);
-  return cleanLines.slice(0, maxLen).map((c, i) => {
-    const r = rawLines[i] ?? "";
-    if (r === c) return escapeHtml(c);
-    if (!r) return `<span class="cur-w-ins">${escapeHtml(c)}</span>`;
-    return inlineLineDiff(r, c);
-  }).join("\n");
+  const out: string[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    const r = rawLines[i];
+    const c = cleanLines[i];
+    if (r === undefined && c !== undefined) {
+      out.push(`<span class="cur-blank-line">¶</span>`);
+    } else if (c === undefined && r !== undefined) {
+      out.push(
+        `<span class="cur-w-del">${searchRegex ? highlightInText(r, searchRegex) : escapeHtml(r)}</span>`,
+      );
+    } else if (r !== undefined && c !== undefined) {
+      if (r === c) out.push(highlightSpeakerOneLine(r, searchRegex));
+      else if (!r && c) out.push(`<span class="cur-blank-line">¶</span>`);
+      else out.push(inlineLineDiffRaw(r, c));
+    }
+  }
+  return out.join("\n");
+}
+
+/** Panneau normalisé (aperçu) : vert = ajouts, rouge dans le diff inline = remplacements. */
+function buildCleanHighlighted(raw: string, clean: string, searchRegex?: RegExp | null): string {
+  const rawLines = raw.split("\n");
+  const cleanLines = clean.split("\n");
+  const maxLen = Math.max(rawLines.length, cleanLines.length);
+  const out: string[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    const r = rawLines[i];
+    const c = cleanLines[i];
+    if (r === undefined && c !== undefined) {
+      out.push(`<span class="cur-w-ins">${searchRegex ? highlightInText(c, searchRegex) : escapeHtml(c)}</span>`);
+    } else if (c === undefined && r !== undefined) {
+      out.push(`<span class="cur-blank-line">¶</span>`);
+    } else if (r !== undefined && c !== undefined) {
+      if (r === c) out.push(highlightSpeakerOneLine(c, searchRegex));
+      else if (!r && c) out.push(`<span class="cur-w-ins">${searchRegex ? highlightInText(c, searchRegex) : escapeHtml(c)}</span>`);
+      else out.push(inlineLineDiff(r, c));
+    }
+  }
+  return out.join("\n");
 }
 
 function renderCurationPreviewMode(
@@ -4172,26 +4473,34 @@ function renderCurationPreviewMode(
   mode: string,
   epTitle: string,
   searchRegex?: RegExp | null,
+  /** Fusion sous-titres : masque le surlignage mot à mot (trop de « faux » suppressions). */
+  suppressInlineChangeHighlight = false,
 ) {
   const hasClean = !!data.clean && data.clean !== data.raw;
-  /** Applique le surlignage de recherche si une regex est active. */
-  const applyHL = (text: string) =>
-    searchRegex ? highlightInText(text, searchRegex) : escapeHtml(text);
 
   const isPreview = _clientPreviewClean !== null;
   const previewTag = isPreview
     ? ` <span style="color:var(--warning,#f59e0b);font-size:0.6rem;font-style:italic">⟳ aperçu</span>`
     : "";
+  const changeLegend =
+    ` <span style="font-size:0.58rem;color:var(--text-muted);font-weight:400">· rouge = supprimé / modifié · vert = ajouté</span>`;
   if (mode === "side") {
     const cleanText = data.clean || data.raw;
+    const previewDiff = cleanText !== data.raw && !suppressInlineChangeHighlight;
+    const rawPaneHtml = previewDiff
+      ? buildRawHighlighted(data.raw, cleanText, searchRegex)
+      : renderRawText(data.raw, searchRegex);
+    const cleanPaneHtml = previewDiff
+      ? buildCleanHighlighted(data.raw, cleanText, searchRegex)
+      : renderRawText(cleanText, searchRegex);
     panes.innerHTML = `
       <div class="cur-pane">
         <div class="cur-pane-head">Brut — ${escapeHtml(epTitle)}</div>
-        <div class="cur-pane-text">${renderRawText(data.raw, searchRegex)}</div>
+        <div class="cur-pane-text">${rawPaneHtml}</div>
       </div>
       <div class="cur-pane">
-        <div class="cur-pane-head">Normalisé${hasClean ? " <span style='color:var(--accent);font-size:0.6rem'>● modifié</span>" : ""}${previewTag}</div>
-        <div class="cur-pane-text">${renderRawText(cleanText, searchRegex)}</div>
+        <div class="cur-pane-head">Normalisé${hasClean ? " <span style='color:var(--accent);font-size:0.6rem'>● modifié</span>" : ""}${previewTag}${previewDiff ? changeLegend : suppressInlineChangeHighlight && cleanText !== data.raw ? ` <span style="font-size:0.58rem;color:var(--text-muted);font-weight:400">· fusion sous-titres : aperçu plein texte</span>` : ""}</div>
+        <div class="cur-pane-text">${cleanPaneHtml}</div>
       </div>`;
   } else if (mode === "raw") {
     panes.innerHTML = `
@@ -4201,11 +4510,12 @@ function renderCurationPreviewMode(
       </div>`;
   } else if (mode === "diff") {
     const cleanText = data.clean || data.raw;
-    const { html, nChanges } = buildDiffHtml(data.raw, cleanText);
+    const { html, nChanges } = buildDiffHtml(data.raw, cleanText, suppressInlineChangeHighlight);
     const totalLines = data.raw.split("\n").length;
+    const diffTitle = suppressInlineChangeHighlight ? "Diff par ligne" : "Diff mot-à-mot";
     panes.innerHTML = `
       <div class="cur-pane" style="overflow:hidden;display:flex;flex-direction:column">
-        <div class="cur-pane-head">Diff mot-à-mot — ${escapeHtml(epTitle)}</div>
+        <div class="cur-pane-head">${diffTitle} — ${escapeHtml(epTitle)}</div>
         <div class="cur-diff-summary">
           <strong>${nChanges}</strong> ligne(s) modifiée(s) sur ${totalLines}
           ${!hasClean ? ' <span style="color:var(--text-muted)">(pas encore normalisé)</span>' : ""}
@@ -4215,14 +4525,18 @@ function renderCurationPreviewMode(
   } else {
     // mode "clean"
     const cleanText = data.clean || data.raw;
+    const previewDiff = cleanText !== data.raw && !suppressInlineChangeHighlight;
+    const cleanPaneOnly = previewDiff
+      ? buildCleanHighlighted(data.raw, cleanText, searchRegex)
+      : renderRawText(cleanText, searchRegex);
     const notNormBanner = !hasClean
       ? `<div style="font-size:0.75rem;color:var(--text-muted);padding:4px 0 8px;font-style:italic">Texte non encore normalisé — cliquez ⚡ sur un épisode pour normaliser.</div>`
       : "";
     panes.innerHTML = `
       <div class="cur-pane">
-        <div class="cur-pane-head">Normalisé — ${escapeHtml(epTitle)}${previewTag}</div>
+        <div class="cur-pane-head">Normalisé — ${escapeHtml(epTitle)}${previewTag}${previewDiff ? changeLegend : suppressInlineChangeHighlight && cleanText !== data.raw ? ` <span style="font-size:0.58rem;color:var(--text-muted);font-weight:400">· fusion sous-titres : aperçu plein texte</span>` : ""}</div>
         ${notNormBanner}
-        <div class="cur-pane-text">${renderRawText(cleanText, searchRegex)}</div>
+        <div class="cur-pane-text">${cleanPaneOnly}</div>
       </div>`;
   }
 }
@@ -8680,7 +8994,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               <span class="cons-toolbar-title">Distribution</span>
               <button class="btn btn-ghost btn-sm" id="cons-refresh-distribution" title="Recharger">↺ Actualiser</button>
             </div>
-            <div class="acts-hub" id="dist-panel-root" style="padding:12px 16px; flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; max-width:900px; width:100%">
+            <div class="acts-hub" id="dist-panel-root" style="padding:12px 16px; flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; width:100%">
               <p style="margin:0 0 10px;font-size:0.82rem;color:var(--text);line-height:1.45">
                 Personnage par ligne selon la <strong>source</strong> (tours / phrases / cues). Catalogue : <strong>Personnages</strong>.
                 Mode <strong>tours</strong> : colonne locuteur (<code>speaker_explicit</code>). Bouton <strong>Alias</strong> : préremplit si le texte commence par un alias.
@@ -8709,8 +9023,16 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
               </div>
               <div id="dist-summary" style="font-size:0.76rem;color:var(--text-muted);margin-bottom:6px"></div>
               <div class="cons-error" id="dist-error" style="display:none;margin-bottom:8px"></div>
-              <div id="dist-table-wrap" style="border:1px solid var(--border);border-radius:8px;background:var(--surface)">
-                <div id="dist-table-inner" class="acts-text-empty" style="padding:14px">Chargement…</div>
+              <div class="dist-body-split">
+                <div class="dist-main-col">
+                  <div id="dist-table-wrap" style="border:1px solid var(--border);border-radius:8px;background:var(--surface)">
+                    <div id="dist-table-inner" class="acts-text-empty" style="padding:14px">Chargement…</div>
+                  </div>
+                </div>
+                <aside class="dist-sidebar" aria-label="Personnages dans l'épisode">
+                  <div class="dist-sidebar-head">Personnages (épisode)</div>
+                  <div id="dist-ep-chars" class="dist-ep-chars dist-ep-chars-sidebar" hidden></div>
+                </aside>
               </div>
             </div>
           </div>
@@ -8998,7 +9320,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           const mode = cnt.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
           const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
           const dd0 = _clientPreviewClean !== null ? { raw: _curPreviewData.raw, clean: _clientPreviewClean } : _curPreviewData;
-          renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, dd0, mode, epTitle, null);
+          renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, dd0, mode, epTitle, null, mergeSubtitleBreaksEnabled(cnt));
         }
         return;
       }
@@ -9027,7 +9349,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       }
       const mode = cnt.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
       const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
-      renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, displayData, mode, epTitle, _curSearchRegex);
+      renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, displayData, mode, epTitle, _curSearchRegex, mergeSubtitleBreaksEnabled(cnt));
     });
 
     // ── Bouton Remplacer et sauvegarder ────────────────────────────────────────
@@ -9059,7 +9381,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         _curSearchRegex = null; // effacer le surlignage recherche après remplacement
         const activeMode = cnt.querySelector<HTMLButtonElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
         const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
-        renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, _curPreviewData, activeMode, epTitle, null);
+        renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, _curPreviewData, activeMode, epTitle, null, mergeSubtitleBreaksEnabled(cnt));
         setTimeout(() => { countEl.textContent = ""; }, 4000);
       } catch (err) {
         countEl.style.color = "var(--danger,#dc2626)";
@@ -9084,6 +9406,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             tab.dataset.mode!,
             epTitle,
             _curSearchRegex,
+            mergeSubtitleBreaksEnabled(cnt),
           );
         }
       });
