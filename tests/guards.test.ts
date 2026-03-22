@@ -16,6 +16,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   guardNormalizeTranscript,
   guardSegmentTranscript,
+  guardResegmentTranscript,
   guardNormalizeSrt,
   guardImportTranscript,
   guardImportSrt,
@@ -106,6 +107,26 @@ describe("guardSegmentTranscript", () => {
 
   it("state=ready_for_alignment → bloqué", () => {
     expect(guardSegmentTranscript(mkSrc("transcript", "ready_for_alignment")).allowed).toBe(false);
+  });
+});
+
+// ── guardResegmentTranscript ─────────────────────────────────────────────
+
+describe("guardResegmentTranscript", () => {
+  it("undefined → bloqué", () => {
+    expect(guardResegmentTranscript(undefined).allowed).toBe(false);
+  });
+
+  it("state=normalized → bloqué (première segmentation)", () => {
+    expect(guardResegmentTranscript(mkSrc("transcript", "normalized")).allowed).toBe(false);
+  });
+
+  it("state=segmented → autorisé", () => {
+    expect(guardResegmentTranscript(mkSrc("transcript", "segmented")).allowed).toBe(true);
+  });
+
+  it("state=ready_for_alignment → autorisé", () => {
+    expect(guardResegmentTranscript(mkSrc("transcript", "ready_for_alignment")).allowed).toBe(true);
   });
 });
 

@@ -332,6 +332,33 @@ export async function fetchNormalizePreview(
   return apiPost<{ clean: string; merges: number }>("/normalize/preview", { text, profile, options });
 }
 
+/** Ligne d’aperçu segmentation (GET /segment/preview) */
+export interface SegmentPreviewLine {
+  n: number;
+  kind: string;
+  text: string;
+  speaker_explicit: string | null;
+}
+
+export interface SegmentPreviewResponse {
+  lang_hint: string;
+  sentences: SegmentPreviewLine[];
+  utterances: SegmentPreviewLine[];
+  n_sentences: number;
+  n_utterances: number;
+}
+
+/** Même moteur Python que le job segment_transcript, sans écriture disque. */
+export async function fetchSegmentPreview(
+  text: string,
+  langHint: string,
+): Promise<SegmentPreviewResponse> {
+  return apiPost<SegmentPreviewResponse>("/segment/preview", {
+    text,
+    lang_hint: langHint,
+  });
+}
+
 export async function importSrt(
   episodeId: string,
   lang: string,

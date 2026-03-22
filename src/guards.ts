@@ -49,8 +49,8 @@ export function guardNormalizeTranscript(
 }
 
 /**
- * Segmenter un transcript : source doit être disponible, état normalized.
- * Bloqué si raw/unknown (normaliser d'abord) ou déjà segmenté.
+ * Première segmentation : transcript normalisé, pas encore segmenté.
+ * Bloqué si raw/unknown ou déjà segmenté (utiliser {@link guardResegmentTranscript}).
  */
 export function guardSegmentTranscript(
   src: EpisodeSource | undefined,
@@ -63,7 +63,26 @@ export function guardSegmentTranscript(
     return block("Normalisez le transcript avant de segmenter.");
   }
   if (s === "segmented" || s === "ready_for_alignment") {
-    return block("Transcript déjà segmenté — aucune action nécessaire.");
+    return block("Transcript déjà segmenté — utilisez « Re-segmenter » pour recalculer depuis le clean.");
+  }
+  return OK;
+}
+
+/**
+ * Re-segmentation : transcript déjà segmenté ; recalcule phrases + tours depuis clean.txt (job forcé).
+ */
+export function guardResegmentTranscript(
+  src: EpisodeSource | undefined,
+): GuardResult {
+  if (!src || !src.available) {
+    return block("Importez et normalisez un transcript avant de segmenter.");
+  }
+  const s = src.state ?? "unknown";
+  if (s === "raw" || s === "unknown") {
+    return block("Normalisez le transcript avant de segmenter.");
+  }
+  if (s === "normalized") {
+    return block("Utilisez « Segmenter » pour une première exécution.");
   }
   return OK;
 }
