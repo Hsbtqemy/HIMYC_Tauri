@@ -35,6 +35,38 @@ export function formatApiError(e: unknown): string {
   return String(e);
 }
 
+/**
+ * FastAPI renvoie souvent les erreurs sous la forme
+ * `{ "detail": { "error": "CODE", "message": "…" } }` (HTTPException).
+ * Sans ce parsing, le client voyait UNKNOWN et le JSON brut.
+ */
+function parseApiErrorBody(body: string): { errorCode: string; message: string } {
+  let errorCode = DEFAULT_ERROR_CODE;
+  let message = body;
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+
+    if (parsed.detail !== undefined) {
+      if (typeof parsed.detail === "string") {
+        message = parsed.detail;
+      } else if (parsed.detail && typeof parsed.detail === "object" && !Array.isArray(parsed.detail)) {
+        const d = parsed.detail as Record<string, unknown>;
+        if (typeof d.error === "string") errorCode = d.error;
+        if (typeof d.message === "string") message = d.message;
+      }
+    }
+    if (errorCode === DEFAULT_ERROR_CODE && typeof parsed.error === "string") {
+      errorCode = parsed.error;
+    }
+    if (message === body && typeof parsed.message === "string") {
+      message = parsed.message as string;
+    }
+  } catch {
+    /* corps non JSON — garder le texte brut */
+  }
+  return { errorCode, message };
+}
+
 async function _loopbackFetch(
   path: string,
   method = "GET",
@@ -62,13 +94,7 @@ async function _loopbackFetch(
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await _loopbackFetch(path);
   if (!res.ok) {
-    let errorCode = DEFAULT_ERROR_CODE;
-    let message = res.body;
-    try {
-      const parsed = JSON.parse(res.body);
-      errorCode = parsed.error ?? errorCode;
-      message = parsed.message ?? message;
-    } catch { /* not JSON */ }
+    const { errorCode, message } = parseApiErrorBody(res.body);
     throw new ApiError(res.status, errorCode, message);
   }
   return JSON.parse(res.body) as T;
@@ -81,13 +107,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 export async function apiPost<T>(path: string, body: unknown, method = "POST"): Promise<T> {
   const res = await _loopbackFetch(path, method, body);
   if (!res.ok) {
-    let errorCode = DEFAULT_ERROR_CODE;
-    let message = res.body;
-    try {
-      const parsed = JSON.parse(res.body);
-      errorCode = parsed.error ?? errorCode;
-      message = parsed.message ?? message;
-    } catch { /* not JSON */ }
+    const { errorCode, message } = parseApiErrorBody(res.body);
     throw new ApiError(res.status, errorCode, message);
   }
   return JSON.parse(res.body) as T;
@@ -96,13 +116,7 @@ export async function apiPost<T>(path: string, body: unknown, method = "POST"): 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   const res = await _loopbackFetch(path, "PUT", body);
   if (!res.ok) {
-    let errorCode = DEFAULT_ERROR_CODE;
-    let message = res.body;
-    try {
-      const parsed = JSON.parse(res.body);
-      errorCode = parsed.error ?? errorCode;
-      message = parsed.message ?? message;
-    } catch { /* not JSON */ }
+    const { errorCode, message } = parseApiErrorBody(res.body);
     throw new ApiError(res.status, errorCode, message);
   }
   return JSON.parse(res.body) as T;
@@ -111,13 +125,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 export async function apiDelete<T>(path: string): Promise<T> {
   const res = await _loopbackFetch(path, "DELETE");
   if (!res.ok) {
-    let errorCode = DEFAULT_ERROR_CODE;
-    let message = res.body;
-    try {
-      const parsed = JSON.parse(res.body);
-      errorCode = parsed.error ?? errorCode;
-      message = parsed.message ?? message;
-    } catch { /* not JSON */ }
+    const { errorCode, message } = parseApiErrorBody(res.body);
     throw new ApiError(res.status, errorCode, message);
   }
   return JSON.parse(res.body) as T;
@@ -134,6 +142,33 @@ export interface HealthResponse {
 
 export async function fetchHealth(): Promise<HealthResponse> {
   return apiGet<HealthResponse>("/health");
+}
+
+/** Crée `corpus.db` (schéma + migrations) si le fichier n’existe pas encore. */
+export interface InitCorpusDbResult {
+  created: boolean;
+  path: string;
+}
+
+export async function initCorpusDb(): Promise<InitCorpusDbResult> {
+  return apiPost<InitCorpusDbResult>("/project/init_corpus_db", {});
+}
+
+/**
+ * Exécute `fn` ; si le backend répond NO_DB (corpus.db absent), tente `initCorpusDb()` puis réessaie une fois.
+ */
+export async function withNoDbRecovery<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.errorCode !== "NO_DB") throw e;
+    try {
+      await initCorpusDb();
+    } catch {
+      throw e;
+    }
+    return await fn();
+  }
 }
 
 // /config
@@ -552,6 +587,20 @@ export async function fetchSubtitleCues(
   return apiGet<SubtitleCuesResponse>(`/episodes/${episodeId}/subtitle_cues?${qs}`);
 }
 
+/** Toutes les cues d’une langue (pagination serveur max 100). */
+export async function fetchAllSubtitleCues(episodeId: string, lang: string): Promise<SubtitleCue[]> {
+  const out: SubtitleCue[] = [];
+  let offset = 0;
+  const limit = 100;
+  for (;;) {
+    const r = await fetchSubtitleCues(episodeId, { lang, limit, offset });
+    out.push(...r.cues);
+    if (out.length >= r.total || r.cues.length === 0) break;
+    offset += limit;
+  }
+  return out;
+}
+
 export async function retargetAlignLink(
   linkId: string,
   cueIdTarget: string,
@@ -667,6 +716,16 @@ export async function fetchCharacters(): Promise<CharactersResponse> {
 
 export async function saveCharacters(characters: Character[]): Promise<{ saved: number }> {
   return apiPut<{ saved: number }>("/characters", { characters });
+}
+
+/** Locuteurs distincts des segments → entrées catalogue (équivalent PyQt « Importer depuis les segments »). */
+export async function importCharactersFromSegments(episodeIds?: string[] | null): Promise<{
+  added: number;
+  total_characters: number;
+  distinct_speakers_found: number;
+  message?: string;
+}> {
+  return apiPost("/characters/import_from_segments", { episode_ids: episodeIds ?? null });
 }
 
 export async function fetchAssignments(): Promise<AssignmentsResponse> {

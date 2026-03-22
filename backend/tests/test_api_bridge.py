@@ -411,3 +411,22 @@ def test_jobs_persistence(tmp_path):
         assert (tmp_path / "jobs.json").exists()
     finally:
         del os.environ["HIMYC_PROJECT_PATH"]
+
+
+def test_init_corpus_db_creates_then_idempotent(tmp_path):
+    """POST /project/init_corpus_db crée corpus.db une fois puis created=false."""
+    os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
+    try:
+        db_path = tmp_path / "corpus.db"
+        assert not db_path.exists()
+        r = client.post("/project/init_corpus_db")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["created"] is True
+        assert data["path"] == str(db_path)
+        assert db_path.is_file()
+        r2 = client.post("/project/init_corpus_db")
+        assert r2.status_code == 200
+        assert r2.json()["created"] is False
+    finally:
+        del os.environ["HIMYC_PROJECT_PATH"]

@@ -67,10 +67,9 @@ Complète : [AUDIT_UI_2026-03.md](./AUDIT_UI_2026-03.md), [AUDIT_VISUEL_2026-03.
 - Recherche principale : `catch` affiche `errorCode — message` pour `ApiError`, sinon `String(e)` — **cohérent**.
 - Facettes `/query/facets` : en échec, **repli calcul client** depuis les hits — l’utilisateur ne voit pas d’erreur ; les analytics peuvent être partiels **sans info** (comportement dégradé acceptable mais opaque).
 
-### 5.3 Inspecter (`inspecterModule.ts`)
+### 5.3 ~~Inspecter~~ (supprimé)
 
-- Chargement source : `ApiError` formatée avec code + message.
-- Jobs : handlers avec `ApiError` ; poll : `catch { stopJobPoll() }` — **silencieux** si le backend tombe pendant le poll (le job peut sembler “bloqué” jusqu’au prochain refresh manuel).
+L’ancien module a été retiré ; la lecture / normalisation / segmentation est gérée dans **Constituer → Actions** (Curation, etc.).
 
 ### 5.4 Aligner (`alignerModule.ts`)
 
@@ -101,7 +100,7 @@ Complète : [AUDIT_UI_2026-03.md](./AUDIT_UI_2026-03.md), [AUDIT_VISUEL_2026-03.
 
 | Pattern | Où |
 |---------|-----|
-| `` `${e.errorCode} — ${e.message}` `` | Inspecter, Aligner, nombreux blocs Constituer, Concordancier recherche, partie Exporter |
+| `` `${e.errorCode} — ${e.message}` `` | Aligner, nombreux blocs Constituer, Concordancier recherche, partie Exporter |
 | `e.message` seul | Plusieurs handlers Exporter, Constituer (feedback court), QA JSON |
 | `String(e)` | Batch normalize Constituer, certains catch génériques |
 
@@ -130,7 +129,7 @@ Complète : [AUDIT_UI_2026-03.md](./AUDIT_UI_2026-03.md), [AUDIT_VISUEL_2026-03.
 
 - **`ApiError`** structuré avec `status` et `errorCode`.
 - **`guards.ts`** + **`formatJobError`** pour lisibilité métier.
-- **Tokens anti-course** : `_searchToken` (Concordancier), `_loadToken` (Inspecter) limitent affichage de données obsolètes.
+- **Tokens anti-course** : `_searchToken` (Concordancier), etc., pour limiter l’affichage de données obsolètes.
 - **Shell** : feedback réseau périodique et toasts projet.
 
 ---
@@ -140,7 +139,7 @@ Complète : [AUDIT_UI_2026-03.md](./AUDIT_UI_2026-03.md), [AUDIT_VISUEL_2026-03.
 1. Envelopper ou garde-fou autour de **`JSON.parse`** après succès HTTP (try/catch → erreur typée / message “Réponse invalide”).
 2. Remplacer les **silences** les plus gênants par au moins un **hint UI** (badge projet Exporter, sélecteur import Constituer, config Hub) ou un log structuré.
 3. ~~**Uniformiser** l’affichage `ApiError` (petit helper `formatApiUserMessage(e)`).~~ ✅ `formatApiError(e: unknown): string` ajouté dans `src/api.ts` ; appliqué à Exporter (8 handlers) et Constituer batch normalize.
-4. **Poll jobs Inspecter** : en cas d’échec réseau, message court ou reprise après `onStatusChange`.
+4. **Distribution** (Constituer) : quand la table d’assignations sera interactive, appliquer le même soin `ApiError` / reprise réseau que sur Curation.
 5. Documenter dans le code les **dégradations silencieuses** (facettes Concordancier en repli client).
 6. **`initShell().catch(console.error)`** : ajouter un fallback UI (toast ou bannière) si le shell ne monte pas.
 

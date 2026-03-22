@@ -3,13 +3,14 @@
  *
  * Navigation restructurée AGRAFES x HIMYC :
  * - Hub (landing) → Concordancier · Constituer · Exporter
- * - Inspecter / Aligner = sous-vues (pas d'onglet top-level)
+ * - Sous-vue « Aligner » uniquement (pas d'onglet top-level) — pas de module Inspecter au shell
  * - Header : brand + [nav tabs] + [zone projet] + statut API
  * - Zone projet : badge "📁 <nom>" + bouton "Changer…" (Tauri seulement)
  * - Couleurs d'accent par mode
  * - Lifecycle modules : mount / dispose
- * - Persistence localStorage : last_mode (hors hub)
+ * - À chaque ouverture d’app : **hub** (pas de restauration du dernier mode)
  * - Healthcheck + polling 30s
+ * - Sidebar : rail icônes (toujours visible) ; survol ou focus clavier déplie libellés (Explorer · Préparer · Exporter)
  */
 
 import type { ShellContext, BackendStatus, AlignerHandoff } from "./context.ts";
@@ -72,6 +73,8 @@ const SHELL_CSS = `
   :root {
     --accent:            #2c5f9e;
     --accent-header-bg:  #1a1a2e;
+    --shell-rail-w:           52px;
+    --shell-sidebar-expanded-w: 192px;
   }
 
   #shell-header {
@@ -99,23 +102,30 @@ const SHELL_CSS = `
     margin-right: 0.25rem;
   }
 
-  /* ── Sidebar ────────────────────────────────────────────────── */
+  /* ── Sidebar : rail icônes + dépliage au survol / focus ─────── */
   #shell-sidebar {
+    position: fixed;
+    top: 44px;
+    left: 0;
+    bottom: 0;
+    width: var(--shell-rail-w);
+    z-index: 9990;
     background: #12151f;
     border-right: 1px solid rgba(255,255,255,0.07);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    transition: transform 0.22s ease;
+    transition: width 0.22s ease, box-shadow 0.22s ease;
   }
-  #shell-sidebar.collapsed {
-    transform: translateX(-100%);
+  #shell-sidebar:hover,
+  #shell-sidebar:focus-within {
+    width: var(--shell-sidebar-expanded-w);
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.28);
+    z-index: 10050;
   }
+
   #app {
     transition: padding-left 0.22s ease;
-  }
-  #app.sidebar-hidden {
-    padding-left: 0 !important;
   }
 
   .sidebar-section-label {
@@ -124,6 +134,17 @@ const SHELL_CSS = `
     text-transform: uppercase;
     letter-spacing: 0.1em;
     color: rgba(255,255,255,0.22);
+    padding: 0 0.9rem;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: max-height 0.2s ease, opacity 0.18s ease, padding 0.2s ease;
+  }
+  #shell-sidebar:hover .sidebar-section-label,
+  #shell-sidebar:focus-within .sidebar-section-label {
+    max-height: 3rem;
+    opacity: 1;
     padding: 0.9rem 0.9rem 0.3rem;
   }
 
@@ -137,12 +158,23 @@ const SHELL_CSS = `
     font-size: 0.83rem;
     font-family: inherit;
     border: none;
-    border-left: 3px solid transparent;
     background: none;
     width: 100%;
+    min-width: 0;
     text-align: left;
-    transition: color 0.14s, background 0.14s, border-color 0.14s;
+    box-shadow: inset 3px 0 0 transparent;
+    transition: color 0.14s, background 0.14s, box-shadow 0.14s, justify-content 0.18s ease;
     user-select: none;
+  }
+  /* Rail replié : icône seule, centrée sur toute la largeur de colonne */
+  #shell-sidebar:not(:hover):not(:focus-within) .sidebar-nav-item {
+    justify-content: center;
+    gap: 0;
+    padding: 0.62rem 0;
+    box-shadow: inset 3px 0 0 transparent;
+  }
+  #shell-sidebar:not(:hover):not(:focus-within) .sidebar-nav-item.active {
+    box-shadow: inset 3px 0 0 var(--accent);
   }
   .sidebar-nav-item:hover {
     color: rgba(255,255,255,0.9);
@@ -152,13 +184,31 @@ const SHELL_CSS = `
     color: #fff;
     font-weight: 600;
     background: rgba(255,255,255,0.09);
-    border-left-color: var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
   }
   .sidebar-nav-icon {
-    font-size: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
-    width: 18px;
-    text-align: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    font-size: 1.05rem;
+    line-height: 1;
+  }
+  .sidebar-nav-text {
+    display: inline-block;
+    overflow: hidden;
+    white-space: nowrap;
+    max-width: 0;
+    min-width: 0;
+    opacity: 0;
+    transition: max-width 0.22s ease, opacity 0.16s ease;
+  }
+  #shell-sidebar:hover .sidebar-nav-text,
+  #shell-sidebar:focus-within .sidebar-nav-text {
+    max-width: 200px;
+    opacity: 1;
   }
   .sidebar-spacer { flex: 1; }
 
@@ -396,8 +446,19 @@ async function _changeProject() {
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
 
+/** Après clic sur la nav, le bouton garde le focus → :focus-within garde la sidebar ouverte ; on retire le focus pour retrouver le rail icônes (sauf si la souris survole encore la barre). */
+function _blurSidebarFocus() {
+  queueMicrotask(() => {
+    const ae = document.activeElement;
+    if (ae instanceof HTMLElement && _sidebarEl?.contains(ae)) ae.blur();
+  });
+}
+
 function _navigateTo(mode: Mode) {
-  if (mode === _currentMode && _appEl.childElementCount > 0) return;
+  if (mode === _currentMode && _appEl.childElementCount > 0) {
+    _blurSidebarFocus();
+    return;
+  }
 
   MODE_CONFIGS[_currentMode].dispose();
 
@@ -407,10 +468,6 @@ function _navigateTo(mode: Mode) {
   }
 
   _currentMode = mode;
-  if (mode !== "hub") {
-    // Ne pas sauvegarder "hub" — on y revient rarement via localStorage
-    localStorage.setItem("himyc_last_mode", mode);
-  }
 
   // Accent couleur
   const accent       = MODE_ACCENT[mode]       ?? "#2c5f9e";
@@ -421,13 +478,10 @@ function _navigateTo(mode: Mode) {
 
   _rebuildNav();
 
-  // Sidebar : ouverte sur le hub, repliée dans les modules
-  const isHub = mode === "hub";
-  _sidebarEl?.classList.toggle("collapsed",     !isHub);
-  _appEl.classList.toggle("sidebar-hidden", !isHub);
-
   _appEl.innerHTML = "";
   MODE_CONFIGS[mode].mount(_appEl, shellContext);
+
+  _blurSidebarFocus();
 }
 
 // ─── Header ───────────────────────────────────────────────────────────────────
@@ -462,16 +516,21 @@ function _rebuildNav() {
 
     const breadcrumb = document.createElement("div");
     breadcrumb.className = "shell-breadcrumb";
-    const modeLabel   = "Aligner";
-    const parentLabel = _prevNavMode.charAt(0).toUpperCase() + _prevNavMode.slice(1);
-    breadcrumb.innerHTML = `${parentLabel} <span style="opacity:0.4">›</span> <span class="shell-breadcrumb-current">${modeLabel}</span>`;
+    const modeLabel = "Aligner";
+    const pm = _prevNavMode as string;
+    const parentShellLabel =
+      pm === "concordancier" ? "Explorer"
+      : pm === "constituer" ? "Préparer"
+      : pm === "exporter" ? "Exporter"
+      : pm.charAt(0).toUpperCase() + pm.slice(1);
+    breadcrumb.innerHTML = `${parentShellLabel} <span style="opacity:0.4">›</span> <span class="shell-breadcrumb-current">${modeLabel}</span>`;
     _headerEl.insertBefore(breadcrumb, insertBefore);
   }
 }
 
 const SIDEBAR_ITEMS: Array<{ mode: NavMode; icon: string; label: string }> = [
-  { mode: "concordancier", icon: "🔍", label: "Concordancier" },
-  { mode: "constituer",    icon: "📂", label: "Constituer" },
+  { mode: "concordancier", icon: "🔍", label: "Explorer" },
+  { mode: "constituer",    icon: "📂", label: "Préparer" },
   { mode: "exporter",      icon: "📤", label: "Exporter" },
 ];
 
@@ -483,9 +542,11 @@ function _buildSidebar() {
 
   SIDEBAR_ITEMS.forEach(({ mode, icon, label }) => {
     const btn = document.createElement("button");
+    btn.type = "button";
     btn.className = "sidebar-nav-item";
     btn.dataset.mode = mode;
-    btn.innerHTML = `<span class="sidebar-nav-icon">${icon}</span>${label}`;
+    btn.title = label;
+    btn.innerHTML = `<span class="sidebar-nav-icon" aria-hidden="true">${icon}</span><span class="sidebar-nav-text">${label}</span>`;
     btn.addEventListener("click", () => _navigateTo(mode));
     _sidebarEl.appendChild(btn);
   });
@@ -585,11 +646,6 @@ export async function initShell() {
   // Toujours démarrer sur le hub (pas de restauration du dernier mode)
   _buildHeader();
   _buildSidebar();
-
-  // Init état sidebar selon le mode restauré
-  const isHub = _currentMode === "hub";
-  _sidebarEl.classList.toggle("collapsed",     !isHub);
-  _appEl.classList.toggle("sidebar-hidden", !isHub);
 
   _rebuildNav();
   MODE_CONFIGS[_currentMode].mount(_appEl, shellContext);

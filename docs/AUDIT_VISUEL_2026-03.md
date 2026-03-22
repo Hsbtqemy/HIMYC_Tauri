@@ -14,7 +14,7 @@ Erreurs / API / silences : [AUDIT_ERREURS_2026-03.md](./AUDIT_ERREURS_2026-03.md
 
 | Token | Valeur | Usage |
 |--------|--------|--------|
-| `--brand` | `#4361ee` | Boutons `.btn-primary`, focus outline, onglets Inspecter actifs |
+| `--brand` | `#4361ee` | Boutons `.btn-primary`, focus outline, onglets actifs (shell / modules) |
 | `--brand-dark` | `#3a56d4` | Hover primary |
 | `--surface` | `#ffffff` | Cartes, champs |
 | `--surface2` | `#f8f9fa` | Fonds alternés, `.exp-root`, barres secondaires |
@@ -43,7 +43,7 @@ Erreurs / API / silences : [AUDIT_ERREURS_2026-03.md](./AUDIT_ERREURS_2026-03.md
 | Mode | Accent (aperçu) | Ambiance |
 |------|-------------------|----------|
 | Hub | `#1a1a2e` | Navbar très sombre |
-| Concordancier / Inspecter | `#2c5f9e` / header `#1e4a80` | Bleu outil |
+| Concordancier (shell) | `#2c5f9e` / header `#1e4a80` | Bleu outil |
 | Constituer | `#1a7f4e` / `#145a38` | Vert corpus |
 | Exporter | `#b45309` / `#92400e` | Ambre / export |
 | Aligner | `#7c3aed` / `#4c1d95` | Violet pipeline |
@@ -163,15 +163,9 @@ Toutes les zones obtiennent un blanc contrôlé (`#ffffff`) ; la modale Constitu
 
 ---
 
-### 4.5 Inspecter (`inspecterModule.ts`)
+### 4.5 ~~Module Inspecter~~ (supprimé)
 
-| Aspect | Observation |
-|--------|-------------|
-| **Chrome** | Toolbar + barre actions gris `#surface` / `surface2`, très “outil de lecture”. |
-| **Badges état** | Pastels Tailwind-like (`#fef9c3`, `#dbeafe`, `#dcfce7`, etc.) — **même famille** que meta panel et patterns modernes. |
-| **Onglets RAW/CLEAN** | Actif : `var(--brand)` underline — **bleu brand**, pas `--accent** du mode (souvent identique en bleu si Concordancier, différent en Constituer vert). |
-| **Texte** | Monospace `0.78rem`, line-height confortable `1.65`. |
-| **Bouton Aligner** | Secondary sm, cohérent avec le DS boutons. |
+L’écran lecture RAW/CLEAN n’existe plus en tant que module shell ; l’équivalent fonctionnel est **Curation** (Constituer → Actions).
 
 ---
 

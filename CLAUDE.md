@@ -10,7 +10,7 @@ Monorepo contenant le frontend Tauri **et** le backend Python FastAPI de HIMYC.
 - **Frontend** : TypeScript / Vite / Tauri — `src/`, `src-tauri/`
 - **Backend** : Python FastAPI — `backend/`
 - Serveur HTTP sur `http://127.0.0.1:8765`
-- 41+ routes backend couplées au frontend
+- 42+ routes backend couplées au frontend (dont `POST /project/init_corpus_db` pour créer `corpus.db` si absent)
 - Base de données SQLite avec FTS5, 8 migrations
 - Le backend est lancé automatiquement par Tauri via `python3 -m uvicorn howimetyourcorpus.api.server:app`
 
@@ -30,7 +30,7 @@ HIMYC_Tauri/
 │   ├── main.ts                 # Point d'entrée, routing modules
 │   ├── shell.ts                # Shell UI (sidebar, navigation)
 │   ├── context.ts              # ShellContext partagé
-│   ├── modules/                # Vues : constituer, inspecter, aligner, exporter…
+│   ├── modules/                # Vues : hub, concordancier, constituer, exporter, aligner (pas d’inspecter)
 │   ├── features/               # Composants réutilisables (metaPanel, etc.)
 │   ├── ui/                     # Utilitaires DOM
 │   └── guards.ts               # Gardes métier

@@ -10,11 +10,12 @@ Le token HIMYC_API_TOKEN est optionnel (pilote : non requis).
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -118,6 +119,50 @@ def _get_db(path: Path = Depends(_require_project_path)) -> CorpusDB:
             },
         )
     return CorpusDB(db_path)
+
+
+def _distinct_speakers_from_segments_jsonl(store: ProjectStore, episode_ids: list[str]) -> list[str]:
+    """Locuteurs distincts depuis segments.jsonl (flux API sans upsert SQLite)."""
+    if not episode_ids:
+        return []
+    labels: set[str] = set()
+    root = store.root_dir
+    for eid in episode_ids:
+        path = root / EPISODES_DIR_NAME / eid / SEGMENTS_JSONL_FILENAME
+        if not path.is_file():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            sp = (obj.get("speaker_explicit") or "").strip()
+            if sp:
+                labels.add(sp)
+    return sorted(labels)
+
+
+# ─── /project/init_corpus_db — création paresseuse de corpus.db ───────────────
+
+
+@app.post("/project/init_corpus_db", summary="Crée corpus.db si absent (schéma + migrations)")
+def init_corpus_db(
+    store: ProjectStore = Depends(_get_store),
+) -> dict[str, Any]:
+    """
+    Les projets créés hors flux PyQt peuvent n'avoir que config.toml / fichiers épisodes
+    sans base SQLite. Les endpoints qui exigent _get_db() renvoient NO_DB tant que ce
+    fichier n'existe pas. Cette route applique CorpusDB.init() une fois.
+    """
+    db_path = store.get_db_path()
+    if db_path.exists():
+        return {"created": False, "path": str(db_path)}
+    db = CorpusDB(db_path)
+    db.init()
+    return {"created": True, "path": str(db_path)}
 
 
 # ─── /health ──────────────────────────────────────────────────────────────────
@@ -1288,6 +1333,13 @@ def query_facets(
 class _CharacterCatalogBody(BaseModel):
     characters: list[dict[str, Any]]
 
+
+class _ImportSpeakersBody(BaseModel):
+    """Si episode_ids est vide ou absent, tous les épisodes de l'index sont pris (comportement PyQt)."""
+
+    episode_ids: list[str] | None = None
+
+
 class _AssignmentsBody(BaseModel):
     assignments: list[dict[str, Any]]
 
@@ -1310,6 +1362,88 @@ def save_characters(
             detail={"error": "INVALID_CATALOG", "message": str(exc)},
         ) from exc
     return {"saved": len(body.characters)}
+
+
+@app.post(
+    "/characters/import_from_segments",
+    status_code=200,
+    summary="Ajoute au catalogue les locuteurs distincts (speaker_explicit) des segments (parité PyQt)",
+)
+def import_characters_from_segments(
+    body: _ImportSpeakersBody | None = Body(default=None),
+    store: ProjectStore = Depends(_get_store),
+    db: CorpusDB | None = Depends(_get_db_optional),
+) -> dict[str, Any]:
+    """Même logique que PersonnagesTabWidget._import_speakers_from_segments."""
+    index = store.load_series_index()
+    if not index or not index.episodes:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "NO_EPISODES",
+                "message": "Aucun épisode dans l'index. Ajoutez des épisodes au corpus.",
+            },
+        )
+    b = body or _ImportSpeakersBody()
+    episode_ids = list(b.episode_ids) if b.episode_ids else [e.episode_id for e in index.episodes]
+    if not episode_ids:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "NO_EPISODE_IDS", "message": "Liste d'épisodes vide."},
+        )
+    speakers: list[str] = []
+    if db is not None:
+        speakers = db.get_distinct_speaker_explicit(episode_ids)
+    if not speakers:
+        speakers = _distinct_speakers_from_segments_jsonl(store, episode_ids)
+    if not speakers:
+        return {
+            "added": 0,
+            "total_characters": len(store.load_character_names()),
+            "distinct_speakers_found": 0,
+            "message": (
+                "Aucun locuteur (speaker_explicit) dans les segments. "
+                "Segmentez d'abord les épisodes."
+            ),
+        }
+    characters = list(store.load_character_names())
+    langs = store.load_project_languages()
+    first_lang = (langs[0] if langs else "en").lower()
+    existing_canonical_lower = {(ch.get("canonical") or "").strip().lower() for ch in characters}
+    existing_id_lower = {(ch.get("id") or "").strip().lower() for ch in characters}
+    added = 0
+    for name in speakers:
+        n = (name or "").strip()
+        if not n:
+            continue
+        norm_id = n.lower().replace(" ", "_")
+        if n.lower() in existing_canonical_lower or norm_id in existing_id_lower:
+            continue
+        row: dict[str, Any] = {
+            "id": norm_id,
+            "canonical": n,
+            "names_by_lang": {first_lang: n},
+        }
+        characters.append(row)
+        existing_canonical_lower.add(n.lower())
+        existing_id_lower.add(norm_id)
+        added += 1
+    if added:
+        try:
+            store.save_character_names(characters)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "INVALID_CATALOG", "message": str(exc)},
+            ) from exc
+    out: dict[str, Any] = {
+        "added": added,
+        "total_characters": len(characters),
+        "distinct_speakers_found": len(speakers),
+    }
+    if added == 0:
+        out["message"] = "Tous les locuteurs trouvés sont déjà dans le catalogue."
+    return out
 
 
 @app.get("/assignments", summary="Liste les assignations personnage (MX-021c)")

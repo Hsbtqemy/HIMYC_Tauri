@@ -11,33 +11,70 @@ import { injectGlobalCss, escapeHtml } from "../ui/dom";
 import { fetchConfig, fetchQaReport, fetchCharacters } from "../api";
 
 const CSS = `
-/* ── Racine ───────────────────────────────────────────────────────────── */
+/* ── Racine : image plein cadre + contenu au-dessus ───────────────────── */
 .hub-root {
+  position: relative;
+  min-height: 100%;
+  overflow-x: hidden;
+  background: #e9ecf1;
+}
+
+/* Image décorative grande, type « hero » plein écran */
+.hub-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    url("/ted-barney.png") center 28% / cover no-repeat;
+  pointer-events: none;
+}
+.hub-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* Léger voile un peu plus marqué pour compenser les panneaux plus transparents */
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(240, 242, 245, 0.88) 38%,
+    rgba(240, 242, 245, 0.98) 72%,
+    #f0f2f5 100%
+  );
+  pointer-events: none;
+}
+
+.hub-content {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   min-height: 100%;
-  background: #f0f2f5;
-  padding: 3rem 2rem 2.5rem;
+  padding: 2.75rem 2rem 2.5rem;
   gap: 0;
 }
 
 /* ── Titre ────────────────────────────────────────────────────────────── */
 .hub-hero {
   text-align: center;
-  margin-bottom: 2.75rem;
+  margin-bottom: 2.5rem;
+  max-width: 36rem;
 }
 .hub-hero-title {
-  font-size: 2.2rem;
+  font-size: clamp(1.85rem, 4.5vw, 2.45rem);
   font-weight: 700;
-  color: #1a1a2e;
-  margin: 0 0 0.3rem;
+  color: #141428;
+  margin: 0 0 0.35rem;
   letter-spacing: -0.5px;
+  text-shadow:
+    0 0 24px rgba(255, 255, 255, 0.95),
+    0 1px 0 rgba(255, 255, 255, 0.6);
 }
 .hub-hero-sub {
   font-size: 0.95rem;
-  color: #6c757d;
+  color: #3d4450;
   margin: 0;
+  text-shadow: 0 0 18px rgba(255, 255, 255, 0.85);
 }
 
 /* ── Cartes ───────────────────────────────────────────────────────────── */
@@ -50,14 +87,17 @@ const CSS = `
 }
 
 .hub-card {
-  background: #fff;
-  border: 1px solid #dde1e8;
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(221, 225, 232, 0.58);
   border-radius: 10px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
   padding: 2rem 2.5rem;
   width: 240px;
+  box-sizing: border-box;
   cursor: pointer;
-  transition: box-shadow 0.18s, transform 0.12s, border-color 0.18s;
+  transition: box-shadow 0.18s, transform 0.12s, border-color 0.18s, background 0.18s;
   text-align: center;
   user-select: none;
   display: flex;
@@ -65,7 +105,10 @@ const CSS = `
   align-items: center;
   gap: 0.25rem;
 }
-.hub-card:hover  { transform: translateY(-3px); }
+.hub-card:hover  {
+  transform: translateY(-3px);
+  background: rgba(255, 255, 255, 0.68);
+}
 .hub-card:active { transform: translateY(0); }
 
 .hub-card-concordancier:hover { box-shadow: 0 6px 20px rgba(44,95,158,0.22);  border-color: #2c5f9e; }
@@ -82,9 +125,9 @@ const CSS = `
   border-radius: 20px;
   margin-bottom: 0.6rem;
 }
-.hub-card-badge-concordancier { background: #dbeafe; color: #1e4a80; }
-.hub-card-badge-constituer    { background: #d1fae5; color: #145a38; }
-.hub-card-badge-exporter      { background: #fff3cd; color: #92400e; }
+.hub-card-badge-concordancier { background: rgba(219, 234, 254, 0.72); color: #1e4a80; }
+.hub-card-badge-constituer    { background: rgba(209, 250, 229, 0.72); color: #145a38; }
+.hub-card-badge-exporter      { background: rgba(255, 243, 205, 0.72); color: #92400e; }
 
 .hub-card h2 {
   font-size: 1.05rem;
@@ -104,7 +147,7 @@ const CSS = `
   width: 100%;
   max-width: 580px;
   height: 1px;
-  background: #dde1e8;
+  background: linear-gradient(90deg, transparent, rgba(180, 188, 200, 0.85), transparent);
   margin-bottom: 1.75rem;
 }
 
@@ -143,8 +186,10 @@ const CSS = `
   font-family: ui-monospace, "SF Mono", monospace;
   color: #1a1a2e;
   font-weight: 600;
-  background: #fff;
-  border: 1px solid #dde1e8;
+  background: rgba(255, 255, 255, 0.45);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(221, 225, 232, 0.52);
   border-radius: 6px;
   padding: 4px 12px;
   max-width: 320px;
@@ -159,8 +204,10 @@ const CSS = `
 }
 
 .hub-project-btn {
-  background: #fff;
-  border: 1px solid #dde1e8;
+  background: rgba(255, 255, 255, 0.48);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(221, 225, 232, 0.55);
   border-radius: 6px;
   color: #495057;
   font-size: 0.8rem;
@@ -170,13 +217,15 @@ const CSS = `
   transition: background 0.12s, border-color 0.12s;
   white-space: nowrap;
 }
-.hub-project-btn:hover:not(:disabled) { background: #f0f4ff; border-color: #2c5f9e; color: #2c5f9e; }
+.hub-project-btn:hover:not(:disabled) { background: rgba(240, 244, 255, 0.72); border-color: #2c5f9e; color: #2c5f9e; }
 .hub-project-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Onboarding ───────────────────────────────────────────────────────── */
 .hub-onboard {
-  background: #f0fdf4;
-  border: 1.5px solid #86efac;
+  background: rgba(240, 253, 244, 0.68);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1.5px solid rgba(134, 239, 172, 0.6);
   border-radius: 8px;
   padding: 0.85rem 1.2rem;
   display: flex;
@@ -203,12 +252,11 @@ const CSS = `
 }
 .hub-onboard-cta:hover { background: #15803d; }
 
-/* ── KPI strip ────────────────────────────────────────────────────────── */
+/* ── KPI strip (grille : pas de débordement horizontal quand la fenêtre rétrécit) ─ */
 .hub-kpi-strip {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 6px;
-  flex-wrap: wrap;
-  justify-content: center;
   max-width: 580px;
   width: 100%;
 }
@@ -216,11 +264,14 @@ const CSS = `
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: #fff;
-  border: 1px solid #dde1e8;
+  justify-content: center;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.45);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(221, 225, 232, 0.52);
   border-radius: 8px;
-  padding: 6px 14px;
-  min-width: 76px;
+  padding: 6px 10px;
 }
 .hub-kpi-val {
   font-size: 1.15rem;
@@ -265,6 +316,89 @@ const CSS = `
 }
 .hub-status-dot.online  { background: #34d399; }
 .hub-status-dot.offline { background: #f87171; }
+
+/* ── Breakpoints (tablette / mobile) ─────────────────────────────────── */
+@media (max-width: 900px) {
+  .hub-content {
+    padding: 2.25rem 1.35rem 2.25rem;
+  }
+  .hub-bg {
+    background-position: center 24%;
+  }
+}
+
+@media (max-width: 640px) {
+  .hub-content {
+    padding: 1.5rem 0.9rem 1.75rem;
+  }
+  .hub-hero {
+    margin-bottom: 1.65rem;
+  }
+  .hub-hero-sub {
+    font-size: 0.88rem;
+    padding: 0 0.25rem;
+  }
+  .hub-cards {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.9rem;
+    width: 100%;
+    max-width: min(360px, 100%);
+    margin-bottom: 2rem;
+  }
+  .hub-card {
+    width: 100%;
+    max-width: none;
+    padding: 1.35rem 1.15rem;
+  }
+  .hub-bg {
+    background-position: center 32%;
+  }
+  .hub-project-section,
+  .hub-sep {
+    max-width: 100%;
+  }
+  .hub-project-row {
+    width: 100%;
+    flex-direction: column;
+  }
+  .hub-project-name {
+    max-width: 100%;
+    text-align: center;
+  }
+  .hub-onboard {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.65rem;
+  }
+  .hub-kpi-strip {
+    gap: 5px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .hub-kpi {
+    padding: 6px 6px;
+  }
+  .hub-kpi-val {
+    font-size: 1rem;
+  }
+  .hub-status {
+    text-align: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 380px) {
+  .hub-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .hub-card h2 {
+    font-size: 1rem;
+  }
+  .hub-card p {
+    font-size: 0.78rem;
+  }
+}
 `;
 
 let _styleInjected = false;
@@ -284,14 +418,13 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
 
   container.innerHTML = `
     <div class="hub-root">
+      <div class="hub-bg" aria-hidden="true"></div>
+      <div class="hub-content">
 
-      <!-- Titre -->
-      <div class="hub-hero" style="display:flex;align-items:center;gap:2.5rem;justify-content:center">
-        <img src="/ted-barney.png" alt="How I Met Your Mother" style="height:160px;width:auto;border-radius:14px;opacity:0.88;flex-shrink:0;box-shadow:0 4px 18px rgba(0,0,0,0.13)">
-        <div style="text-align:left">
-          <h1 class="hub-hero-title">HIMYC</h1>
-          <p class="hub-hero-sub">How I Met Your Corpus</p>
-        </div>
+      <!-- Titre (au-dessus du fond) -->
+      <div class="hub-hero">
+        <h1 class="hub-hero-title">HIMYC</h1>
+        <p class="hub-hero-sub">How I Met Your Corpus</p>
       </div>
 
       <!-- Cartes de navigation -->
@@ -345,6 +478,7 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
         <span id="hub-status-label">${status.online ? `Backend v${status.version ?? "?"}` : "Backend hors ligne"}</span>
       </div>
 
+      </div>
     </div>`;
 
   // ── Navigation cartes ──────────────────────────────────────────────────────

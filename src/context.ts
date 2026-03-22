@@ -12,7 +12,7 @@ export interface BackendStatus {
 }
 
 /**
- * Données de contexte transmises de l'Inspecter vers l'Aligner (MX-009).
+ * Données de handoff vers l'Aligner (MX-009) — alimentées depuis Constituer → Actions → Alignement.
  *
  * Cas transcript-first : pivot_key = "transcript", target_keys = ["srt_en", ...]
  * Cas srt-only         : pivot_key = "srt_en",     target_keys = ["srt_fr", ...]
@@ -59,8 +59,8 @@ export interface ShellContext {
   navigateTo(mode: "hub" | "concordancier" | "constituer" | "exporter" | "aligner"): void;
 
   /**
-   * Stocker les données de handoff Inspecter → Aligner (MX-009).
-   * L'Aligner lit ces données à son montage.
+   * Stocker les données de handoff vers la sous-vue Aligner (MX-009).
+   * L'Aligner lit ces données à son montage (lecture unique via getHandoff).
    */
   setHandoff(data: AlignerHandoff | null): void;
 

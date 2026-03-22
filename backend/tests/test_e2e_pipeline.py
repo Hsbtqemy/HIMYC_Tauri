@@ -229,3 +229,34 @@ class TestExport:
         r = client.post("/export", json={"scope": "segments", "fmt": "txt", "use_clean": True})
         # Soit 200 avec fichier vide, soit 4xx — pas de 500
         assert r.status_code < 500, f"Erreur serveur inattendue : {r.text}"
+
+
+class TestImportCharactersFromSegments:
+    """POST /characters/import_from_segments — parité PyQt (locuteurs → catalogue)."""
+
+    def _prepare_segmented(self, project: Path) -> None:
+        client.post("/episodes/S01E01/sources/transcript", json={"content": TRANSCRIPT})
+        r1 = client.post("/jobs", json={
+            "job_type": "normalize_transcript",
+            "episode_id": "S01E01",
+            "source_key": "transcript",
+        })
+        _poll_job(r1.json()["job_id"])
+        r2 = client.post("/jobs", json={
+            "job_type": "segment_transcript",
+            "episode_id": "S01E01",
+        })
+        _poll_job(r2.json()["job_id"])
+
+    def test_import_adds_entries_from_segment_speakers(self, project: Path) -> None:
+        self._prepare_segmented(project)
+        r = client.post("/characters/import_from_segments", json={})
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["distinct_speakers_found"] >= 1
+        assert data["added"] >= 1
+        r2 = client.get("/characters")
+        assert r2.status_code == 200
+        chars = r2.json()["characters"]
+        assert len(chars) >= 1
+        assert any((c.get("canonical") or "").strip() for c in chars)

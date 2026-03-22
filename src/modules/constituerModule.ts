@@ -26,6 +26,7 @@ import {
   cancelJob,
   fetchCharacters,
   saveCharacters,
+  importCharactersFromSegments,
   fetchAssignments,
   saveAssignments,
   autoAssignCharacters,
@@ -40,6 +41,7 @@ import {
   setAlignLinkStatus,
   bulkSetAlignLinkStatus,
   fetchSubtitleCues,
+  fetchAllSubtitleCues,
   retargetAlignLink,
   fetchConcordance,
   fetchEpisodeSegments,
@@ -77,6 +79,7 @@ import {
   fetchLinkPositions,
   ApiError,
   formatApiError,
+  withNoDbRecovery,
 } from "../api";
 import {
   guardImportTranscript,
@@ -256,6 +259,7 @@ const CSS = `
 
 .acts-hub {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 1.5rem;
   display: flex;
@@ -399,7 +403,7 @@ const CSS = `
   font-size: 1rem; padding: 2px 6px; border-radius: 4px; line-height: 1;
 }
 .docs-panel-close:hover { background: var(--surface2); color: var(--text); }
-.docs-panel-body { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
+.docs-panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
 .docs-panel-section-head {
   font-size: 0.7rem; font-weight: 700; letter-spacing: .06em;
   text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px;
@@ -584,7 +588,7 @@ const CSS = `
   align-items: center;
   gap: 6px;
 }
-.pers-list-scroll { flex: 1; overflow-y: auto; }
+.pers-list-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .pers-char-item {
   display: flex;
   align-items: center;
@@ -610,7 +614,7 @@ const CSS = `
   flex-direction: column;
   overflow: hidden;
 }
-.pers-detail-scroll { flex: 1; overflow-y: auto; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+.pers-detail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
 .pers-detail-empty {
   display: flex;
   flex-direction: column;
@@ -691,6 +695,7 @@ const CSS = `
 /* Table */
 .cons-table-wrap {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 0 16px 16px;
 }
@@ -778,13 +783,125 @@ const CSS = `
   min-height: 0;
   overflow: hidden;
 }
+/* Colonne liste épisodes : scroll interne, pas de marge fantôme (évite flex + overflow:hidden qui clippe) */
+.acts-split > .acts-ep-list {
+  min-height: 0;
+  align-self: stretch;
+}
 .acts-ep-list {
-  width: 360px;
+  width: min(400px, 40vw);
+  min-width: 240px;
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  padding: 0;
+}
+.acts-ep-list-title {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 4px 6px 3px;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+.seg-table-wrap,
+.align-ep-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
   overflow-y: auto;
+  padding: 0;
+  -webkit-overflow-scrolling: touch;
+}
+/* Chargement / erreur : pas le padding 3rem global de .cons-loading */
+.acts-ep-list .seg-table-wrap.cons-loading,
+.acts-ep-list .align-ep-wrap.cons-loading,
+.acts-ep-list .seg-table-wrap > .cons-loading,
+.acts-ep-list .align-ep-wrap > .cons-loading {
+  padding: 10px 6px;
+  box-sizing: border-box;
+}
+.seg-table-wrap > .cons-table,
+.align-ep-wrap > .cons-table {
+  margin-top: 0;
+}
+/* Table épisodes : tient dans la largeur colonne */
+.acts-ep-list .cons-table {
+  width: 100%;
+  table-layout: fixed;
+  margin: 0;
+  font-size: 0.76rem;
+}
+.acts-ep-list .cons-table th,
+.acts-ep-list .cons-table td {
+  padding: 3px 4px;
+  vertical-align: middle;
+}
+.acts-ep-list .cons-table th:first-child,
+.acts-ep-list .cons-table td:first-child {
+  padding-left: 6px;
+}
+.acts-ep-list .cons-table th:last-child,
+.acts-ep-list .cons-table td:last-child {
+  padding-right: 6px;
+}
+.acts-ep-list .cons-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.acts-ep-list .cons-table th {
+  background: var(--surface2);
+  box-shadow: 0 1px 0 var(--border);
+  font-size: 0.68rem;
+}
+.acts-ep-cell-id {
+  width: 22%;
+  min-width: 0;
+  white-space: nowrap;
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+}
+.acts-ep-cell-title {
+  width: 30%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+.acts-ep-cell-status {
+  width: 30%;
+  min-width: 0;
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+.acts-ep-lang-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+}
+.acts-ep-cell-action {
+  width: 18%;
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+.acts-ep-cell-action .btn {
+  padding: 2px 6px;
+  font-size: 0.72rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .acts-text-panel {
   flex: 1;
@@ -1036,6 +1153,7 @@ const CSS = `
 .cur-pane {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   padding: 1rem 1.25rem;
   font-family: ui-monospace, monospace;
@@ -1061,7 +1179,7 @@ const CSS = `
 }
 .cur-pane-text { flex: 1; }
 /* Diagnostics */
-.cur-diag-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+.cur-diag-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .cur-diag-section { padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .cur-diag-title { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 6px; }
 .cur-stat-row { display: flex; justify-content: space-between; font-size: 0.77rem; padding: 2px 0; color: var(--text); }
@@ -1177,10 +1295,7 @@ const CSS = `
 .align-lang-badge.done    { background: color-mix(in srgb, var(--success,#16a34a) 15%, transparent); color: var(--success,#16a34a); border: 1px solid color-mix(in srgb, var(--success,#16a34a) 35%, transparent); }
 .align-lang-badge.pending { background: color-mix(in srgb, var(--danger,#dc2626) 10%, transparent);  color: var(--danger-text,#991b1b); border: 1px solid color-mix(in srgb, var(--danger,#dc2626) 25%, transparent); }
 .align-ep-blocked { font-size: 0.74rem; color: var(--text-muted); font-style: italic; }
-.align-ep-table .align-cell-id    { white-space: nowrap; font-family: ui-monospace,monospace; font-size: 0.76rem; width: 68px; }
-.align-ep-table .align-cell-title { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.align-ep-table .align-cell-status { }
-.align-ep-table .align-cell-action { white-space: nowrap; }
+/* Colonnes liste épisodes : voir .acts-ep-cell-* sous .acts-ep-list */
 
 /* ── Alignment run history + audit view ──────────────────────── */
 .align-runs-panel {
@@ -1554,12 +1669,12 @@ const CSS = `
   font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; flex-shrink: 0;
 }
 /* Collisions */
-.audit-collision-list { overflow-y: auto; flex: 1; padding: 0; display: flex; flex-direction: column; }
+.audit-collision-list { overflow-y: auto; flex: 1; min-height: 0; padding: 0; display: flex; flex-direction: column; }
 .audit-collision-actions {
   display: flex; align-items: center; gap: 8px; padding: 6px 14px;
   border-bottom: 1px solid #fca5a5; background: #fff8f8; flex-shrink: 0; flex-wrap: wrap;
 }
-.audit-collision-scroll { overflow-y: auto; flex: 1; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
+.audit-collision-scroll { overflow-y: auto; flex: 1; min-height: 0; padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
 .audit-collision-card {
   border: 1px solid #fca5a5; border-radius: var(--radius);
   background: #fef2f2; padding: 8px 12px;
@@ -1650,7 +1765,7 @@ const CSS = `
   font-size: 0.72rem; color: var(--text-muted); padding: 4px 10px;
   border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
-.seg-segments-scroll { flex: 1; overflow: auto; }
+.seg-segments-scroll { flex: 1; min-height: 0; overflow: auto; }
 .seg-segments-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
 .seg-segments-table th { position: sticky; top: 0; background: var(--surface2); z-index: 1; }
 .seg-cell-n     { width: 36px; text-align: right; color: var(--text-muted); padding: 3px 6px; font-family: ui-monospace,monospace; }
@@ -1663,6 +1778,44 @@ const CSS = `
   margin: 8px; padding: 8px 12px; border-radius: 6px; font-size: 0.78rem;
   background: color-mix(in srgb, var(--warning,#f59e0b) 12%, transparent);
   color: var(--warning-text, #92400e); border: 1px solid color-mix(in srgb, var(--warning,#f59e0b) 30%, transparent);
+}
+
+/* Distribution — utterance ↔ personnage */
+.dist-toolbar-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin-bottom: 10px;
+}
+.dist-toolbar-row label { font-size: 0.76rem; color: var(--text-muted); }
+.dist-filter-input {
+  flex: 1; min-width: 140px; max-width: 320px;
+  padding: 4px 8px; font-size: 0.78rem;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font-family: inherit;
+}
+.dist-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+.dist-table th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface2); text-align: left; font-weight: 600;
+  color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
+.dist-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.dist-table tr:hover td { background: color-mix(in srgb, var(--surface2) 70%, transparent); }
+.dist-td-n { width: 36px; text-align: right; font-family: ui-monospace, monospace; color: var(--text-muted); }
+.dist-td-sp { width: 100px; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.72rem; }
+.dist-td-tx { line-height: 1.45; word-break: break-word; }
+.dist-char-select { max-width: 200px; font-size: 0.75rem; }
+.dist-sp-input {
+  width: 100%; max-width: 140px; box-sizing: border-box;
+  padding: 3px 6px; font-size: 0.72rem; font-family: inherit;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--surface); color: var(--text);
+}
+.dist-sp-input.dist-sp-saved { border-color: var(--success, #16a34a); }
+.dist-sp-input.dist-sp-err { border-color: var(--danger, #dc2626); }
+.dist-pagination {
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  padding: 8px 10px; border-top: 1px solid var(--border);
+  background: var(--surface2); font-size: 0.76rem; color: var(--text-muted);
 }
 
 /* ── Mode traduction (MX-036) ────────────────────────────────── */
@@ -1681,7 +1834,7 @@ const CSS = `
   padding: 5px 12px; background: var(--surface2);
   border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
-.seg-trad-content { flex: 1; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; }
+.seg-trad-content { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 2px; }
 .seg-trad-row {
   font-size: 0.79rem; line-height: 1.5; padding: 4px 6px;
   border-radius: 3px; border-left: 2px solid transparent;
@@ -1788,6 +1941,71 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
   background-position: right 6px center;
 }
 .acts-params-select:focus { outline: none; border-color: var(--accent); }
+/* Segmentation / Alignement : moins de marge latérale au-dessus de la liste épisodes */
+.cons-actions-pane[data-subview="segmentation"] .acts-params,
+.cons-actions-pane[data-subview="alignement"] .acts-params {
+  padding: 6px 8px;
+  gap: 12px;
+}
+.cons-actions-pane[data-subview="segmentation"] .cons-toolbar,
+.cons-actions-pane[data-subview="alignement"] .cons-toolbar {
+  padding: 8px 10px;
+}
+.cons-actions-pane[data-subview="segmentation"] .cons-error.seg-error {
+  margin: 6px 8px;
+}
+/* Filtres liste épisodes (segmentation / alignement) */
+.acts-ep-filters {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.acts-ep-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.acts-ep-filter-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.acts-ep-filter-select {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 22px 3px 6px;
+  font-size: 0.74rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--text);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+.acts-ep-filter-select:focus { outline: none; border-color: var(--accent, #0f766e); }
+.acts-ep-filter-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  font-size: 0.76rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  color: var(--text);
+  font-family: inherit;
+}
+.acts-ep-filter-search::placeholder { color: var(--text-muted); opacity: 0.85; }
 .acts-params-radios { display: flex; gap: 10px; }
 .acts-params-radio { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .acts-params-radio input { cursor: pointer; }
@@ -1821,6 +2039,21 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
 .cfg-select { appearance: none; cursor: pointer; }
 .cfg-feedback { font-size: 0.76rem; min-height: 1.2em; color: var(--text-muted); }
 .cfg-path { font-size: 0.72rem; font-family: ui-monospace, monospace; color: var(--text-muted); word-break: break-all; }
+.cfg-path-label { display: block; font-size: 0.72rem; color: var(--text-muted); margin-bottom: 4px; font-style: normal; }
+.cfg-index-summary {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  padding: 8px 10px;
+  background: var(--surface-elevated, rgba(0,0,0,0.035));
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.cfg-index-summary strong { color: var(--text); font-weight: 600; }
+.cfg-index-muted { font-style: italic; }
+.cfg-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.35; margin-top: 3px; width: 100%; }
+.cfg-muted-inline { font-size: 0.78rem; color: var(--text-muted); }
 
 /* Web sources (MX-021b) */
 .web-src-tabs { display: flex; gap: 2px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
@@ -1889,7 +2122,7 @@ let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _jobsExpanded = true;
 let _activeSection = "actions";
-let _activeActionsSubView: "hub" | "curation" | "segmentation" | "alignement" = "hub";
+let _activeActionsSubView: "hub" | "curation" | "distribution" | "segmentation" | "alignement" = "hub";
 let _navCollapsed = false;
 let _page = 0;
 /** Données épisodes en cache pour Documents (rechargées à chaque mount section) */
@@ -1902,6 +2135,42 @@ let _ctx: ShellContext | null = null;
 let _docsPanelEpId: string | null = null;
 /** Filtre saison actif dans Documents (null = toutes) */
 let _docsSeasonFilter: number | null = null;
+/** Listes épisodes complètes pour filtres saison / recherche (Segmentation & Alignement) */
+let _segEpisodesAll: Episode[] = [];
+let _alignEpisodesAll: Episode[] = [];
+let _alignRunsLangMap: Map<string, Set<string>> = new Map();
+
+const DIST_EP_LS_KEY = "himyc_dist_ep";
+const DIST_SOURCE_LS_KEY = "himyc_dist_source";
+const DIST_CUE_LANG_LS_KEY = "himyc_dist_cue_lang";
+const DIST_ROWS_PER_PAGE = 40;
+
+type DistSourceKind = "utterance" | "sentence" | "cue";
+
+function readDistSourceKind(): DistSourceKind {
+  const v = localStorage.getItem(DIST_SOURCE_LS_KEY);
+  if (v === "sentence" || v === "cue" || v === "utterance") return v;
+  return "utterance";
+}
+
+/** Source affichée (segments tours / phrases / cues SRT) — aligné PyQt */
+let _distSourceKind: DistSourceKind = readDistSourceKind();
+let _distCueLang = localStorage.getItem(DIST_CUE_LANG_LS_KEY) ?? "en";
+
+/** Segments chargés pour l’épisode courant (Distribution) — utterance ou sentence */
+let _distLoadedSegments: SegmentRow[] = [];
+/** Cues SRT chargées (mode cue) */
+let _distLoadedCues: SubtitleCue[] = [];
+let _distLoadedEpId: string | null = null;
+/** Invalide le cache si la source ou la langue cue change */
+let _distLoadedSourceKind: DistSourceKind | null = null;
+let _distLoadedCueLangSnap: string | null = null;
+/** Choix personnage par ligne (segment_id ou cue_id), toutes pages confondues */
+let _distCharPick = new Map<string, string>();
+let _distFilterTimer: ReturnType<typeof setTimeout> | null = null;
+let _distTablePage = 0;
+/** Listener `himyc:open-distribution` — retiré au dispose */
+let _openDistributionNavListener: (() => void) | null = null;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1942,6 +2211,143 @@ function collectSrtLangs(episodes: Episode[]): string[] {
 
 function sourceForKey(ep: Episode, key: string): EpisodeSource | undefined {
   return ep.sources.find((s) => s.source_key === key);
+}
+
+function episodeHasSegmentedTranscript(ep: Episode): boolean {
+  const t = sourceForKey(ep, "transcript");
+  return !!(t?.available && (t.state === "segmented" || t.state === "ready_for_alignment"));
+}
+
+/** Au moins un fichier transcript importé (étapes amont possibles). */
+function episodeHasTranscript(ep: Episode): boolean {
+  return !!sourceForKey(ep, "transcript")?.available;
+}
+
+function transcriptStageLabel(ep: Episode): string {
+  const t = sourceForKey(ep, "transcript");
+  if (!t?.available) return "";
+  const st = t.state ?? "unknown";
+  if (st === "segmented" || st === "ready_for_alignment") return "segmenté";
+  if (st === "normalized") return "normalisé";
+  if (st === "raw") return "brut";
+  return st;
+}
+
+/** Langues SRT importées pour un épisode. */
+function episodeSrtLangs(ep: Episode): string[] {
+  const langs: string[] = [];
+  for (const s of ep.sources) {
+    if (s.source_key.startsWith("srt_") && s.available) langs.push(s.source_key.slice(4));
+  }
+  return [...new Set(langs)].sort();
+}
+
+function episodeHasSrtLang(ep: Episode, lang: string): boolean {
+  return !!sourceForKey(ep, `srt_${lang}`)?.available;
+}
+
+function distSegmentMarker(kind: "utterance" | "sentence"): string {
+  return kind === "utterance" ? ":utterance:" : ":sentence:";
+}
+
+/** Réinitialise la carte des choix depuis les assignations courantes pour l’épisode et la source. */
+function distHydrateCharPick(epId: string, kind: DistSourceKind): void {
+  _distCharPick.clear();
+  for (const a of _assignments) {
+    if (a.episode_id !== epId || !a.character_id) continue;
+    if (kind === "cue") {
+      if (a.cue_id) _distCharPick.set(a.cue_id, a.character_id);
+      continue;
+    }
+    const sid = a.segment_id ?? "";
+    if (!sid.includes(distSegmentMarker(kind))) continue;
+    _distCharPick.set(sid, a.character_id);
+  }
+}
+
+/** Garde les assignations qui ne sont pas recouvertes par l’enregistrement courant. */
+function distKeepOtherAssignments(
+  epId: string,
+  kind: DistSourceKind,
+  loadedSegmentIds: Set<string>,
+  loadedCueIds: Set<string>,
+): CharacterAssignment[] {
+  return _assignments.filter((a) => {
+    if (a.episode_id !== epId) return true;
+    if (kind === "cue") {
+      if (!a.cue_id) return true;
+      return !loadedCueIds.has(a.cue_id);
+    }
+    if (a.cue_id) return true;
+    const sid = a.segment_id ?? "";
+    if (!sid.includes(distSegmentMarker(kind))) return true;
+    return !loadedSegmentIds.has(sid);
+  });
+}
+
+/** Comme PyQt : préremplit les combos quand le texte commence par un alias. */
+function distApplySuggestByAlias(rows: { id: string; text: string }[]): number {
+  if (_characters.length === 0) return 0;
+  const charAliases: { id: string; aliases: string[] }[] = [];
+  for (const ch of _characters) {
+    const aliases = (ch.aliases ?? []).filter((x) => (x ?? "").trim());
+    if (aliases.length === 0) continue;
+    charAliases.push({
+      id: ch.id,
+      aliases: [...aliases].sort((a, b) => b.length - a.length),
+    });
+  }
+  if (charAliases.length === 0) return 0;
+  let filled = 0;
+  for (const row of rows) {
+    const text = (row.text || "").trim();
+    if (!text) continue;
+    const textLower = text.toLowerCase();
+    outer: for (const { id, aliases } of charAliases) {
+      for (const alias of aliases) {
+        const al = alias.toLowerCase();
+        if (
+          textLower.startsWith(al) ||
+          textLower.startsWith(`${al}:`) ||
+          textLower.startsWith(`${al} `)
+        ) {
+          _distCharPick.set(row.id, id);
+          filled++;
+          break outer;
+        }
+      }
+    }
+  }
+  return filled;
+}
+
+function syncDistributionSourceControls(cnt: HTMLElement): void {
+  const srcSel = cnt.querySelector<HTMLSelectElement>("#dist-source-kind");
+  const langWrap = cnt.querySelector<HTMLElement>("#dist-cue-lang-wrap");
+  const langSel = cnt.querySelector<HTMLSelectElement>("#dist-cue-lang");
+  const filt = cnt.querySelector<HTMLInputElement>("#dist-filter");
+  if (srcSel) srcSel.value = _distSourceKind;
+  if (langWrap) langWrap.style.display = _distSourceKind === "cue" ? "flex" : "none";
+  if (filt) {
+    filt.placeholder =
+      _distSourceKind === "cue" ? "Filtrer le texte des cues…" : "Filtrer texte ou locuteur…";
+  }
+  const epSel = cnt.querySelector<HTMLSelectElement>("#dist-ep-select");
+  const epId = epSel?.value ?? "";
+  if (!langSel || !epId || !_cachedEpisodes) return;
+  const ep = _cachedEpisodes.episodes.find((e) => e.episode_id === epId);
+  if (!ep) return;
+  const langs = episodeSrtLangs(ep);
+  langSel.innerHTML =
+    langs.length > 0
+      ? langs.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l.toUpperCase())}</option>`).join("")
+      : `<option value="">— Aucun SRT —</option>`;
+  if (langs.includes(_distCueLang)) langSel.value = _distCueLang;
+  else if (langs.length) {
+    _distCueLang = langs[0];
+    langSel.value = _distCueLang;
+    localStorage.setItem(DIST_CUE_LANG_LS_KEY, _distCueLang);
+  }
 }
 
 // ── Jobs helpers ────────────────────────────────────────────────────────────
@@ -2027,6 +2433,526 @@ function renderJobsPanel(container: HTMLElement, jobs: JobRecord[]) {
   });
 }
 
+/** Câblage unique des contrôles Distribution (épisode, filtre, enregistrer, pagination, locuteur). */
+function wireDistributionPanel(cnt: HTMLElement): void {
+  const root = cnt.querySelector<HTMLElement>("#dist-panel-root");
+  if (!root || root.dataset.wired === "1") return;
+  root.dataset.wired = "1";
+  cnt.querySelector<HTMLSelectElement>("#dist-ep-select")?.addEventListener("change", () => {
+    const v = cnt.querySelector<HTMLSelectElement>("#dist-ep-select")?.value ?? "";
+    if (v) localStorage.setItem(DIST_EP_LS_KEY, v);
+    _distLoadedEpId = null;
+    _distLoadedSegments = [];
+    _distLoadedCues = [];
+    _distLoadedSourceKind = null;
+    _distTablePage = 0;
+    syncDistributionSourceControls(cnt);
+    void renderDistributionTable(cnt);
+  });
+  cnt.querySelector<HTMLSelectElement>("#dist-source-kind")?.addEventListener("change", () => {
+    const v = cnt.querySelector<HTMLSelectElement>("#dist-source-kind")?.value ?? "utterance";
+    _distSourceKind = v === "sentence" || v === "cue" || v === "utterance" ? v : "utterance";
+    localStorage.setItem(DIST_SOURCE_LS_KEY, _distSourceKind);
+    _distLoadedEpId = null;
+    _distLoadedSegments = [];
+    _distLoadedCues = [];
+    _distLoadedSourceKind = null;
+    _distTablePage = 0;
+    syncDistributionSourceControls(cnt);
+    void renderDistributionTable(cnt);
+  });
+  cnt.querySelector<HTMLSelectElement>("#dist-cue-lang")?.addEventListener("change", () => {
+    const v = cnt.querySelector<HTMLSelectElement>("#dist-cue-lang")?.value?.trim() ?? "";
+    if (v) {
+      _distCueLang = v;
+      localStorage.setItem(DIST_CUE_LANG_LS_KEY, v);
+    }
+    _distLoadedEpId = null;
+    _distLoadedCues = [];
+    _distLoadedSourceKind = null;
+    _distTablePage = 0;
+    void renderDistributionTable(cnt);
+  });
+  cnt.querySelector<HTMLButtonElement>("#dist-suggest-alias")?.addEventListener("click", () => {
+    const epId = cnt.querySelector<HTMLSelectElement>("#dist-ep-select")?.value ?? "";
+    if (!epId) return;
+    let rows: { id: string; text: string }[] = [];
+    if (_distSourceKind === "cue") {
+      rows = _distLoadedCues.map((c) => ({ id: c.cue_id, text: c.text_clean ?? "" }));
+    } else {
+      rows = _distLoadedSegments.map((s) => ({ id: s.segment_id, text: s.text ?? "" }));
+    }
+    const n = distApplySuggestByAlias(rows);
+    const sum = cnt.querySelector<HTMLElement>("#dist-summary");
+    if (sum) {
+      sum.textContent =
+        n > 0
+          ? `Suggestion par alias : ${n} ligne(s) renseignée(s).`
+          : "Aucune correspondance (vérifiez les alias dans Personnages).";
+    }
+    void renderDistributionTable(cnt);
+  });
+  cnt.querySelector<HTMLButtonElement>("#dist-save-btn")?.addEventListener("click", () => void saveDistributionAssignments(cnt));
+  cnt.querySelector<HTMLInputElement>("#dist-filter")?.addEventListener("input", () => {
+    if (_distFilterTimer) clearTimeout(_distFilterTimer);
+    _distFilterTimer = setTimeout(() => {
+      _distTablePage = 0;
+      void renderDistributionTable(cnt);
+    }, 180);
+  });
+
+  root.addEventListener("change", (e) => {
+    const t = e.target as HTMLElement;
+    if (!t.classList.contains("dist-char-select")) return;
+    const id = (t as HTMLSelectElement).dataset.rowId?.trim();
+    const v = (t as HTMLSelectElement).value.trim();
+    if (!id) return;
+    if (v) _distCharPick.set(id, v);
+    else _distCharPick.delete(id);
+  });
+
+  root.addEventListener("click", (e) => {
+    const t = e.target as HTMLElement;
+    if (t.id === "dist-page-prev") {
+      _distTablePage = Math.max(0, _distTablePage - 1);
+      void renderDistributionTable(cnt);
+    }
+    if (t.id === "dist-page-next") {
+      _distTablePage += 1;
+      void renderDistributionTable(cnt);
+    }
+    if (t.id === "dist-jump-curation") {
+      cnt.querySelector<HTMLButtonElement>('.cons-nav-tree-link[data-subview="curation"]')?.click();
+    }
+    if (t.id === "dist-jump-seg") {
+      cnt.querySelector<HTMLButtonElement>('.cons-nav-tree-link[data-subview="segmentation"]')?.click();
+    }
+  });
+
+  root.addEventListener("focusout", (e) => {
+    const t = e.target as HTMLElement;
+    if (!t.classList.contains("dist-sp-input")) return;
+    const sid = t.dataset.segmentId;
+    const epId = cnt.querySelector<HTMLSelectElement>("#dist-ep-select")?.value ?? "";
+    if (!sid || !epId) return;
+    const inp = t as HTMLInputElement;
+    const raw = inp.value.trim();
+    const seg = _distLoadedSegments.find((s) => s.segment_id === sid);
+    const prev = (seg?.speaker_explicit ?? "").trim();
+    if (raw === prev) return;
+    inp.classList.remove("dist-sp-saved", "dist-sp-err");
+    void (async () => {
+      try {
+        const updated = await patchSegment(epId, sid, { speaker_explicit: raw || null });
+        if (seg) seg.speaker_explicit = updated.speaker_explicit;
+        inp.classList.add("dist-sp-saved");
+        setTimeout(() => inp.classList.remove("dist-sp-saved"), 900);
+      } catch (err) {
+        inp.classList.add("dist-sp-err");
+        inp.value = prev;
+        const errEl = cnt.querySelector<HTMLElement>("#dist-error");
+        if (errEl) {
+          errEl.style.display = "block";
+          errEl.textContent = err instanceof ApiError ? `${err.errorCode} — ${err.message}` : formatApiError(err);
+        }
+        setTimeout(() => inp.classList.remove("dist-sp-err"), 1600);
+      }
+    })();
+  });
+}
+
+/** Segments (tours/phrases) ou cues SRT + sélecteurs personnage — aligné PyQt. */
+async function renderDistributionTable(cnt: HTMLElement): Promise<void> {
+  const tableInner = cnt.querySelector<HTMLElement>("#dist-table-inner");
+  const summary = cnt.querySelector<HTMLElement>("#dist-summary");
+  const epSel = cnt.querySelector<HTMLSelectElement>("#dist-ep-select");
+  if (!tableInner || !epSel) return;
+
+  const filter = (cnt.querySelector<HTMLInputElement>("#dist-filter")?.value ?? "").trim().toLowerCase();
+  const epId = epSel.value;
+  const saveBtn = cnt.querySelector<HTMLButtonElement>("#dist-save-btn");
+  const filt = cnt.querySelector<HTMLInputElement>("#dist-filter");
+  const suggestBtn = cnt.querySelector<HTMLButtonElement>("#dist-suggest-alias");
+  const kind = _distSourceKind;
+
+  if (!epId) {
+    if (saveBtn) saveBtn.disabled = true;
+    if (filt) filt.disabled = true;
+    if (suggestBtn) suggestBtn.disabled = true;
+    tableInner.innerHTML = `<div class="acts-text-empty" style="padding:14px">Choisissez un épisode avec transcript importé.</div>`;
+    if (summary) summary.textContent = "";
+    return;
+  }
+
+  const ep = _cachedEpisodes?.episodes.find((e) => e.episode_id === epId);
+  if (!ep || !episodeHasTranscript(ep)) {
+    if (saveBtn) saveBtn.disabled = true;
+    if (filt) filt.disabled = true;
+    if (suggestBtn) suggestBtn.disabled = true;
+    tableInner.innerHTML = `<div class="acts-text-empty" style="padding:14px">Aucun transcript pour cet épisode.</div>`;
+    if (summary) summary.textContent = "";
+    return;
+  }
+
+  if (kind !== "cue") {
+    if (!episodeHasSegmentedTranscript(ep)) {
+      if (saveBtn) saveBtn.disabled = true;
+      if (filt) filt.disabled = true;
+      if (suggestBtn) suggestBtn.disabled = true;
+      const st = transcriptStageLabel(ep);
+      if (summary) {
+        summary.textContent = `Segmentation requise (${st}).`;
+      }
+      tableInner.innerHTML = `
+      <div class="dist-preseg-panel" style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);max-width:36rem">
+        <div style="font-size:0.8rem;color:var(--text);line-height:1.5;margin-bottom:10px">
+          Normaliser → segmenter, puis revenir ici pour assigner les personnages.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="btn btn-secondary btn-sm" id="dist-jump-curation">Curation</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="dist-jump-seg">Segmentation</button>
+        </div>
+      </div>`;
+      return;
+    }
+  } else {
+    const langs = episodeSrtLangs(ep);
+    if (langs.length === 0 || !episodeHasSrtLang(ep, _distCueLang)) {
+      if (saveBtn) saveBtn.disabled = true;
+      if (filt) filt.disabled = true;
+      if (suggestBtn) suggestBtn.disabled = true;
+      tableInner.innerHTML = `<div class="acts-text-empty" style="padding:14px">Importez un SRT pour cet épisode (langue affichée à droite) pour éditer les cues.</div>`;
+      if (summary) summary.textContent = "";
+      return;
+    }
+  }
+
+  if (saveBtn) saveBtn.disabled = false;
+  if (filt) filt.disabled = false;
+  if (suggestBtn) suggestBtn.disabled = false;
+
+  const cacheMiss =
+    _distLoadedEpId !== epId ||
+    _distLoadedSourceKind !== kind ||
+    (kind === "cue" && _distLoadedCueLangSnap !== _distCueLang);
+
+  if (cacheMiss) {
+    tableInner.innerHTML = `<div class="acts-text-empty" style="padding:14px">Chargement…</div>`;
+    try {
+      if (kind === "cue") {
+        _distLoadedCues = await fetchAllSubtitleCues(epId, _distCueLang);
+        _distLoadedSegments = [];
+        _distLoadedEpId = epId;
+        _distLoadedSourceKind = kind;
+        _distLoadedCueLangSnap = _distCueLang;
+        distHydrateCharPick(epId, kind);
+      } else {
+        const segKind = kind === "utterance" ? "utterance" : "sentence";
+        const resp = await fetchEpisodeSegments(epId, segKind);
+        _distLoadedSegments = resp.segments;
+        _distLoadedCues = [];
+        _distLoadedEpId = epId;
+        _distLoadedSourceKind = kind;
+        _distLoadedCueLangSnap = null;
+        distHydrateCharPick(epId, kind);
+      }
+    } catch (e) {
+      tableInner.innerHTML = `<div class="acts-text-empty" style="padding:14px;color:var(--danger)">${escapeHtml(formatApiError(e))}</div>`;
+      return;
+    }
+  }
+
+  const isCue = kind === "cue";
+  const totalRaw = isCue ? _distLoadedCues.length : _distLoadedSegments.length;
+  if (totalRaw === 0) {
+    tableInner.innerHTML = `<div class="acts-text-empty" style="padding:14px">Aucune ligne (${isCue ? "cues SRT" : kind}).</div>`;
+    if (summary) summary.textContent = "";
+    return;
+  }
+
+  let rowsSeg: SegmentRow[] = [];
+  let rowsCue: SubtitleCue[] = [];
+  if (isCue) {
+    rowsCue = _distLoadedCues;
+    if (filter) {
+      rowsCue = rowsCue.filter((c) => (c.text_clean ?? "").toLowerCase().includes(filter));
+    }
+  } else {
+    rowsSeg = _distLoadedSegments;
+    if (filter) {
+      rowsSeg = rowsSeg.filter((s) => {
+        const blob = `${s.text}\n${s.speaker_explicit ?? ""}`.toLowerCase();
+        return blob.includes(filter);
+      });
+    }
+  }
+
+  const nAssignCur = _assignments.filter((a) => {
+    if (a.episode_id !== epId) return false;
+    if (isCue) return !!a.cue_id;
+    const sid = a.segment_id ?? "";
+    return sid.includes(distSegmentMarker(kind));
+  }).length;
+
+  if (_characters.length === 0) {
+    if (summary) {
+      summary.textContent = `${totalRaw} ligne(s) · ${nAssignCur} assign. — ajoutez des personnages (onglet Personnages).`;
+    }
+    tableInner.innerHTML = `
+      <div class="acts-text-empty" style="padding:14px">
+        Aucun personnage. Créez-en dans <strong>Personnages</strong>.
+      </div>`;
+    return;
+  }
+
+  const rowCount = isCue ? rowsCue.length : rowsSeg.length;
+  if (rowCount === 0) {
+    if (summary) {
+      summary.textContent = `0 / ${totalRaw} (filtre) · ${nAssignCur} assign. · ${_characters.length} pers.`;
+    }
+    _distTablePage = 0;
+    tableInner.innerHTML = `<div class="acts-text-empty" style="padding:14px">Aucune ligne ne correspond au filtre.</div>`;
+    return;
+  }
+
+  const pageCount = Math.max(1, Math.ceil(rowCount / DIST_ROWS_PER_PAGE));
+  if (_distTablePage >= pageCount) _distTablePage = pageCount - 1;
+  if (_distTablePage < 0) _distTablePage = 0;
+  const p0 = _distTablePage * DIST_ROWS_PER_PAGE;
+  const pageSeg = isCue ? [] : rowsSeg.slice(p0, p0 + DIST_ROWS_PER_PAGE);
+  const pageCue = isCue ? rowsCue.slice(p0, p0 + DIST_ROWS_PER_PAGE) : [];
+
+  const srcLabel =
+    kind === "utterance" ? "tours" : kind === "sentence" ? "phrases" : `cues ${_distCueLang.toUpperCase()}`;
+
+  if (summary) {
+    summary.textContent =
+      `p. ${_distTablePage + 1}/${pageCount} · ${rowCount}/${totalRaw} (${srcLabel}) · ${nAssignCur} assign. · ${_characters.length} pers.`;
+  }
+
+  const showSpeakerCol = kind === "utterance";
+
+  const tableRowsFixed = isCue
+    ? pageCue.map((c) => {
+        const cur = _distCharPick.get(c.cue_id) ?? "";
+        const preview =
+          c.text_clean.length > 160 ? `${c.text_clean.slice(0, 160)}…` : c.text_clean;
+        const opts = _characters
+          .map((ch) => `<option value="${escapeHtml(ch.id)}"${cur === ch.id ? " selected" : ""}>${escapeHtml(ch.canonical)}</option>`)
+          .join("");
+        return `<tr>
+      <td class="dist-td-n">${c.n}</td>
+      <td class="dist-td-tx">${escapeHtml(preview)}</td>
+      <td class="dist-td-sel">
+        <select class="dist-char-select acts-params-select" data-row-id="${escapeHtml(c.cue_id)}">
+          <option value="">—</option>
+          ${opts}
+        </select>
+      </td>
+    </tr>`;
+      })
+    : pageSeg.map((s) => {
+        const cur = _distCharPick.get(s.segment_id) ?? "";
+        const preview = s.text.length > 160 ? `${s.text.slice(0, 160)}…` : s.text;
+        const opts = _characters
+          .map((ch) => `<option value="${escapeHtml(ch.id)}"${cur === ch.id ? " selected" : ""}>${escapeHtml(ch.canonical)}</option>`)
+          .join("");
+        const spVal = escapeHtml(s.speaker_explicit ?? "");
+        const locCell = showSpeakerCol
+          ? `<td class="dist-td-sp">
+        <input type="text" class="dist-sp-input" data-segment-id="${escapeHtml(s.segment_id)}"
+          value="${spVal}" placeholder="—" title="speaker_explicit (sauvé au blur)" />
+      </td>`
+          : "";
+        return `<tr>
+      <td class="dist-td-n">${s.n}</td>
+      ${locCell}
+      <td class="dist-td-tx">${escapeHtml(preview)}</td>
+      <td class="dist-td-sel">
+        <select class="dist-char-select acts-params-select" data-row-id="${escapeHtml(s.segment_id)}">
+          <option value="">—</option>
+          ${opts}
+        </select>
+      </td>
+    </tr>`;
+      });
+
+  const pagHtml =
+    pageCount > 1
+      ? `<div class="dist-pagination">
+          <button type="button" class="btn btn-ghost btn-sm" id="dist-page-prev" ${_distTablePage <= 0 ? "disabled" : ""}>‹ Préc.</button>
+          <span>${_distTablePage + 1} / ${pageCount}</span>
+          <button type="button" class="btn btn-ghost btn-sm" id="dist-page-next" ${_distTablePage >= pageCount - 1 ? "disabled" : ""}>Suiv. ›</button>
+        </div>`
+      : "";
+
+  const head = isCue
+    ? `<th>#</th><th>Texte (SRT)</th><th>Personnage</th>`
+    : showSpeakerCol
+      ? `<th>#</th><th>Locuteur</th><th>Texte</th><th>Personnage</th>`
+      : `<th>#</th><th>Texte</th><th>Personnage</th>`;
+
+  tableInner.innerHTML = `
+    <table class="dist-table">
+      <thead><tr>${head}</tr></thead>
+      <tbody>${tableRowsFixed.join("")}</tbody>
+    </table>${pagHtml}`;
+}
+
+async function saveDistributionAssignments(cnt: HTMLElement): Promise<void> {
+  const msg = cnt.querySelector<HTMLElement>("#dist-save-msg");
+  const errEl = cnt.querySelector<HTMLElement>("#dist-error");
+  const epId = cnt.querySelector<HTMLSelectElement>("#dist-ep-select")?.value?.trim() ?? "";
+  if (!epId) return;
+  if (_characters.length === 0) {
+    if (msg) {
+      msg.textContent = "Aucun personnage (onglet Personnages).";
+      msg.style.color = "var(--danger,#dc2626)";
+    }
+    return;
+  }
+  if (errEl) { errEl.style.display = "none"; errEl.textContent = ""; }
+  if (msg) {
+    msg.textContent = "Enregistrement…";
+    msg.style.color = "var(--text-muted)";
+  }
+
+  const kind = _distSourceKind;
+
+  try {
+    if (kind === "cue") {
+      const loadedSet = new Set(_distLoadedCues.map((c) => c.cue_id));
+      const kept = distKeepOtherAssignments(epId, kind, new Set(), loadedSet);
+      const next: CharacterAssignment[] = [];
+      for (const c of _distLoadedCues) {
+        const cid = _distCharPick.get(c.cue_id)?.trim();
+        if (!cid) continue;
+        next.push({
+          cue_id: c.cue_id,
+          character_id: cid,
+          episode_id: epId,
+          speaker_label: (c.text_clean ?? "").trim().slice(0, 200) || undefined,
+        });
+      }
+      await saveAssignments([...kept, ...next]);
+    } else {
+      const segKind = kind === "utterance" ? "utterance" : "sentence";
+      const segResp = await fetchEpisodeSegments(epId, segKind);
+      const loadedSet = new Set(segResp.segments.map((s) => s.segment_id));
+      const kept = distKeepOtherAssignments(epId, kind, loadedSet, new Set());
+      const next: CharacterAssignment[] = [];
+      for (const s of segResp.segments) {
+        const cid = _distCharPick.get(s.segment_id)?.trim();
+        if (!cid) continue;
+        next.push({
+          segment_id: s.segment_id,
+          character_id: cid,
+          episode_id: epId,
+          speaker_label: s.speaker_explicit?.trim() || undefined,
+          source_key: "transcript",
+        });
+      }
+      await saveAssignments([...kept, ...next]);
+    }
+    const fresh = await fetchAssignments();
+    _assignments = fresh.assignments;
+    distHydrateCharPick(epId, kind);
+    if (msg) {
+      msg.textContent = "✓ Enregistré";
+      msg.style.color = "var(--success, #16a34a)";
+      setTimeout(() => { if (msg.textContent === "✓ Enregistré") msg.textContent = ""; }, 2200);
+    }
+    await renderDistributionTable(cnt);
+  } catch (e) {
+    if (msg) {
+      msg.textContent = "";
+      msg.style.color = "";
+    }
+    if (errEl) {
+      errEl.style.display = "block";
+      errEl.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : formatApiError(e);
+    }
+  }
+}
+
+async function loadDistributionPanel(cnt: HTMLElement, opts?: { force?: boolean }): Promise<void> {
+  wireDistributionPanel(cnt);
+  if (opts?.force) {
+    _distLoadedEpId = null;
+    _distLoadedSegments = [];
+    _distLoadedCues = [];
+    _distLoadedSourceKind = null;
+    _distTablePage = 0;
+  }
+
+  const errEl = cnt.querySelector<HTMLElement>("#dist-error");
+  const statsEl = cnt.querySelector<HTMLElement>("#dist-corpus-stats");
+  const tableInner = cnt.querySelector<HTMLElement>("#dist-table-inner");
+  const epSel = cnt.querySelector<HTMLSelectElement>("#dist-ep-select");
+  if (!tableInner || !epSel) return;
+
+  if (errEl) { errEl.style.display = "none"; errEl.textContent = ""; }
+
+  try {
+    if (!_cachedEpisodes) _cachedEpisodes = await fetchEpisodes();
+    const [charResp, assignResp] = await Promise.all([fetchCharacters(), fetchAssignments()]);
+    _characters = charResp.characters;
+    _assignments = assignResp.assignments;
+
+    const eps = _cachedEpisodes.episodes;
+    const n = eps.length;
+    const withTr = eps.filter((e) => episodeHasTranscript(e)).length;
+    const segReady = eps.filter((e) => episodeHasSegmentedTranscript(e)).length;
+    if (statsEl) {
+      statsEl.innerHTML =
+        `<strong>${n}</strong> ép. · <strong>${withTr}</strong> transcript · <strong>${segReady}</strong> segmentés`;
+    }
+
+    const sorted = [...eps].sort((a, b) => (a.season !== b.season ? a.season - b.season : a.episode - b.episode));
+    const stored = localStorage.getItem(DIST_EP_LS_KEY) ?? "";
+    let htmlOpts = "";
+    for (const e of sorted) {
+      if (!episodeHasTranscript(e)) continue;
+      const stage = transcriptStageLabel(e);
+      const titleShort = e.title.length > 36 ? `${e.title.slice(0, 36)}…` : e.title;
+      const label = `${e.episode_id} — ${titleShort} · ${stage}`;
+      htmlOpts += `<option value="${escapeHtml(e.episode_id)}">${escapeHtml(label)}</option>`;
+    }
+    if (!htmlOpts) {
+      htmlOpts = `<option value="" disabled>Aucun épisode avec transcript</option>`;
+    }
+    epSel.innerHTML = `<option value="">— Choisir un épisode —</option>${htmlOpts}`;
+
+    const prev = stored && eps.some((e) => e.episode_id === stored) ? stored : "";
+    const prevEp = prev ? eps.find((e) => e.episode_id === prev) : undefined;
+    const prevHasTr = prevEp ? episodeHasTranscript(prevEp) : false;
+    if (prevHasTr) {
+      epSel.value = prev;
+    } else {
+      const firstSeg = sorted.find((e) => episodeHasTranscript(e) && episodeHasSegmentedTranscript(e));
+      const firstTr = sorted.find((e) => episodeHasTranscript(e));
+      const pick = firstSeg ?? firstTr;
+      if (pick) {
+        epSel.value = pick.episode_id;
+        localStorage.setItem(DIST_EP_LS_KEY, pick.episode_id);
+      } else {
+        epSel.value = "";
+      }
+    }
+
+    const sk = cnt.querySelector<HTMLSelectElement>("#dist-source-kind");
+    if (sk) sk.value = _distSourceKind;
+    syncDistributionSourceControls(cnt);
+    await renderDistributionTable(cnt);
+  } catch (e) {
+    tableInner.innerHTML = `<div class="acts-text-empty" style="padding:14px;color:var(--danger)">Impossible de charger les données.</div>`;
+    if (errEl) {
+      errEl.style.display = "block";
+      errEl.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : formatApiError(e);
+    }
+  }
+}
+
 async function refreshJobs(container: HTMLElement) {
   try {
     const { jobs } = await fetchJobs();
@@ -2058,6 +2984,7 @@ async function refreshJobs(container: HTMLElement) {
         }
         if (_activeActionsSubView === "segmentation") loadAndRenderSegmentation(container);
         if (_activeActionsSubView === "alignement")   loadAndRenderAlignement(container);
+        if (_activeActionsSubView === "distribution") void loadDistributionPanel(container);
       }
     }
   } catch { /* backend down — stop poll */ stopJobPoll(); }
@@ -3181,7 +4108,9 @@ async function loadAndRender(container: HTMLElement) {
   _page = 0;
 
   try {
-    const data = await measureAsync("constituer:load_episodes", fetchEpisodes);
+    const data = await withNoDbRecovery(() =>
+      measureAsync("constituer:load_episodes", fetchEpisodes),
+    );
     _cachedEpisodes = data;
 
     const seriesEl = container.querySelector<HTMLElement>(".cons-toolbar-series");
@@ -3625,9 +4554,10 @@ function renderDocPanelSource(
 function renderImporterSection(pane: HTMLElement) {
   pane.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:1rem;padding:1.25rem;overflow-y:auto;height:100%">
-      <!-- Config projet -->
+      <!-- Métadonnées projet (identité corpus — la découverte d’épisodes est dans Sources web) -->
       <div class="cons-card">
         <div class="cons-card-title">Projet</div>
+        <div style="font-size:0.76rem;color:var(--text-muted);margin:-4px 0 2px">Nom, langues, dossier — pas le choix de la source de données.</div>
         <div id="imp-config-body" class="cons-card-body">Chargement…</div>
       </div>
       <!-- Import fichiers -->
@@ -3652,10 +4582,13 @@ function renderImporterSection(pane: HTMLElement) {
           <div id="imp-feedback" style="font-size:0.78rem;color:var(--text-muted);min-height:1.2em"></div>
         </div>
       </div>
-      <!-- Sources web (MX-021b) -->
+      <!-- Sources web (MX-021b) — point d’entrée principal pour structure + transcripts -->
       <div class="cons-card">
         <div class="cons-card-title">Sources web</div>
         <div class="cons-card-body" id="web-src-body">
+          <p style="margin:0 0 10px;font-size:0.8rem;color:var(--text-muted);line-height:1.35">
+            Découvrir la série, enregistrer la <strong>structure d’épisodes</strong> et importer des <strong>transcripts</strong> (TVMaze ou Subslikescript).
+          </p>
           <div class="web-src-tabs">
             <button class="web-src-tab active" data-wsrc="tvmaze">TVMaze</button>
             <button class="web-src-tab" data-wsrc="subslikescript">Subslikescript</button>
@@ -3719,52 +4652,98 @@ const NORMALIZE_PROFILES: Array<{ id: string; label: string; options: NormalizeO
                strip_line_spaces: true,  strip_empty_lines: true,  case_transform: "lowercase" } },
 ];
 
-const SOURCE_IDS = [
-  { id: "subslikescript", label: "Subslikescript" },
-  { id: "tvmaze",         label: "TVMaze" },
-  { id: "",               label: "— autre —" },
-];
+/** Libellé pour la métadonnée `source_id` (remplie automatiquement depuis Sources web, pas éditable ici). */
+function formatStoredSourceMeta(id: string): string {
+  if (!id) return "— (après « Enregistrer la structure » dans Sources web)";
+  if (id === "tvmaze") return "TVMaze";
+  if (id === "subslikescript") return "Subslikescript";
+  return id;
+}
+
+type SeriesIndexForImporter = Awaited<ReturnType<typeof fetchSeriesIndex>>;
 
 async function loadImporterConfig(pane: HTMLElement) {
   const body = pane.querySelector<HTMLElement>("#imp-config-body");
   if (!body) return;
   body.innerHTML = `<div class="cons-loading" style="padding:8px 0">Chargement…</div>`;
   try {
-    _cachedConfig = await fetchConfig();
-    renderConfigForm(body, _cachedConfig, pane);
+    const cfg = await fetchConfig();
+    _cachedConfig = cfg;
+    let seriesIndex: SeriesIndexForImporter;
+    try {
+      seriesIndex = await fetchSeriesIndex();
+    } catch {
+      seriesIndex = { series_title: "", series_url: "", episodes: [] };
+    }
+    renderConfigForm(body, cfg, pane, seriesIndex);
   } catch (e) {
     body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e)}</div>`;
   }
 }
 
-function renderConfigForm(body: HTMLElement, cfg: ConfigResponse, pane: HTMLElement) {
-  const sourceOpts = SOURCE_IDS.map((s) =>
-    `<option value="${s.id}" ${cfg.source_id === s.id ? "selected" : ""}>${escapeHtml(s.label)}</option>`
-  ).join("");
+function renderConfigForm(
+  body: HTMLElement,
+  cfg: ConfigResponse,
+  pane: HTMLElement,
+  seriesIndex: SeriesIndexForImporter,
+) {
+  const nIdxEp = seriesIndex.episodes?.length ?? 0;
+  const idxTitle = (seriesIndex.series_title || "").trim();
+  const hasIdx = nIdxEp > 0 || idxTitle.length > 0;
+  const idxSummary = hasIdx
+    ? `<div class="cfg-index-summary">
+        <strong>Index série enregistré</strong> — ${escapeHtml(idxTitle || "—")}
+        ${seriesIndex.series_url ? ` <span>· ${escapeHtml(seriesIndex.series_url)}</span>` : ""}
+        <span> · ${nIdxEp} épisode${nIdxEp > 1 ? "s" : ""}</span>
+      </div>`
+    : `<div class="cfg-index-summary cfg-index-muted">
+        Pas encore d’index série. Utilisez la section <strong>Sources web</strong> ci-dessous pour découvrir la série et créer les dossiers d’épisodes.
+      </div>`;
+
+  const mergedSeriesUrl = (cfg.series_url || "").trim() || (seriesIndex.series_url || "").trim();
 
   body.innerHTML = `
     <div class="cfg-form">
+      ${idxSummary}
       <div class="cfg-row">
-        <span class="cfg-label">Nom</span>
+        <span class="cfg-label">Nom du projet</span>
         <input class="cfg-input" id="cfg-project-name" type="text" value="${escapeHtml(cfg.project_name)}" />
       </div>
       <div class="cfg-row">
-        <span class="cfg-label">Source</span>
-        <select class="cfg-input cfg-select" id="cfg-source-id">${sourceOpts}</select>
+        <span class="cfg-label" title="Renseignée automatiquement quand vous enregistrez la structure depuis Sources web.">Origine</span>
+        <span class="cfg-muted-inline">${escapeHtml(formatStoredSourceMeta(cfg.source_id))}</span>
+      </div>
+      <div class="cfg-row" style="flex-direction:column;align-items:stretch">
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;width:100%">
+          <span class="cfg-label">URL page série</span>
+          <input class="cfg-input" id="cfg-series-url" type="text" value="${escapeHtml(mergedSeriesUrl)}" placeholder="Subslikescript : URL de la page série · TVMaze : souvent vide (recherche en dessous)" />
+        </div>
+        <div class="cfg-hint">
+          Valeur aussi stockée dans l’<strong>index série</strong> lorsque vous enregistrez la structure via Sources web (les deux restent synchronisés si vous enregistrez depuis cette page).
+          Pour TVMaze, l’URL n’est pas saisie ici : elle provient de la découverte puis de « Enregistrer la structure ».
+        </div>
+      </div>
+      <div class="cfg-row" style="flex-direction:column;align-items:stretch">
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;width:100%">
+          <span class="cfg-label" title="Langues du corpus (pivot, traductions)">Langues du corpus</span>
+          <input class="cfg-input" id="cfg-languages" type="text" value="${escapeHtml(cfg.languages.join(", "))}" placeholder="en, fr, it…" />
+        </div>
+        <div class="cfg-hint">
+          Indépendant du champ <strong>Langue SRT</strong> dans « Importer des fichiers locaux » (langue du fichier importé).
+        </div>
       </div>
       <div class="cfg-row">
-        <span class="cfg-label">URL série</span>
-        <input class="cfg-input" id="cfg-series-url" type="text" value="${escapeHtml(cfg.series_url)}" placeholder="https://subslikescript.com/series/…" />
-      </div>
-      <div class="cfg-row">
-        <span class="cfg-label">Langues</span>
-        <input class="cfg-input" id="cfg-languages" type="text" value="${escapeHtml(cfg.languages.join(", "))}" placeholder="en, fr, it…" />
+        <span class="cfg-label">Normalisation</span>
+        <span class="cfg-muted-inline"><code>${escapeHtml(cfg.normalize_profile)}</code> — réglage dans l’onglet <strong>Actions</strong></span>
       </div>
       <div class="cfg-row" style="justify-content:flex-end;gap:6px">
         <span class="cfg-feedback" id="cfg-feedback"></span>
         <button class="btn btn-primary btn-sm" id="cfg-save-btn">Enregistrer</button>
       </div>
-      <div class="cfg-path">📁 ${escapeHtml(cfg.project_path)}</div>
+      <div class="cfg-path">
+        <span class="cfg-path-label">Dossier projet (ouvert depuis le Hub / le démarrage)</span>
+        📁 ${escapeHtml(cfg.project_path)}
+      </div>
     </div>`;
 
   const feedback = body.querySelector<HTMLElement>("#cfg-feedback")!;
@@ -3774,7 +4753,6 @@ function renderConfigForm(body: HTMLElement, cfg: ConfigResponse, pane: HTMLElem
       feedback.style.color = "var(--text-muted)";
       const update: ConfigUpdate = {
         project_name: (body.querySelector<HTMLInputElement>("#cfg-project-name")!.value),
-        source_id:    (body.querySelector<HTMLSelectElement>("#cfg-source-id")!.value),
         series_url:   (body.querySelector<HTMLInputElement>("#cfg-series-url")!.value),
         languages:    (body.querySelector<HTMLInputElement>("#cfg-languages")!.value)
                         .split(",").map((l) => l.trim()).filter(Boolean),
@@ -3991,7 +4969,19 @@ function wireImporterButtons(pane: HTMLElement) {
             if (!_tvLastData) return;
             try {
               const r = await saveSeriesIndex({ series_title: _tvLastData.series_title, series_url: _tvLastData.series_url, episodes: _tvLastData.episodes });
+              try {
+                await saveConfig({ series_url: _tvLastData.series_url, source_id: "tvmaze" });
+                _cachedConfig = await fetchConfig();
+              } catch (syncErr) {
+                setTvFeedback(
+                  `Index enregistré ; synchro métadonnées projet impossible : ${syncErr instanceof ApiError ? syncErr.message : String(syncErr)}`,
+                  false,
+                );
+                await loadImporterConfig(pane);
+                return;
+              }
               setTvFeedback(`✓ Structure enregistrée — ${r.saved} épisodes, ${r.dirs_created.length} répertoires créés.`);
+              await loadImporterConfig(pane);
             } catch (e) {
               setTvFeedback(e instanceof ApiError ? e.message : String(e), false);
             }
@@ -4038,7 +5028,19 @@ function wireImporterButtons(pane: HTMLElement) {
             if (!_slLastData) return;
             try {
               const r = await saveSeriesIndex({ series_title: _slLastData.series_title, series_url: _slLastData.series_url, episodes: _slLastData.episodes });
+              try {
+                await saveConfig({ series_url: _slLastData.series_url, source_id: "subslikescript" });
+                _cachedConfig = await fetchConfig();
+              } catch (syncErr) {
+                setSlFeedback(
+                  `Index enregistré ; synchro métadonnées projet impossible : ${syncErr instanceof ApiError ? syncErr.message : String(syncErr)}`,
+                  false,
+                );
+                await loadImporterConfig(pane);
+                return;
+              }
               setSlFeedback(`✓ Structure enregistrée — ${r.saved} épisodes, ${r.dirs_created.length} répertoires créés.`);
+              await loadImporterConfig(pane);
             } catch (e) {
               setSlFeedback(e instanceof ApiError ? e.message : String(e), false);
             }
@@ -4053,16 +5055,104 @@ function wireImporterButtons(pane: HTMLElement) {
   });
 }
 
+function seasonsSorted(episodes: Episode[]): number[] {
+  const s = new Set<number>();
+  for (const ep of episodes) {
+    if (typeof ep.season === "number" && Number.isFinite(ep.season)) s.add(ep.season);
+  }
+  return Array.from(s).sort((a, b) => a - b);
+}
+
+function filterEpisodesBySeasonAndSearch(episodes: Episode[], seasonVal: string, q: string): Episode[] {
+  const qq = q.trim().toLowerCase();
+  const all = seasonVal === "all" || seasonVal === "";
+  const sn = parseInt(seasonVal, 10);
+  return episodes.filter((ep) => {
+    if (!all && !(Number.isFinite(sn) && ep.season === sn)) return false;
+    if (!qq) return true;
+    const hay = `${ep.episode_id} ${ep.title ?? ""}`.toLowerCase();
+    return hay.includes(qq);
+  });
+}
+
+function debounceEpListFilter(fn: () => void, ms: number): () => void {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return () => {
+    clearTimeout(t);
+    t = setTimeout(fn, ms);
+  };
+}
+
+function fillSeasonOptions(sel: HTMLSelectElement, episodes: Episode[], previousValue: string) {
+  const seasons = seasonsSorted(episodes);
+  const opts = [`<option value="all">Toutes les saisons</option>`].concat(
+    seasons.map((s) => `<option value="${s}">Saison ${s}</option>`),
+  );
+  sel.innerHTML = opts.join("");
+  const valid = previousValue === "all" || seasons.includes(Number(previousValue));
+  sel.value = valid ? previousValue : "all";
+}
+
+function wireSegEpListFilters(container: HTMLElement) {
+  const root = container.querySelector<HTMLElement>("#seg-acts-ep-list");
+  if (!root || root.dataset.filterWired === "1") return;
+  const season = container.querySelector<HTMLSelectElement>("#seg-ep-season");
+  const search = container.querySelector<HTMLInputElement>("#seg-ep-search");
+  if (!season || !search) return;
+  root.dataset.filterWired = "1";
+  const go = () => renderSegmentationPane(container, _segEpisodesAll);
+  season.addEventListener("change", go);
+  search.addEventListener("input", debounceEpListFilter(go, 200));
+}
+
+function wireAlignEpListFilters(container: HTMLElement) {
+  const root = container.querySelector<HTMLElement>("#align-acts-ep-list");
+  if (!root || root.dataset.filterWired === "1") return;
+  const season = container.querySelector<HTMLSelectElement>("#align-ep-season");
+  const search = container.querySelector<HTMLInputElement>("#align-ep-search");
+  if (!season || !search) return;
+  root.dataset.filterWired = "1";
+  const go = () => renderAlignementPane(container, _alignEpisodesAll, _alignRunsLangMap);
+  season.addEventListener("change", go);
+  search.addEventListener("input", debounceEpListFilter(go, 200));
+}
+
 // ── Sous-vue Segmentation ────────────────────────────────────────────────────
 
 function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
+  _segEpisodesAll = episodes;
   const wrap = container.querySelector<HTMLElement>(".seg-table-wrap");
+  const seasonSel = container.querySelector<HTMLSelectElement>("#seg-ep-season");
+  const searchInp = container.querySelector<HTMLInputElement>("#seg-ep-search");
   if (!wrap) return;
+
+  const prevActive = wrap.querySelector<HTMLTableRowElement>("tr.active-row")?.dataset.epId ?? null;
+
+  if (seasonSel && searchInp) {
+    const curSeason = seasonSel.value;
+    const curSearch = searchInp.value;
+    fillSeasonOptions(seasonSel, episodes, curSeason);
+    searchInp.value = curSearch;
+  }
+
   if (episodes.length === 0) {
     wrap.innerHTML = `<div class="cons-loading">Aucun épisode dans le projet.</div>`;
+    wireSegEpListFilters(container);
     return;
   }
-  const rows = episodes.map((ep) => {
+
+  const seasonVal = seasonSel?.value ?? "all";
+  const searchVal = searchInp?.value ?? "";
+  const filtered = filterEpisodesBySeasonAndSearch(episodes, seasonVal, searchVal);
+
+  if (prevActive && !filtered.some((e) => e.episode_id === prevActive)) {
+    const segTextPanel = container.querySelector<HTMLElement>("#seg-text-panel");
+    if (segTextPanel) {
+      segTextPanel.innerHTML = `<div class="acts-text-empty">← Sélectionnez un épisode</div>`;
+    }
+  }
+
+  const rows = filtered.map((ep) => {
     const t = ep.sources.find((s) => s.source_key === "transcript");
     const state = t?.state ?? "unknown";
     const stateLabel =
@@ -4077,17 +5167,25 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
         ? `<span style="color:var(--success,#16a34a);font-size:0.78rem">✓</span>`
         : `<span style="color:var(--text-muted);font-size:0.78rem">—</span>`;
     return `<tr data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}">
-      <td style="white-space:nowrap;font-family:ui-monospace,monospace;font-size:0.78rem">${escapeHtml(ep.episode_id)}</td>
-      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(ep.title)}</td>
-      <td>${stateLabel}</td>
-      <td>${action}</td>
+      <td class="acts-ep-cell-id">${escapeHtml(ep.episode_id)}</td>
+      <td class="acts-ep-cell-title">${escapeHtml(ep.title)}</td>
+      <td class="acts-ep-cell-status">${stateLabel}</td>
+      <td class="acts-ep-cell-action">${action}</td>
     </tr>`;
   }).join("");
+  if (!filtered.length) {
+    wrap.innerHTML = `<div class="cons-loading" style="padding:12px 8px;font-size:0.78rem;line-height:1.4">Aucun épisode ne correspond au filtre.</div>`;
+    wireSegEpListFilters(container);
+    return;
+  }
   wrap.innerHTML = `
     <table class="cons-table">
-      <thead><tr><th>ID</th><th>Titre</th><th>État</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>Titre</th><th>État transcript</th><th>Action</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+  if (prevActive && filtered.some((e) => e.episode_id === prevActive)) {
+    wrap.querySelector(`tr[data-ep-id="${window.CSS.escape(prevActive)}"]`)?.classList.add("active-row");
+  }
   wrap.querySelectorAll<HTMLButtonElement>(".seg-ep-btn").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -4132,6 +5230,7 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
       }
     });
   }
+  wireSegEpListFilters(container);
 }
 
 /**
@@ -4147,7 +5246,7 @@ async function loadSegmentsTable(
 ) {
   panel.innerHTML = `<div class="acts-text-empty">Chargement segments…</div>`;
   try {
-    const res = await fetchEpisodeSegments(epId, kind);
+    const res = await withNoDbRecovery(() => fetchEpisodeSegments(epId, kind));
     const segs = res.segments;
 
     if (segs.length === 0) {
@@ -4235,7 +5334,7 @@ async function loadSegmentsTable(
             const patch: { text?: string; speaker_explicit?: string | null } = {};
             if (field === "text") patch.text = newVal;
             else patch.speaker_explicit = newVal || null;
-            const updated = await patchSegment(epId, segId, patch);
+            const updated = await withNoDbRecovery(() => patchSegment(epId, segId, patch));
             // Mettre à jour le DOM
             tr.dataset.segText = updated.text;
             tr.dataset.segSpk = updated.speaker_explicit ?? "";
@@ -4288,12 +5387,21 @@ async function loadAndRenderSegmentation(container: HTMLElement) {
   const wrap = container.querySelector<HTMLElement>(".seg-table-wrap");
   if (wrap) wrap.innerHTML = `<div class="cons-loading">Chargement…</div>`;
   try {
-    const data = await fetchEpisodes();
+    const data = await withNoDbRecovery(() => fetchEpisodes());
     _cachedEpisodes = data;
     renderSegmentationPane(container, data.episodes);
     updateHubStats(container);
   } catch (e) {
-    if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
+    if (!wrap) return;
+    const main = escapeHtml(formatApiError(e));
+    const noDbHint =
+      e instanceof ApiError && e.errorCode === "NO_DB"
+        ? `<p style="margin-top:10px;font-size:0.76rem;color:var(--text-muted);max-width:42rem;line-height:1.55">
+            La création automatique de <code>corpus.db</code> a échoué ou le backend refuse l’écriture. Vérifiez les droits sur le dossier projet,
+            que le sidecar Python est à jour, puis réessayez. Sinon : import transcript / normalisation pour indexer le corpus.
+          </p>`
+        : "";
+    wrap.innerHTML = `<div class="cons-loading" style="line-height:1.45"><span style="color:var(--danger)">${main}</span>${noDbHint}</div>`;
   }
 }
 
@@ -4577,13 +5685,40 @@ function renderAlignementPane(
   episodes: Episode[],
   alignedLangs: Map<string, Set<string>> = new Map(),
 ) {
+  _alignEpisodesAll = episodes;
+  _alignRunsLangMap = alignedLangs;
   const wrap = container.querySelector<HTMLElement>(".align-ep-wrap");
+  const seasonSel = container.querySelector<HTMLSelectElement>("#align-ep-season");
+  const searchInp = container.querySelector<HTMLInputElement>("#align-ep-search");
   if (!wrap) return;
+
+  const prevActive = wrap.querySelector<HTMLTableRowElement>("tr.active-row")?.dataset.epId ?? null;
+
+  if (seasonSel && searchInp) {
+    const curSeason = seasonSel.value;
+    const curSearch = searchInp.value;
+    fillSeasonOptions(seasonSel, episodes, curSeason);
+    searchInp.value = curSearch;
+  }
+
   if (episodes.length === 0) {
     wrap.innerHTML = `<div class="cons-loading">Aucun épisode dans le projet.</div>`;
+    wireAlignEpListFilters(container);
     return;
   }
-  const rows = episodes.map((ep) => {
+
+  const seasonVal = seasonSel?.value ?? "all";
+  const searchVal = searchInp?.value ?? "";
+  const filtered = filterEpisodesBySeasonAndSearch(episodes, seasonVal, searchVal);
+
+  if (prevActive && !filtered.some((e) => e.episode_id === prevActive)) {
+    const alignTextPanel = container.querySelector<HTMLElement>("#align-text-panel");
+    if (alignTextPanel) {
+      alignTextPanel.innerHTML = `<div class="acts-text-empty">← Sélectionnez un épisode</div>`;
+    }
+  }
+
+  const rows = filtered.map((ep) => {
     const t = ep.sources.find((s) => s.source_key === "transcript");
     const srts = ep.sources.filter((s) => s.source_key.startsWith("srt_") && s.available);
     const isSegmented = t?.state === "segmented";
@@ -4591,11 +5726,11 @@ function renderAlignementPane(
 
     // A-1 : statut par langue SRT (✓ si lang dans un run d'alignement)
     const srtStatus = srts.length > 0
-      ? srts.map((s) => {
+      ? `<div class="acts-ep-lang-stack">${srts.map((s) => {
           const lang = s.source_key.replace("srt_", "");
           const done = epAligned.has(lang);
           return `<span class="align-lang-badge ${done ? "done" : "pending"}">${escapeHtml(lang)} ${done ? "✓" : "✗"}</span>`;
-        }).join("")
+        }).join("")}</div>`
       : `<span style="color:var(--text-muted);font-size:0.78rem">—</span>`;
 
     const canAlign = isSegmented && srts.length > 0;
@@ -4604,17 +5739,25 @@ function renderAlignementPane(
       : `<span class="align-ep-blocked" title="${!isSegmented ? "Segmenter d'abord" : "Importer un SRT"}">${!isSegmented ? "seg. manquante" : "SRT manquant"}</span>`;
 
     return `<tr data-ep-id="${escapeHtml(ep.episode_id)}" data-ep-title="${escapeHtml(ep.title)}" style="cursor:pointer">
-      <td class="align-cell-id">${escapeHtml(ep.episode_id)}</td>
-      <td class="align-cell-title">${escapeHtml(ep.title)}</td>
-      <td class="align-cell-status">${srtStatus}</td>
-      <td class="align-cell-action">${action}</td>
+      <td class="acts-ep-cell-id">${escapeHtml(ep.episode_id)}</td>
+      <td class="acts-ep-cell-title">${escapeHtml(ep.title)}</td>
+      <td class="acts-ep-cell-status">${srtStatus}</td>
+      <td class="acts-ep-cell-action">${action}</td>
     </tr>`;
   }).join("");
+  if (!filtered.length) {
+    wrap.innerHTML = `<div class="cons-loading" style="padding:12px 8px;font-size:0.78rem;line-height:1.4">Aucun épisode ne correspond au filtre.</div>`;
+    wireAlignEpListFilters(container);
+    return;
+  }
   wrap.innerHTML = `
-    <table class="cons-table align-ep-table">
-      <thead><tr><th>ID</th><th>Titre</th><th>Alignement</th><th></th></tr></thead>
+    <table class="cons-table">
+      <thead><tr><th>ID</th><th>Titre</th><th>Langues SRT</th><th>Action</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+  if (prevActive && filtered.some((e) => e.episode_id === prevActive)) {
+    wrap.querySelector(`tr[data-ep-id="${window.CSS.escape(prevActive)}"]`)?.classList.add("active-row");
+  }
   wrap.querySelectorAll<HTMLButtonElement>(".align-ep-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const epId       = btn.dataset.ep!;
@@ -4660,6 +5803,7 @@ function renderAlignementPane(
       });
     });
   }
+  wireAlignEpListFilters(container);
 }
 
 async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle: string) {
@@ -5101,10 +6245,6 @@ async function openAuditView(panel: HTMLElement, epId: string, epTitle: string, 
     return Array.from(
       panel.querySelectorAll<HTMLTableRowElement>(".audit-table tbody tr[data-link-id]"),
     );
-  }
-
-  function _auditFocusRow(_row: HTMLTableRowElement | null) {
-    // Legacy: focus is now index-driven via _vsFocusIdx; this is a no-op shim.
   }
 
   function _auditClickAction(row: HTMLTableRowElement, action: string) {
@@ -6243,10 +7383,17 @@ let _selectedCharIdx: number | null = null;
 function renderPersonnagesSection(pane: HTMLElement) {
   pane.innerHTML = `
     <div class="pers-toolbar">
-      <span class="pers-toolbar-title">Personnages</span>
+      <span class="pers-toolbar-title">Personnages — catalogue</span>
       <button class="btn btn-primary" id="pers-add-btn" style="font-size:0.8rem">+ Nouveau</button>
-      <button class="btn btn-secondary btn-sm" id="pers-auto-btn" title="Assigner automatiquement les locuteurs aux personnages par correspondance d'alias">⚡ Auto-assigner</button>
+      <button class="btn btn-secondary btn-sm" id="pers-import-speakers-btn" title="Crée une entrée catalogue par locuteur distinct trouvé sur les segments (speaker_explicit), comme sous PyQt">Importer depuis les segments</button>
+      <button class="btn btn-secondary btn-sm" id="pers-auto-btn" title="Compare speaker_explicit des segments aux id / noms / alias du catalogue (comme la logique d’appariement Qt)">⚡ Auto-assigner</button>
+      <button class="btn btn-ghost btn-sm" id="pers-goto-dist" title="Tableau réplique ↔ personnage (équivalent partie « tours » de l’onglet PyQt)">Distribution →</button>
       <button class="btn btn-ghost btn-sm" id="pers-refresh">↺</button>
+    </div>
+    <div class="pers-intro" style="margin:0 16px 12px;line-height:1.55;font-size:0.8rem;color:var(--text);max-width:52rem">
+      <p style="margin:0 0 8px"><strong>But</strong> : une <em>base de personnages</em> du projet (fichier catalogue + API). Chaque entrée a un <strong>id</strong>, un nom <strong>canonique</strong>, des noms <strong>par langue</strong> et des <strong>alias</strong> (variantes « TED », « Marshall », etc.) pour reconnaître les libellés dans le transcript ou les SRT. <strong>Importer depuis les segments</strong> préremplit le catalogue avec les locuteurs déjà présents sur les segments (équivalent PyQt).</p>
+      <p style="margin:0 0 8px"><strong>Assignation d’un nom</strong> : soit <strong>automatique</strong> via ⚡ Auto-assigner (correspondance entre le locuteur déjà présent sur les segments et le catalogue), soit <strong>manuelle</strong> ligne par ligne dans <strong>Actions → Distribution</strong> (choix du personnage par réplique utterance). Vous pouvez tout saisir à la main dans le formulaire ci-dessous.</p>
+      <p style="margin:0;font-size:0.76rem;color:var(--text-muted)"><strong>Rappel PyQt</strong> : le même onglet regroupait le catalogue <em>et</em> un tableau par épisode (segments phrases / tours / cues) avec « Suggérer par alias ». Ici le catalogue reste dans cet onglet ; le tableau des tours (utterance) est dans Distribution.</p>
     </div>
     <div class="cons-error" id="pers-error" style="display:none;margin:0 16px 0"></div>
     <div id="pers-auto-result" style="display:none;margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)"></div>
@@ -6270,6 +7417,45 @@ function renderPersonnagesSection(pane: HTMLElement) {
 
   pane.querySelector<HTMLButtonElement>("#pers-refresh")!
     .addEventListener("click", () => loadPersonnages(pane));
+
+  pane.querySelector<HTMLButtonElement>("#pers-import-speakers-btn")?.addEventListener("click", async () => {
+    const btn = pane.querySelector<HTMLButtonElement>("#pers-import-speakers-btn")!;
+    const resultEl = pane.querySelector<HTMLElement>("#pers-auto-result")!;
+    btn.disabled = true;
+    resultEl.style.display = "none";
+    try {
+      const r = await importCharactersFromSegments();
+      if (r.added > 0) {
+        resultEl.textContent = `✓ ${r.added} entrée(s) ajoutée(s) (${r.total_characters} dans le catalogue).`;
+        resultEl.style.cssText =
+          "display:block;background:#f0fdf4;color:#166534;margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)";
+      } else if (r.message) {
+        resultEl.textContent = `ℹ ${r.message}`;
+        resultEl.style.cssText =
+          "display:block;background:var(--surface2);color:var(--text-muted);margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)";
+      } else {
+        resultEl.textContent = "ℹ Aucune nouvelle entrée.";
+        resultEl.style.cssText =
+          "display:block;background:var(--surface2);color:var(--text-muted);margin:4px 16px;font-size:0.78rem;padding:6px 10px;border-radius:var(--radius)";
+      }
+      void loadPersonnages(pane);
+    } catch (e) {
+      const errEl = pane.querySelector<HTMLElement>("#pers-error");
+      if (errEl) {
+        errEl.textContent = e instanceof Error ? e.message : String(e);
+        errEl.style.display = "block";
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  pane.querySelector<HTMLButtonElement>("#pers-goto-dist")?.addEventListener("click", () => {
+    localStorage.setItem("cons-active-section", "actions");
+    localStorage.setItem("cons-active-subview", "distribution");
+    _ctx?.navigateTo("constituer");
+    document.dispatchEvent(new CustomEvent("himyc:open-distribution"));
+  });
 
   pane.querySelector<HTMLButtonElement>("#pers-auto-btn")!
     .addEventListener("click", async () => {
@@ -6517,7 +7703,7 @@ function _renderAssignmentsBlock(charId: string): string {
       <div class="pers-field">
         <label class="pers-label">Assignations <span style="font-weight:400">(0)</span></label>
         <div style="font-size:0.8rem;color:var(--text-muted);font-style:italic">
-          Aucune assignation. Les assignations sont créées depuis l'Inspecter ou via le concordancier.
+          Aucune assignation. Création via <strong>Auto-assigner</strong> (locuteurs reconnus) ; affinage manuel : <strong>Constituer → Actions → Distribution</strong>.
         </div>
       </div>`;
   }
@@ -6691,7 +7877,13 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   // Restore persisted nav state
   _navCollapsed = localStorage.getItem("cons-nav-collapsed") === "1";
   const _savedSubView = localStorage.getItem("cons-active-subview");
-  if (_savedSubView === "hub" || _savedSubView === "curation" || _savedSubView === "segmentation" || _savedSubView === "alignement") {
+  if (
+    _savedSubView === "hub"
+    || _savedSubView === "curation"
+    || _savedSubView === "distribution"
+    || _savedSubView === "segmentation"
+    || _savedSubView === "alignement"
+  ) {
     _activeActionsSubView = _savedSubView;
   }
   const _savedSection = localStorage.getItem("cons-active-section");
@@ -6715,6 +7907,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         <div class="cons-nav-tree-body">
           <button class="cons-nav-tree-link${_activeSection === "actions" && _activeActionsSubView === "curation"     ? " active" : ""}" data-subview="curation">Curation</button>
           <button class="cons-nav-tree-link${_activeSection === "actions" && _activeActionsSubView === "segmentation" ? " active" : ""}" data-subview="segmentation">Segmentation</button>
+          <button class="cons-nav-tree-link${_activeSection === "actions" && _activeActionsSubView === "distribution" ? " active" : ""}" data-subview="distribution">Distribution</button>
           <button class="cons-nav-tree-link${_activeSection === "actions" && _activeActionsSubView === "alignement"   ? " active" : ""}" data-subview="alignement">Alignement</button>
         </div>
 
@@ -7040,11 +8233,62 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             <div class="cons-error seg-error" style="display:none"></div>
             <!-- Vue Table -->
             <div id="seg-view-table" class="acts-split" style="flex:1;min-height:0;overflow:hidden">
-              <div class="acts-ep-list">
+              <div class="acts-ep-list" id="seg-acts-ep-list">
+                <div class="acts-ep-list-title">Épisodes</div>
+                <div class="acts-ep-filters" role="search">
+                  <div class="acts-ep-filter-row">
+                    <label class="acts-ep-filter-label" for="seg-ep-season">Saison</label>
+                    <select id="seg-ep-season" class="acts-ep-filter-select" aria-label="Filtrer par saison">
+                      <option value="all">Toutes les saisons</option>
+                    </select>
+                  </div>
+                  <input type="search" id="seg-ep-search" class="acts-ep-filter-search" placeholder="Rechercher (ID, titre)…" autocomplete="off" />
+                </div>
                 <div class="seg-table-wrap cons-loading">Chargement…</div>
               </div>
               <div class="acts-text-panel" id="seg-text-panel">
                 <div class="acts-text-empty">← Sélectionnez un épisode</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Distribution sub-pane : assignation personnage ↔ segments / cues -->
+          <div class="cons-actions-pane${_activeActionsSubView === "distribution" ? " active" : ""}" data-subview="distribution">
+            <div class="cons-toolbar">
+              <span class="cons-toolbar-title">Distribution</span>
+              <button class="btn btn-ghost btn-sm" id="cons-refresh-distribution" title="Recharger">↺ Actualiser</button>
+            </div>
+            <div class="acts-hub" id="dist-panel-root" style="padding:12px 16px; flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; max-width:900px; width:100%">
+              <p style="margin:0 0 10px;font-size:0.82rem;color:var(--text);line-height:1.45">
+                Personnage par ligne selon la <strong>source</strong> (tours / phrases / cues). Catalogue : <strong>Personnages</strong>.
+                Mode <strong>tours</strong> : colonne locuteur (<code>speaker_explicit</code>). Bouton <strong>Alias</strong> : préremplit si le texte commence par un alias.
+                <span style="color:var(--text-muted)"> · Enregistrer → assignations, puis alignement.</span>
+              </p>
+              <div id="dist-corpus-stats" style="font-size:0.78rem;color:var(--text-muted);margin-bottom:8px">Chargement…</div>
+              <div class="dist-toolbar-row">
+                <label for="dist-ep-select">Épisode</label>
+                <select class="acts-params-select" id="dist-ep-select" style="min-width:min(220px,92vw)">
+                  <option value="">— Choisir —</option>
+                </select>
+                <label for="dist-source-kind">Source</label>
+                <select class="acts-params-select" id="dist-source-kind" title="Type de ligne">
+                  <option value="utterance" title="utterance">Tours</option>
+                  <option value="sentence" title="sentence">Phrases</option>
+                  <option value="cue" title="cues SRT">Cues SRT</option>
+                </select>
+                <span id="dist-cue-lang-wrap" style="display:none;align-items:center;gap:6px">
+                  <label for="dist-cue-lang">Langue</label>
+                  <select class="acts-params-select" id="dist-cue-lang" style="min-width:4.5rem"></select>
+                </span>
+                <button type="button" class="btn btn-secondary btn-sm" id="dist-suggest-alias" title="Alias → personnage si le texte commence par un alias">Alias</button>
+                <input type="search" class="dist-filter-input" id="dist-filter" placeholder="Filtrer…" autocomplete="off" />
+                <button type="button" class="btn btn-primary btn-sm" id="dist-save-btn">Enregistrer</button>
+                <span id="dist-save-msg" style="font-size:0.76rem;min-width:80px"></span>
+              </div>
+              <div id="dist-summary" style="font-size:0.76rem;color:var(--text-muted);margin-bottom:6px"></div>
+              <div class="cons-error" id="dist-error" style="display:none;margin-bottom:8px"></div>
+              <div id="dist-table-wrap" style="flex:1;min-height:180px;border:1px solid var(--border);border-radius:8px;overflow:auto;background:var(--surface)">
+                <div id="dist-table-inner" class="acts-text-empty" style="padding:14px">Chargement…</div>
               </div>
             </div>
           </div>
@@ -7061,7 +8305,17 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             </div>
             <!-- Vue Inspection -->
             <div id="align-view-inspect" class="acts-split" style="flex:1;min-height:0;overflow:hidden">
-              <div class="acts-ep-list">
+              <div class="acts-ep-list" id="align-acts-ep-list">
+                <div class="acts-ep-list-title">Épisodes</div>
+                <div class="acts-ep-filters" role="search">
+                  <div class="acts-ep-filter-row">
+                    <label class="acts-ep-filter-label" for="align-ep-season">Saison</label>
+                    <select id="align-ep-season" class="acts-ep-filter-select" aria-label="Filtrer par saison">
+                      <option value="all">Toutes les saisons</option>
+                    </select>
+                  </div>
+                  <input type="search" id="align-ep-search" class="acts-ep-filter-search" placeholder="Rechercher (ID, titre)…" autocomplete="off" />
+                </div>
                 <div class="align-ep-wrap cons-loading">Chargement…</div>
               </div>
               <div class="acts-text-panel" id="align-text-panel">
@@ -7115,7 +8369,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   }
 
   // ── Helper: switch Actions sub-view ──────────────────────────────────────
-  function activateSubView(subview: "hub" | "curation" | "segmentation" | "alignement") {
+  function activateSubView(subview: "hub" | "curation" | "distribution" | "segmentation" | "alignement") {
     _activeActionsSubView = subview;
     localStorage.setItem("cons-active-subview", subview);
     container.querySelectorAll<HTMLElement>(".cons-actions-pane")
@@ -7131,10 +8385,18 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       const wrap = container.querySelector(".align-ep-wrap");
       if (wrap?.classList.contains("cons-loading")) loadAndRenderAlignement(container);
     }
+    if (subview === "distribution") void loadDistributionPanel(container);
     // Init params panels on first show
     if (subview === "hub")      { initHubParams(container); updateHubStats(container); }
     if (subview === "curation") initCurationParams(container);
   }
+
+  _openDistributionNavListener = () => {
+    activateSection("actions");
+    activateSubView("distribution");
+    void loadDistributionPanel(container);
+  };
+  document.addEventListener("himyc:open-distribution", _openDistributionNavListener);
 
   // ── Hub params : initialisation au premier affichage ────────────────────
   async function initHubParams(cnt: HTMLElement) {
@@ -7410,7 +8672,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   container.querySelectorAll<HTMLButtonElement>(".cons-nav-tree-link").forEach((btn) => {
     btn.addEventListener("click", () => {
       activateSection("actions");
-      activateSubView(btn.dataset.subview as "curation" | "segmentation" | "alignement");
+      activateSubView(btn.dataset.subview as "curation" | "distribution" | "segmentation" | "alignement");
     });
   });
 
@@ -7454,6 +8716,9 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
   container.querySelector<HTMLButtonElement>("#cons-refresh-seg")
     ?.addEventListener("click", () => loadAndRenderSegmentation(container));
+
+  container.querySelector<HTMLButtonElement>("#cons-refresh-distribution")
+    ?.addEventListener("click", () => void loadDistributionPanel(container, { force: true }));
 
   // ── Seg mode toggle (Table / Texte) ─────────────────────────────────────────
   container.querySelector<HTMLButtonElement>("#seg-mode-table")
@@ -7569,6 +8834,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
     if (_activeSection === "actions") {
       if (_activeActionsSubView === "hub")           initHubParams(container);
       if (_activeActionsSubView === "curation")      initCurationParams(container);
+      if (_activeActionsSubView === "distribution")  void loadDistributionPanel(container);
       if (_activeActionsSubView === "segmentation")  loadAndRenderSegmentation(container);
       if (_activeActionsSubView === "alignement")    loadAndRenderAlignement(container);
     }
@@ -7627,6 +8893,10 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 export function disposeConstituer() {
   stopJobPoll();
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+  if (_openDistributionNavListener) {
+    document.removeEventListener("himyc:open-distribution", _openDistributionNavListener);
+    _openDistributionNavListener = null;
+  }
   _container = null;
   _ctx = null;
   _cachedEpisodes = null;

@@ -4,8 +4,12 @@
  * Adapte de AGRAFES tauri-app/src/features/metaPanel.ts@03a8790.
  * Modele de donnees remplace : QueryHit/doc_id/unit_id -> EpisodeSourceInfo.
  * Structure conservee : open/close, backdrop, sections, bouton copie.
+ * Ouverture depuis le Concordancier (KWIC) : `concordancierModule` appelle `openMetaPanel`
+ * avec les infos dérivées du hit (épisode, source selon le scope, segment/cue si présents).
+ * (L’ancien module Inspecter source-centric a été retiré du dépôt — Curation + Distribution couvrent le flux.)
+ *
  * Hors perimetre HIMYC (non portes) :
- *   - navigation prev/next dans les hits de recherche (pas de concordancier)
+ *   - navigation prev/next entre hits
  *   - compteur "autres occurrences" (pas de state.hits)
  *   - contexte local via GET /unit/context (pas de segmentation unites)
  */
@@ -22,6 +26,9 @@ export interface EpisodeSourceInfo {
   language?: string;
   source_state?: string;    // "raw" | "normalized" | "segmented" | "ready_for_alignment"
   track_count?: number;     // nombre de pistes SRT disponibles pour cet episode
+  /** Présents si ouverture depuis un hit Concordancier. */
+  segment_id?: string | null;
+  cue_id?: string | null;
 }
 
 // ─── Module state ─────────────────────────────────────────────────────────────
@@ -88,6 +95,7 @@ const CSS = `
 
   #himyc-meta-body {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 12px 14px;
   }
@@ -251,6 +259,13 @@ function _renderContent(
       _stateLabel(info.source_state));
     stateRow.appendChild(badge);
     body.appendChild(stateRow);
+  }
+
+  if (info.segment_id) {
+    body.appendChild(field("Segment", info.segment_id));
+  }
+  if (info.cue_id) {
+    body.appendChild(field("Cue", info.cue_id));
   }
 
   // ── Pied : actions ───────────────────────────────────────────────────────────

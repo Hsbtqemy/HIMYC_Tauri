@@ -3,9 +3,9 @@
  *
  * Couvre :
  * - Import transcript via API REST
- * - Bouton "Normaliser" dans l'Inspecter → feedback "Terminé ✓"
- * - Bouton "Segmenter" dans l'Inspecter → feedback "Terminé ✓"
- * - Bouton export CSV dans l'Exporter  → result "✓ … segments"
+ * - Normalisation depuis Constituer → Actions → Curation (bouton ⚡ épisode)
+ * - Segmentation depuis Actions → Segmentation
+ * - Export CSV segments dans l'Exporter
  *
  * Prérequis :
  * - Backend FastAPI sur localhost:8765 (HIMYC_PROJECT_PATH=/tmp/himyc-e2e)
@@ -30,12 +30,12 @@ Ted Mosby: Where was I? Right. It started with Robin.
 Barney Stinson: Legendary. Wait for it.
 `;
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-/** Navigate to a module tab (via localStorage + reload). */
-async function gotoModule(page: import("@playwright/test").Page, mode: string) {
-  await page.evaluate((m) => localStorage.setItem("himyc_last_mode", m), mode);
-  await page.reload({ waitUntil: "networkidle" });
+/** Hub puis sidebar Constituer → sous-vue Curation. */
+async function gotoConstituerCuration(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.locator('[data-mode="constituer"]').click();
+  await page.waitForSelector('.cons-nav-tree-link[data-subview="curation"]', { timeout: 15_000 });
+  await page.locator('.cons-nav-tree-link[data-subview="curation"]').click();
 }
 
 // ── Tests (séquentiels — chaque étape dépend de la précédente) ─────────────────
@@ -49,52 +49,40 @@ test.describe.serial("Pipeline normalize → segment → export", () => {
     expect(r.ok(), `Import transcript: ${await r.text()}`).toBeTruthy();
   });
 
-  test("1. Inspecter — bouton Normaliser visible et job terminé", async ({ page }) => {
-    await page.goto("/");
-    await gotoModule(page, "constituer");
+  test("1. Curation — normalisation épisode S01E01 (⚡) puis badge norm.", async ({ page }) => {
+    await gotoConstituerCuration(page);
 
-    // Cliquer sur "→ Inspecter" de l'épisode S01E01
-    await page.waitForSelector('[data-inspecter="S01E01"]', { timeout: 10_000 });
-    await page.click('[data-inspecter="S01E01"]');
+    const normBtn = page.locator('button.cur-ep-normalize[data-ep="S01E01"]');
+    await expect(normBtn).toBeVisible({ timeout: 15_000 });
+    await normBtn.click();
 
-    // Le bouton Normaliser doit être présent (transcript en état "raw")
-    const btnNorm = page.locator("#insp-btn-normalize");
-    await expect(btnNorm).toBeVisible({ timeout: 10_000 });
-
-    await btnNorm.click();
-
-    // Attendre le feedback "Terminé ✓" (job asynchrone — jusqu'à 30 s)
-    await expect(page.locator("#insp-job-fb")).toContainText("Terminé ✓", { timeout: 30_000 });
+    await expect(page.locator('.cur-ep-item[data-ep-id="S01E01"] .cons-badge.normalized')).toBeVisible({
+      timeout: 45_000,
+    });
   });
 
-  test("2. Inspecter — bouton Segmenter visible et job terminé", async ({ page }) => {
-    await page.goto("/");
-    await gotoModule(page, "constituer");
+  test("2. Segmentation — job segmenter sur S01E01", async ({ page }) => {
+    await gotoConstituerCuration(page);
+    await page.locator('.cons-nav-tree-link[data-subview="segmentation"]').click();
 
-    await page.waitForSelector('[data-inspecter="S01E01"]', { timeout: 10_000 });
-    await page.click('[data-inspecter="S01E01"]');
+    const segBtn = page.locator('button.seg-ep-btn[data-ep="S01E01"]');
+    await expect(segBtn).toBeVisible({ timeout: 15_000 });
+    await segBtn.click();
 
-    // Après normalisation, le bouton Segmenter remplace Normaliser
-    const btnSeg = page.locator("#insp-btn-segment");
-    await expect(btnSeg).toBeVisible({ timeout: 10_000 });
-
-    await btnSeg.click();
-
-    await expect(page.locator("#insp-job-fb")).toContainText("Terminé ✓", { timeout: 30_000 });
+    await expect(
+      page.locator('tr[data-ep-id="S01E01"] .cons-badge.segmented'),
+    ).toBeVisible({ timeout: 45_000 });
   });
 
   test("3. Exporter — export CSV segments produit un résultat", async ({ page }) => {
     await page.goto("/");
-    await gotoModule(page, "exporter");
+    await page.locator('[data-mode="exporter"]').click();
 
-    // Activer l'onglet "Segments" dans l'Exporter
     await page.waitForSelector('[data-stage="segments"]', { timeout: 10_000 });
     await page.click('[data-stage="segments"]');
 
-    // Lancer l'export CSV
     await page.click('[data-scope="segments"][data-fmt="csv"]');
 
-    // Le div résultat doit contenir "✓" et au moins une mention de "segment" ou du chemin
     await expect(page.locator("#exp-segments-result")).toContainText("✓", { timeout: 15_000 });
   });
 });

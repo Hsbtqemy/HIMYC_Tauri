@@ -59,16 +59,19 @@ const CSS = `
 }
 /* KPI strip */
 .exp-kpi-strip {
-  display: flex;
-  gap: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 10px 14px;
   padding: 6px 0 10px;
-  flex-wrap: wrap;
+  align-items: stretch;
 }
+.exp-kpi-sep { display: none; }
 .exp-kpi {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 56px;
+  justify-content: center;
+  min-width: 0;
 }
 .exp-kpi-val {
   font-size: 1.1rem;
@@ -78,7 +81,6 @@ const CSS = `
   line-height: 1.2;
 }
 .exp-kpi-label { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
-.exp-kpi-sep { width: 1px; background: var(--border); align-self: stretch; margin: 2px 0; }
 /* Stage tabs */
 .exp-tabs {
   display: flex;
@@ -110,6 +112,7 @@ const CSS = `
 /* Body */
 .exp-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 1.25rem 1.5rem;
   display: flex;

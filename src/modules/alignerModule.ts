@@ -1,7 +1,7 @@
 /**
  * alignerModule.ts — Mode Aligner (MX-009)
  *
- * Handoff depuis l'Inspecter :
+ * Handoff depuis Constituer → Actions → Alignement (setHandoff avant navigateTo("aligner")) :
  *   ctx.getHandoff() → AlignerHandoff{episode_id, pivot_key, target_keys, mode, segment_kind}
  *
  * Si handoff présent → formulaire pré-rempli.
@@ -61,6 +61,7 @@ const CSS = `
 /* Body scroll */
 .align-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px;
   display: flex;

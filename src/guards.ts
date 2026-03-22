@@ -230,7 +230,7 @@ export function getAlignPreconditions(episode: Episode): AlignPrecondition[] {
         id: "transcript_normalized",
         label: "Transcript normalisé",
         met: isNorm,
-        hint: isNorm ? undefined : "Normalisez le transcript via l'onglet Inspecter.",
+        hint: isNorm ? undefined : "Normalisez le transcript dans Constituer → Actions → Curation.",
       },
       {
         id: "transcript_segmented",
@@ -238,8 +238,8 @@ export function getAlignPreconditions(episode: Episode): AlignPrecondition[] {
         met: isSeg,
         hint: isSeg ? undefined : (
           isNorm
-            ? "Segmentez le transcript via l'onglet Inspecter."
-            : "Normalisez puis segmentez le transcript via l'onglet Inspecter."
+            ? "Segmentez le transcript dans Constituer → Actions → Segmentation."
+            : "Normalisez puis segmentez le transcript dans Constituer → Actions (Curation puis Segmentation)."
         ),
       },
       {

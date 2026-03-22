@@ -12,13 +12,17 @@
  *   - Filtre drawer (type / langue / épisode / locuteur)
  *   - Chips bar (filtres actifs)
  *   - Analytics bar (total hits · épisodes · langues · top-épisodes cliquables)
- *   - Reset button (efface tout)
- *   - Pagination client-side avec bannière has_more
+ *   - Barre résultats : tri client (épisode / position), affichage compact, Charger plus (offset + append jusqu’à 2000)
+  *   - Raccourcis / (focus recherche), Esc (ferme popovers)
+  *   - Bouton ℹ par résultat → panneau méta épisode/source (`features/metaPanel.ts`)
+  *   - Reset button (efface tout)
+  *   - Pagination client-side avec bannière has_more
  */
 
 import type { ShellContext } from "../context";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
-import { apiPost, apiGet, ApiError } from "../api";
+import { apiPost, apiGet, ApiError, withNoDbRecovery } from "../api";
+import { openMetaPanel, type EpisodeSourceInfo } from "../features/metaPanel.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +52,7 @@ interface QueryRequest {
   speaker?: string | null;
   window?: number;
   limit?: number;
+  offset?: number;
   case_sensitive?: boolean;
 }
 
@@ -100,6 +105,7 @@ const CSS = `
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 80%, transparent);
 }
 .kwic-search-row {
   display: flex;
@@ -597,6 +603,7 @@ const CSS = `
 /* ── Results table ───────────────────────────────────────────── */
 .kwic-table-wrap {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -647,6 +654,21 @@ const CSS = `
 .kwic-col-right { width: 26%; color: var(--text-muted); }
 .kwic-col-meta  { width: 120px; }
 .kwic-col-copy  { width: 30px; }
+.kwic-meta-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.kwic-meta-btn:hover {
+  background: var(--surface2);
+  color: var(--text);
+}
 .kwic-ep-id {
   font-family: ui-monospace, monospace;
   font-size: 0.68rem;
@@ -728,6 +750,7 @@ const CSS = `
 /* ── Aligned cards view ──────────────────────────────────────── */
 .kwic-cards-wrap {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 10px 14px;
   display: flex;
@@ -842,12 +865,101 @@ const CSS = `
 }
 .kwic-pagination.visible { display: flex; }
 .kwic-pag-gap { flex: 1; }
+
+/* ── Barre résultats (tri / compact / charger +) — style type atelier AGRAFES ─ */
+.kwic-results-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface2) 85%, var(--surface));
+  flex-shrink: 0;
+}
+.kwic-results-toolbar.hidden { display: none; }
+.kwic-results-left, .kwic-results-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.kwic-results-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+}
+.kwic-results-select {
+  font-size: 0.78rem;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  min-width: 200px;
+}
+.kwic-results-count {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+.kwic-compact-toggle.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface2));
+}
+
+/* Mode compact : densité type liste KWIC studio */
+.kwic-root.kwic-compact .kwic-table th { padding: 3px 6px; font-size: 0.65rem; }
+.kwic-root.kwic-compact .kwic-table td { padding: 2px 6px; font-size: 0.76rem; }
+.kwic-root.kwic-compact .kwic-match-pill { font-size: 0.78rem; }
+.kwic-root.kwic-compact .kwic-card { padding: 6px 10px; }
+.kwic-root.kwic-compact .kwic-card-context { font-size: 0.8rem; line-height: 1.45; }
 `;
 
 // ── Constants & State ────────────────────────────────────────────────────────
 
 const HIST_KEY  = "himyc_kwic_history";
+const SORT_LS_KEY = "himyc_kwic_sort";
+const COMPACT_LS_KEY = "himyc_kwic_compact";
 const PAGE_SIZE = 50;
+const QUERY_LIMIT_INITIAL = 500;
+const QUERY_LIMIT_MAX = 2000;
+/** Taille d’une requête « Charger plus » (append avec offset). */
+const QUERY_CHUNK = 500;
+
+type SortMode = "relevance" | "ep_asc" | "ep_desc" | "position";
+
+function readSortMode(): SortMode {
+  const v = localStorage.getItem(SORT_LS_KEY);
+  if (v === "ep_asc" || v === "ep_desc" || v === "position" || v === "relevance") return v;
+  return "relevance";
+}
+
+/** Ordre d’affichage (tri client, comme un tri par document dans AGRAFES). */
+function getDisplayHits(): KwicHit[] {
+  if (_sortMode === "relevance") return _hits;
+  const h = [..._hits];
+  switch (_sortMode) {
+    case "ep_asc":
+      return h.sort((a, b) => {
+        const c = a.episode_id.localeCompare(b.episode_id, undefined, { numeric: true, sensitivity: "base" });
+        return c !== 0 ? c : a.position - b.position;
+      });
+    case "ep_desc":
+      return h.sort((a, b) => {
+        const c = b.episode_id.localeCompare(a.episode_id, undefined, { numeric: true, sensitivity: "base" });
+        return c !== 0 ? c : a.position - b.position;
+      });
+    case "position":
+      return h.sort((a, b) => a.position - b.position || a.episode_id.localeCompare(b.episode_id));
+    default:
+      return _hits;
+  }
+}
 
 let _styleInjected = false;
 let _hits: KwicHit[]               = [];
@@ -868,6 +980,9 @@ let _caseSensitive                 = false;
 let _unsubscribe: (() => void) | null = null;
 let _closeDropdownsRef: ((e: MouseEvent) => void) | null = null;
 let _searchToken                   = 0; // token anti-race pour les facettes
+let _sortMode: SortMode            = "relevance";
+let _compactView                   = false;
+let _kbdHandler: ((e: KeyboardEvent) => void) | null = null;
 
 // ── History ──────────────────────────────────────────────────────────────────
 
@@ -934,18 +1049,20 @@ function dlBlob(blob: Blob, name: string) {
 function csvQ(v: string) { return `"${String(v).replace(/"/g, '""')}"`; }
 
 function exportCsvFlat() {
-  if (!_hits.length) return;
+  const rowsSrc = getDisplayHits();
+  if (!rowsSrc.length) return;
   const hdr  = "episode_id,title,match,speaker,lang,kind\n";
-  const rows = _hits.map((h) =>
+  const rows = rowsSrc.map((h) =>
     [h.episode_id, h.title, h.match, h.speaker ?? "", h.lang ?? "", h.kind ?? ""].map(csvQ).join(",")
   ).join("\n");
   dlBlob(new Blob([hdr + rows], { type: "text/csv;charset=utf-8;" }), `kwic_${Date.now()}.csv`);
 }
 
 function exportCsvLong() {
-  if (!_hits.length) return;
+  const rowsSrc = getDisplayHits();
+  if (!rowsSrc.length) return;
   const hdr  = "episode_id,title,left,match,right,speaker,lang,kind,position\n";
-  const rows = _hits.map((h) =>
+  const rows = rowsSrc.map((h) =>
     [h.episode_id, h.title, h.left, h.match, h.right, h.speaker ?? "", h.lang ?? "", h.kind ?? "", String(h.position)]
       .map(csvQ).join(",")
   ).join("\n");
@@ -953,16 +1070,18 @@ function exportCsvLong() {
 }
 
 function exportJsonlSimple() {
-  if (!_hits.length) return;
-  const lines = _hits.map((h) => JSON.stringify(h)).join("\n");
+  const rowsSrc = getDisplayHits();
+  if (!rowsSrc.length) return;
+  const lines = rowsSrc.map((h) => JSON.stringify(h)).join("\n");
   dlBlob(new Blob([lines], { type: "application/json;charset=utf-8;" }), `kwic_${Date.now()}.jsonl`);
 }
 
 function exportJsonlParallel() {
-  if (!_hits.length) return;
+  const rowsSrc = getDisplayHits();
+  if (!rowsSrc.length) return;
   // Grouper par épisode : { episode_id, title, hits: [...] }
   const groups: Record<string, { episode_id: string; title: string; hits: KwicHit[] }> = {};
-  for (const h of _hits) {
+  for (const h of rowsSrc) {
     if (!groups[h.episode_id]) groups[h.episode_id] = { episode_id: h.episode_id, title: h.title, hits: [] };
     groups[h.episode_id].hits.push(h);
   }
@@ -1014,29 +1133,51 @@ function renderResults(container: HTMLElement) {
   renderTableResults(container);
 }
 
+function updateResultsToolbar(container: HTMLElement): void {
+  const tb = container.querySelector<HTMLElement>("#kwic-results-toolbar");
+  const cnt = container.querySelector<HTMLElement>("#kwic-results-count");
+  const loadMore = container.querySelector<HTMLButtonElement>("#kwic-load-more");
+  const disp = getDisplayHits();
+  if (cnt) {
+    let t = `${disp.length} ligne(s) affichée(s)`;
+    if (_hasMore && _hits.length < QUERY_LIMIT_MAX) t += " — d’autres occurrences peuvent exister (Charger plus)";
+    else if (_hasMore) t += " — limite max atteinte";
+    cnt.textContent = t;
+  }
+  if (tb) tb.classList.toggle("hidden", disp.length === 0);
+  if (loadMore) {
+    loadMore.style.display = _hasMore && _hits.length < QUERY_LIMIT_MAX ? "inline-flex" : "none";
+  }
+}
+
 function renderTableResults(container: HTMLElement) {
   const wrap = container.querySelector<HTMLElement>(".kwic-table-wrap")!;
   const pag  = container.querySelector<HTMLElement>(".kwic-pagination")!;
   const exportBtn = container.querySelector<HTMLButtonElement>("#kwic-export-btn");
 
-  const pageCount = Math.ceil(_hits.length / PAGE_SIZE);
+  const display = getDisplayHits();
+  const pageCount = Math.ceil(display.length / PAGE_SIZE);
   _page = Math.min(_page, Math.max(0, pageCount - 1));
-  const slice = _hits.slice(_page * PAGE_SIZE, (_page + 1) * PAGE_SIZE);
+  const slice = display.slice(_page * PAGE_SIZE, (_page + 1) * PAGE_SIZE);
 
-  if (exportBtn) exportBtn.disabled = _hits.length === 0;
+  if (exportBtn) exportBtn.disabled = display.length === 0;
 
-  if (_hits.length === 0) {
+  if (display.length === 0) {
     wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:1.8rem">🔍</span><span>Aucun résultat.</span></div>`;
     pag.classList.remove("visible");
+    updateResultsToolbar(container);
     return;
   }
 
-  const rows = slice.map((h) => {
+  const base = _page * PAGE_SIZE;
+  const rows = slice.map((h, i) => {
     const badges: string[] = [];
     if (h.speaker) badges.push(`<span class="kwic-speaker-badge" title="${escapeHtml(h.speaker)}">${escapeHtml(h.speaker.slice(0, 14))}</span>`);
     if (h.kind)    badges.push(`<span class="kwic-kind-badge">${h.kind === "utterance" ? "tour" : "phrase"}</span>`);
     if (h.lang)    badges.push(`<span class="kwic-lang-badge">${escapeHtml(h.lang)}</span>`);
     const citation = `${h.left}${h.match}${h.right}`.replace(/\n/g, " ");
+    const origIdx = _hits.indexOf(h);
+    const gidx = origIdx >= 0 ? origIdx : base + i;
     return `
       <tr>
         <td class="kwic-col-ep">
@@ -1046,7 +1187,7 @@ function renderTableResults(container: HTMLElement) {
         <td class="kwic-col-left">${escapeHtml(h.left)}</td>
         <td class="kwic-col-match"><span class="kwic-match-pill">${escapeHtml(h.match)}</span></td>
         <td class="kwic-col-right">${escapeHtml(h.right)}</td>
-        <td class="kwic-col-meta"><div class="kwic-meta-badges">${badges.join("")}</div></td>
+        <td class="kwic-col-meta"><div class="kwic-meta-badges">${badges.join("")}</div><button type="button" class="kwic-meta-btn" data-kwic-idx="${gidx}" title="Épisode / source">ℹ</button></td>
         <td class="kwic-col-copy">
           <button class="kwic-copy-btn" data-text="${escapeHtml(citation)}" title="Copier">⎘</button>
         </td>
@@ -1078,18 +1219,22 @@ function renderTableResults(container: HTMLElement) {
     });
   });
 
+  const root = container.querySelector<HTMLElement>(".kwic-root");
+  if (root) wireKwicMetaButtons(root);
+
   if (pageCount <= 1) {
     pag.classList.remove("visible");
   } else {
     pag.classList.add("visible");
     pag.innerHTML = `
       <button class="btn btn-ghost btn-sm" id="kwic-prev" ${_page === 0 ? "disabled" : ""}>‹ Préc.</button>
-      <span>Page ${_page + 1} / ${pageCount} &nbsp;(${_page * PAGE_SIZE + 1}–${Math.min((_page + 1) * PAGE_SIZE, _hits.length)})</span>
+      <span>Page ${_page + 1} / ${pageCount} &nbsp;(${_page * PAGE_SIZE + 1}–${Math.min((_page + 1) * PAGE_SIZE, display.length)})</span>
       <span class="kwic-pag-gap"></span>
       <button class="btn btn-ghost btn-sm" id="kwic-next" ${_page >= pageCount - 1 ? "disabled" : ""}>Suiv. ›</button>`;
     pag.querySelector("#kwic-prev")?.addEventListener("click", () => { _page--; renderTableResults(container); });
     pag.querySelector("#kwic-next")?.addEventListener("click", () => { _page++; renderTableResults(container); });
   }
+  updateResultsToolbar(container);
 }
 
 function renderAlignedCards(container: HTMLElement) {
@@ -1097,24 +1242,29 @@ function renderAlignedCards(container: HTMLElement) {
   const pag  = container.querySelector<HTMLElement>(".kwic-pagination")!;
   const exportBtn = container.querySelector<HTMLButtonElement>("#kwic-export-btn");
 
-  if (exportBtn) exportBtn.disabled = _hits.length === 0;
+  const display = getDisplayHits();
+  if (exportBtn) exportBtn.disabled = display.length === 0;
   pag.classList.remove("visible");
 
-  if (_hits.length === 0) {
+  if (display.length === 0) {
     wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:1.8rem">🔍</span><span>Aucun résultat.</span></div>`;
+    updateResultsToolbar(container);
     return;
   }
 
-  const pageCount = Math.ceil(_hits.length / PAGE_SIZE);
+  const pageCount = Math.ceil(display.length / PAGE_SIZE);
   _page = Math.min(_page, Math.max(0, pageCount - 1));
-  const slice = _hits.slice(_page * PAGE_SIZE, (_page + 1) * PAGE_SIZE);
+  const slice = display.slice(_page * PAGE_SIZE, (_page + 1) * PAGE_SIZE);
+  const base = _page * PAGE_SIZE;
 
-  function cardHtml(h: KwicHit): string {
+  function cardHtml(h: KwicHit, globalIdx: number): string {
     const badges: string[] = [];
     if (h.speaker) badges.push(`<span class="kwic-speaker-badge" title="${escapeHtml(h.speaker)}">${escapeHtml(h.speaker.slice(0, 18))}</span>`);
     if (h.kind)    badges.push(`<span class="kwic-kind-badge">${h.kind === "utterance" ? "tour" : "phrase"}</span>`);
     if (h.lang)    badges.push(`<span class="kwic-lang-badge">${escapeHtml(h.lang)}</span>`);
     const citation = `${h.left}${h.match}${h.right}`.replace(/\n/g, " ");
+    const oi = _hits.indexOf(h);
+    const idxMeta = oi >= 0 ? oi : globalIdx;
     return `
       <div class="kwic-card">
         <div class="kwic-card-head">
@@ -1126,6 +1276,7 @@ function renderAlignedCards(container: HTMLElement) {
           <span class="kwic-card-left">${escapeHtml(h.left)}</span><span class="kwic-card-match">${escapeHtml(h.match)}</span><span class="kwic-card-right">${escapeHtml(h.right)}</span>
         </div>
         <div class="kwic-card-footer">
+          <button type="button" class="kwic-meta-btn" data-kwic-idx="${idxMeta}" title="Épisode / source">ℹ</button>
           <button class="kwic-card-copy" data-text="${escapeHtml(citation)}" title="Copier">⎘ Copier</button>
         </div>
       </div>`;
@@ -1146,10 +1297,10 @@ function renderAlignedCards(container: HTMLElement) {
     }
     for (const g of groups) {
       html += `<div class="kwic-ep-sep">${escapeHtml(g.epId)} — ${escapeHtml(g.title.slice(0, 40))}</div>`;
-      html += g.hits.map(cardHtml).join("");
+      html += g.hits.map((h) => cardHtml(h, base + slice.indexOf(h))).join("");
     }
   } else {
-    html += slice.map(cardHtml).join("");
+    html += slice.map((h, i) => cardHtml(h, base + i)).join("");
   }
 
   html += `</div>`;
@@ -1166,16 +1317,20 @@ function renderAlignedCards(container: HTMLElement) {
     });
   });
 
+  const rootAligned = container.querySelector<HTMLElement>(".kwic-root");
+  if (rootAligned) wireKwicMetaButtons(rootAligned);
+
   if (pageCount > 1) {
     pag.classList.add("visible");
     pag.innerHTML = `
       <button class="btn btn-ghost btn-sm" id="kwic-prev" ${_page === 0 ? "disabled" : ""}>‹ Préc.</button>
-      <span>Page ${_page + 1} / ${pageCount} &nbsp;(${_page * PAGE_SIZE + 1}–${Math.min((_page + 1) * PAGE_SIZE, _hits.length)})</span>
+      <span>Page ${_page + 1} / ${pageCount} &nbsp;(${_page * PAGE_SIZE + 1}–${Math.min((_page + 1) * PAGE_SIZE, display.length)})</span>
       <span class="kwic-pag-gap"></span>
       <button class="btn btn-ghost btn-sm" id="kwic-next" ${_page >= pageCount - 1 ? "disabled" : ""}>Suiv. ›</button>`;
     pag.querySelector("#kwic-prev")?.addEventListener("click", () => { _page--; renderAlignedCards(container); });
     pag.querySelector("#kwic-next")?.addEventListener("click", () => { _page++; renderAlignedCards(container); });
   }
+  updateResultsToolbar(container);
 }
 
 // ── Chips ────────────────────────────────────────────────────────────────────
@@ -1204,6 +1359,34 @@ function updateChips(container: HTMLElement) {
       if (key === "ep")   { const el = container.querySelector<HTMLInputElement>("#kwic-episode-id"); if (el) el.value = ""; }
       if (key === "sp")   { const el = container.querySelector<HTMLInputElement>("#kwic-speaker");   if (el) el.value = ""; }
       updateChips(container);
+    });
+  });
+}
+
+/** Panneau méta (épisode / source / ids) depuis un hit KWIC — voir `features/metaPanel.ts`. */
+function episodeSourceFromKwicHit(h: KwicHit): EpisodeSourceInfo {
+  let source_key: string;
+  if (_scope === "segments") source_key = "transcript";
+  else if (_scope === "cues") source_key = h.lang ? `srt_${h.lang}` : "subtitle_cue";
+  else source_key = "episode_document";
+
+  return {
+    episode_id: h.episode_id,
+    title: h.title,
+    source_key,
+    language: h.lang ?? undefined,
+    segment_id: h.segment_id,
+    cue_id: h.cue_id,
+  };
+}
+
+function wireKwicMetaButtons(container: HTMLElement) {
+  container.querySelectorAll<HTMLButtonElement>(".kwic-meta-btn[data-kwic-idx]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const idx = Number(btn.dataset.kwicIdx);
+      const h = _hits[idx];
+      if (h) openMetaPanel(episodeSourceFromKwicHit(h));
     });
   });
 }
@@ -1243,7 +1426,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       <div class="kwic-toolbar">
         <div class="kwic-search-row">
           <input class="kwic-search-input" id="kwic-input" type="search"
-            placeholder="Rechercher dans le corpus (FTS5)…" autocomplete="off" spellcheck="false">
+            placeholder="Rechercher (FTS5)… — / focus" autocomplete="off" spellcheck="false">
           <button class="btn btn-primary btn-sm kwic-search-btn" id="kwic-search-btn">Rechercher</button>
           <div class="kwic-mode-tabs">
             <button class="kwic-mode-tab active" data-scope="segments">Segments</button>
@@ -1393,6 +1576,24 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       <!-- Analytics bar -->
       <div class="kwic-analytics hidden" id="kwic-analytics"></div>
 
+      <!-- Tri / compact / limite (proximité AGRAFES : contrôle de la liste) -->
+      <div class="kwic-results-toolbar hidden" id="kwic-results-toolbar">
+        <div class="kwic-results-left">
+          <span class="kwic-results-label">Tri</span>
+          <select class="kwic-results-select" id="kwic-sort" title="Ordre des lignes (côté client)">
+            <option value="relevance">Ordre serveur</option>
+            <option value="ep_asc">Épisode A → Z</option>
+            <option value="ep_desc">Épisode Z → A</option>
+            <option value="position">Position (caractère)</option>
+          </select>
+          <button type="button" class="kwic-toolbar-btn kwic-compact-toggle" id="kwic-compact-btn" title="Affichage compact (plus de lignes visibles)">▤ Compact</button>
+        </div>
+        <div class="kwic-results-right">
+          <span class="kwic-results-count" id="kwic-results-count"></span>
+          <button type="button" class="btn btn-secondary btn-sm" id="kwic-load-more" style="display:none">Charger plus (max ${QUERY_LIMIT_MAX})</button>
+        </div>
+      </div>
+
       <!-- Error -->
       <div class="kwic-error" id="kwic-error"></div>
 
@@ -1435,6 +1636,16 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   const ftsPreviewCode = container.querySelector<HTMLElement>("#kwic-fts-preview-code")!;
   const resetBtn       = container.querySelector<HTMLButtonElement>("#kwic-reset-btn")!;
   const caseBtn        = container.querySelector<HTMLButtonElement>("#kwic-case-btn")!;
+  const rootKwic       = container.querySelector<HTMLElement>(".kwic-root")!;
+  const sortSel        = container.querySelector<HTMLSelectElement>("#kwic-sort")!;
+  const compactBtn     = container.querySelector<HTMLButtonElement>("#kwic-compact-btn")!;
+  const loadMoreBtn    = container.querySelector<HTMLButtonElement>("#kwic-load-more")!;
+
+  _sortMode = readSortMode();
+  _compactView = localStorage.getItem(COMPACT_LS_KEY) === "1";
+  sortSel.value = _sortMode;
+  compactBtn.classList.toggle("active", _compactView);
+  rootKwic.classList.toggle("kwic-compact", _compactView);
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1465,6 +1676,11 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     _histOpen = false;  histMenu.classList.remove("open");  histBtn.classList.remove("active");
     _expOpen  = false;  exportMenu.classList.remove("open"); exportBtn.classList.remove("active");
     _helpOpen = false;  helpPopover.classList.remove("open"); helpBtn.classList.remove("active");
+    if (_filterOpen) {
+      _filterOpen = false;
+      filterDrawer.classList.add("hidden");
+      filterBtn.classList.remove("active");
+    }
   }
 
   // ── Mode tabs ───────────────────────────────────────────────────────────────
@@ -1662,12 +1878,35 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     });
   });
 
+  sortSel.addEventListener("change", () => {
+    _sortMode = sortSel.value as SortMode;
+    localStorage.setItem(SORT_LS_KEY, _sortMode);
+    _page = 0;
+    if (_hits.length) renderResults(container);
+  });
+
+  compactBtn.addEventListener("click", () => {
+    _compactView = !_compactView;
+    localStorage.setItem(COMPACT_LS_KEY, _compactView ? "1" : "0");
+    compactBtn.classList.toggle("active", _compactView);
+    rootKwic.classList.toggle("kwic-compact", _compactView);
+  });
+
+  loadMoreBtn.addEventListener("click", () => void runSearch({ append: true, skipHistory: true }));
+
   // ── Reset button ────────────────────────────────────────────────────────────
   resetBtn.addEventListener("click", () => {
     input.value = "";
     _hits        = [];
     _page        = 0;
     _hasMore     = false;
+    _sortMode = "relevance";
+    localStorage.removeItem(SORT_LS_KEY);
+    sortSel.value = "relevance";
+    _compactView = false;
+    localStorage.removeItem(COMPACT_LS_KEY);
+    compactBtn.classList.remove("active");
+    rootKwic.classList.remove("kwic-compact");
     _facets      = null;
     _showAligned = false;
     _showParallel = false;
@@ -1692,6 +1931,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     const sEl = container.querySelector<HTMLInputElement>("#kwic-speaker");   if (sEl) sEl.value = "";
     updateChips(container);
     container.querySelector<HTMLElement>("#kwic-analytics")!.classList.add("hidden");
+    container.querySelector<HTMLElement>("#kwic-results-toolbar")?.classList.add("hidden");
     errEl.style.display = "none";
     const wrap = container.querySelector<HTMLElement>(".kwic-table-wrap")!;
     wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:2.2rem">🔍</span><span>Entrez un terme et lancez la recherche.</span></div>`;
@@ -1734,7 +1974,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   }
 
   // ── Search ──────────────────────────────────────────────────────────────────
-  async function runSearch() {
+  async function runSearch(opts?: { limit?: number; skipHistory?: boolean; append?: boolean }) {
     const raw = input.value.trim();
     if (!raw) return;
 
@@ -1746,6 +1986,22 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     errEl.style.display = "none";
     container.querySelector<HTMLElement>("#kwic-analytics")!.classList.add("hidden");
 
+    const append = opts?.append ?? false;
+    let reqLimit: number;
+    let reqOffset: number;
+    if (append) {
+      reqOffset = _hits.length;
+      reqLimit = Math.min(QUERY_CHUNK, Math.max(0, QUERY_LIMIT_MAX - reqOffset));
+      if (reqLimit <= 0) {
+        searchBtn.disabled = false;
+        searchBtn.textContent = "Rechercher";
+        return;
+      }
+    } else {
+      reqOffset = 0;
+      reqLimit = Math.min(QUERY_LIMIT_MAX, opts?.limit ?? QUERY_LIMIT_INITIAL);
+    }
+
     const req: QueryRequest = {
       term, scope: _scope,
       kind:           _scope === "segments" ? (container.querySelector<HTMLSelectElement>("#kwic-kind")!.value || null) : null,
@@ -1753,39 +2009,50 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       episode_id:     container.querySelector<HTMLInputElement>("#kwic-episode-id")!.value.trim() || null,
       speaker:        container.querySelector<HTMLInputElement>("#kwic-speaker")!.value.trim() || null,
       window:         Number(windowRange.value),
-      limit:          500,
+      limit:          reqLimit,
+      offset:         reqOffset,
       case_sensitive: _caseSensitive || undefined,
     };
 
     const myToken = ++_searchToken;
 
     try {
-      const res = await apiPost<QueryResponse>("/query", req);
+      const res = await withNoDbRecovery(() => apiPost<QueryResponse>("/query", req));
       if (_searchToken !== myToken) return;
-      _hits    = res.hits;
+      if (append) {
+        _hits = [..._hits, ...res.hits];
+      } else {
+        _hits    = res.hits;
+        _page    = 0;
+      }
       _hasMore = res.has_more ?? false;
-      _page    = 0;
 
-      saveHistory({ term: raw, scope: _scope, kind: req.kind ?? "", lang: req.lang ?? "",
-        episode_id: req.episode_id ?? "", speaker: req.speaker ?? "", ts: Date.now() });
+      if (!opts?.skipHistory) {
+        saveHistory({ term: raw, scope: _scope, kind: req.kind ?? "", lang: req.lang ?? "",
+          episode_id: req.episode_id ?? "", speaker: req.speaker ?? "", ts: Date.now() });
+      }
 
       renderResults(container);
       updateChips(container);
 
-      // Facets — backend first, client fallback
-      _facets = null;
-      apiPost<FacetsResponse>("/query/facets", {
-        term, scope: _scope, kind: req.kind, lang: req.lang,
-        episode_id: req.episode_id, speaker: req.speaker,
-      }).then((f) => {
-        if (_searchToken !== myToken) return;
-        _facets = f;
-        renderAnalytics(container);
-      }).catch(() => {
-        if (_searchToken !== myToken) return;
-        _facets = buildFacetsFromHits(raw);
-        renderAnalytics(container);
-      });
+      // Facettes : première requête uniquement (append = même requête, pas de nouvel agrégat)
+      if (!append) {
+        _facets = null;
+        withNoDbRecovery(() =>
+          apiPost<FacetsResponse>("/query/facets", {
+            term, scope: _scope, kind: req.kind, lang: req.lang,
+            episode_id: req.episode_id, speaker: req.speaker,
+          }),
+        ).then((f) => {
+          if (_searchToken !== myToken) return;
+          _facets = f;
+          renderAnalytics(container);
+        }).catch(() => {
+          if (_searchToken !== myToken) return;
+          _facets = buildFacetsFromHits(raw);
+          renderAnalytics(container);
+        });
+      }
 
     } catch (e) {
       const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
@@ -1797,8 +2064,22 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     }
   }
 
-  searchBtn.addEventListener("click", runSearch);
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
+  searchBtn.addEventListener("click", () => void runSearch());
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") void runSearch(); });
+
+  _kbdHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      closeAllPanels();
+    }
+    if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const t = e.target as HTMLElement;
+      if (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA" && !t.isContentEditable) {
+        e.preventDefault();
+        input.focus();
+      }
+    }
+  };
+  document.addEventListener("keydown", _kbdHandler);
 
   _unsubscribe = ctx.onStatusChange(() => {});
 }
@@ -1808,6 +2089,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
 export function disposeConcordancier() {
   if (_unsubscribe)       { _unsubscribe(); _unsubscribe = null; }
   if (_closeDropdownsRef) { document.removeEventListener("click", _closeDropdownsRef); _closeDropdownsRef = null; }
+  if (_kbdHandler)       { document.removeEventListener("keydown", _kbdHandler); _kbdHandler = null; }
   _searchToken++;
   _hits          = [];
   _facets        = null;
