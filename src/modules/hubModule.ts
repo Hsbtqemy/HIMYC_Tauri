@@ -433,7 +433,7 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
           <div class="hub-card-icon">🔍</div>
           <span class="hub-card-badge hub-card-badge-concordancier">Concordancier</span>
           <h2>Explorer le corpus</h2>
-          <p>Rechercher, filtrer et exporter des concordances KWIC dans les segments et sous-titres.</p>
+          <p>Rechercher, filtrer et exporter des concordances KWIC sur les <strong>segments</strong> indexés (après segmentation).</p>
         </div>
         <div class="hub-card hub-card-constituer" data-mode="constituer">
           <div class="hub-card-icon">📂</div>

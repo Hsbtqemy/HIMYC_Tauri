@@ -143,10 +143,11 @@ def query_kwic_segments(
         params.append(episode)
     rows = conn.execute(
         f"""
-        SELECT s.segment_id, s.episode_id, s.kind, s.text, s.speaker_explicit, e.title
+        SELECT s.segment_id, s.episode_id, s.kind, s.text, s.speaker_explicit,
+               COALESCE(e.title, '') AS title
         FROM segments_fts
         JOIN segments s ON s.rowid = segments_fts.rowid
-        JOIN episodes e ON e.episode_id = s.episode_id
+        LEFT JOIN episodes e ON e.episode_id = s.episode_id
         WHERE segments_fts MATCH ?{where_extra}
         """,
         params,

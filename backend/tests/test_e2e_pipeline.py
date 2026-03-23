@@ -184,6 +184,22 @@ class TestSegmentJob:
         assert transcript.get("prep_status") in ("segmented", "clean"), \
             f"Statut inattendu : {transcript}"
 
+    def test_segment_job_writes_sqlite_for_kwic(self, project: Path) -> None:
+        """Le job segment_transcript doit remplir ``segments`` (+ FTS) pour le concordancier."""
+        self._prepare_clean(project)
+        r = client.post("/jobs", json={
+            "job_type": "segment_transcript",
+            "episode_id": "S01E01",
+        })
+        assert r.status_code in (200, 201), r.text
+        _poll_job(r.json()["job_id"])
+
+        assert (project / "corpus.db").exists(), "corpus.db doit être créé à la segmentation"
+        rq = client.post("/query", json={"term": "Robin", "scope": "segments"})
+        assert rq.status_code == 200, rq.text
+        data = rq.json()
+        assert data.get("total", 0) >= 1, f"Aucun hit KWIC alors que le transcript contient « Robin » : {data}"
+
 
 class TestExport:
     """POST /export → export du corpus segmenté."""

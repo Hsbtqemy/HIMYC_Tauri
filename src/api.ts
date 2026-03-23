@@ -154,6 +154,17 @@ export async function initCorpusDb(): Promise<InitCorpusDbResult> {
   return apiPost<InitCorpusDbResult>("/project/init_corpus_db", {});
 }
 
+/** Rebuild FTS5 `segments_fts` depuis la table `segments` (concordancier). */
+export interface RebuildSegmentsFtsResult {
+  ok: boolean;
+  segments_rows: number;
+  segments_fts_rows: number;
+}
+
+export async function rebuildSegmentsFts(): Promise<RebuildSegmentsFtsResult> {
+  return apiPost<RebuildSegmentsFtsResult>("/project/rebuild_segments_fts", {});
+}
+
 /**
  * Exécute `fn` ; si le backend répond NO_DB (corpus.db absent), tente `initCorpusDb()` puis réessaie une fois.
  */

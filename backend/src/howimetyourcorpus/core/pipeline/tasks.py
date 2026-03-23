@@ -19,7 +19,7 @@ from howimetyourcorpus.core.models import EpisodeRef, EpisodeStatus, ProjectConf
 from howimetyourcorpus.core.normalize.profiles import get_profile
 from howimetyourcorpus.core.pipeline.context import PipelineContext
 from howimetyourcorpus.core.pipeline.steps import Step, StepResult
-from howimetyourcorpus.core.segment import segmenter_sentences, segmenter_utterances
+from howimetyourcorpus.core.segment import Segment, segmenter_sentences, segmenter_utterances
 from howimetyourcorpus.core.storage.db import CorpusDB
 from howimetyourcorpus.core.storage.project_store import ProjectStore
 from howimetyourcorpus.core.opensubtitles import OpenSubtitlesClient, OpenSubtitlesError
@@ -27,6 +27,39 @@ from howimetyourcorpus.core.subtitles import cues_to_audit_rows, parse_subtitle_
 from howimetyourcorpus.core.subtitles.parsers import read_subtitle_file_content
 
 logger = logging.getLogger(__name__)
+
+
+def _segments_by_kind_from_jsonl(segments_path: Path) -> tuple[list[Segment], list[Segment]]:
+    """Lit ``segments.jsonl`` en listes ``sentence`` / ``utterance`` pour upsert SQLite."""
+    sentences: list[Segment] = []
+    utterances: list[Segment] = []
+    text = segments_path.read_text(encoding="utf-8")
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        kind = obj.get("kind") or "sentence"
+        seg = Segment(
+            episode_id=str(obj.get("episode_id", "")),
+            kind=kind if kind in ("sentence", "utterance") else "sentence",
+            n=int(obj.get("n", 0)),
+            start_char=int(obj.get("start_char", 0)),
+            end_char=int(obj.get("end_char", 0)),
+            text=str(obj.get("text") or ""),
+            speaker_explicit=obj.get("speaker_explicit"),
+            meta=obj.get("meta") if isinstance(obj.get("meta"), dict) else {},
+        )
+        if seg.kind == "utterance":
+            utterances.append(seg)
+        else:
+            sentences.append(seg)
+    sentences.sort(key=lambda s: s.n)
+    utterances.sort(key=lambda s: s.n)
+    return sentences, utterances
 
 
 class FetchSeriesIndexStep(Step):
@@ -380,6 +413,12 @@ class SegmentEpisodeStep(Step):
         ep_dir = store._episode_dir(self.episode_id)  # noqa: SLF001 - sanitation centralisée côté store
         segments_path = ep_dir / SEGMENTS_JSONL_FILENAME
         if not force and segments_path.exists():
+            if db:
+                # jsonl déjà présent mais SQLite parfois vide (anciens jobs sans ``db``) :
+                # réinjecter pour FTS concordancier / align.
+                sents, utts = _segments_by_kind_from_jsonl(segments_path)
+                db.upsert_segments(self.episode_id, "sentence", sents)
+                db.upsert_segments(self.episode_id, "utterance", utts)
             if on_progress:
                 on_progress(self.name, 1.0, f"Skip (already segmented): {self.episode_id}")
             return StepResult(True, f"Already segmented: {self.episode_id}")

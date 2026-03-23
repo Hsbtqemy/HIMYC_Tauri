@@ -3,7 +3,7 @@
 Jobs supportés :
   - normalize_transcript : NormalizeEpisodeStep (raw → clean)
   - normalize_srt        : normalize_subtitle_track (cues text_raw → text_clean via DB)
-  - segment_transcript   : SegmentEpisodeStep (clean → segments)
+  - segment_transcript   : SegmentEpisodeStep (clean → segments.jsonl + table ``segments`` / FTS)
 
 Persistance : {project_path}/jobs.json (réécrit à chaque mutation).
 Reprise     : les jobs "running" au redémarrage sont remis en "pending".
@@ -291,6 +291,17 @@ class JobWorker:
 
 # ── Exécution job ──────────────────────────────────────────────────────────
 
+def _ensure_corpus_db(store: Any) -> Any:
+    """Crée ``corpus.db`` si absent. Les étapes pipeline doivent recevoir ``db`` pour
+    persister les segments dans SQLite (FTS concordancier, alignement)."""
+    from howimetyourcorpus.core.storage.db import CorpusDB
+
+    db_path = store.get_db_path()
+    if not db_path.exists():
+        CorpusDB(db_path).init()
+    return CorpusDB(db_path)
+
+
 def _execute_job(
     job: JobRecord,
     project_path: Path,
@@ -334,9 +345,10 @@ def _execute_job(
                 "Normalisez le transcript avant de segmenter."
             )
         lang_hint = job.params.get("lang_hint", "en")
+        db = _ensure_corpus_db(store)
         runner = PipelineRunner()
         step   = SegmentEpisodeStep(job.episode_id, lang_hint=lang_hint)
-        ctx = {"store": store}
+        ctx: dict[str, Any] = {"store": store, "db": db}
         results = runner.run([step], ctx, force=True)
         if results and not results[0].success:
             raise RuntimeError(results[0].message)

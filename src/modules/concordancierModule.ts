@@ -1,8 +1,10 @@
 /**
  * concordancierModule.ts — Concordancier KWIC v3 (MX-034)
  *
- * Parity AGRAFES :
- *   - Mode tabs (Segments / Sous-titres / Documents)
+ * Portée : recherche **uniquement sur les segments** indexés (`scope=segments` / FTS `segments_fts`).
+ * Les textes bruts, documents normalisés seuls ou sous-titres sans segmentation ne sont pas interrogés ici.
+ *
+ * Parity AGRAFES (résultats / toolbar) :
  *   - Aligned toggle (vue cartes enrichies) + Parallel toggle (groupé épisode)
  *   - Query builder panel (5 modes : simple / phrase / and / or / near + near-N)
  *   - FTS preview bar (query transformée en temps réel)
@@ -21,7 +23,7 @@
 
 import type { ShellContext } from "../context";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
-import { apiPost, apiGet, ApiError, withNoDbRecovery } from "../api";
+import { apiPost, apiGet, ApiError, withNoDbRecovery, fetchQaReport, rebuildSegmentsFts } from "../api";
 import { openMetaPanel, type EpisodeSourceInfo } from "../features/metaPanel.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -43,9 +45,12 @@ interface KwicHit {
   speaker: string | null;
 }
 
+/** Toujours `segments` — le concordancier ne cible que l’index FTS des segments. */
+const KWIC_SCOPE = "segments" as const;
+
 interface QueryRequest {
   term: string;
-  scope: "episodes" | "segments" | "cues";
+  scope: typeof KWIC_SCOPE;
   kind?: string | null;
   lang?: string | null;
   episode_id?: string | null;
@@ -132,35 +137,40 @@ const CSS = `
   white-space: nowrap;
 }
 
-/* Mode tabs */
-.kwic-mode-tabs {
+/* Portée fixe : segments uniquement */
+.kwic-scope-hint {
   display: flex;
-  gap: 2px;
-  border: 1px solid var(--border);
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 4px 10px;
   border-radius: var(--radius);
-  padding: 2px;
-  background: var(--surface2);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface2));
 }
-.kwic-mode-tab {
-  padding: 4px 11px;
-  font-size: 0.77rem;
-  font-weight: 600;
-  border: none;
-  border-radius: calc(var(--radius) - 2px);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background .12s, color .12s;
-  font-family: inherit;
-}
-.kwic-mode-tab:hover { background: var(--surface); color: var(--text); }
-.kwic-mode-tab.active {
-  background: var(--surface);
+.kwic-scope-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--accent);
-  font-weight: 700;
-  box-shadow: 0 1px 3px rgba(0,0,0,.08);
 }
+.kwic-scope-sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  max-width: 200px;
+  line-height: 1.25;
+}
+.kwic-empty-qa {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  max-width: 32rem;
+  margin-top: 10px;
+  line-height: 1.45;
+  text-align: center;
+  min-height: 0;
+}
+.kwic-empty-qa strong { color: var(--text); }
 
 /* Controls row */
 .kwic-controls-row {
@@ -260,7 +270,6 @@ const CSS = `
 .kwic-dd-item:hover { background: var(--surface2); }
 .kwic-dd-item.muted { color: var(--text-muted); font-style: italic; font-size: 0.74rem; }
 .kwic-dd-sep { height: 1px; background: var(--border); margin: 2px 0; flex-shrink: 0; }
-.kwic-dd-scope-tag { font-size: 0.68rem; color: var(--text-muted); }
 
 /* ── Builder panel ───────────────────────────────────────────── */
 .kwic-builder-panel {
@@ -598,6 +607,25 @@ const CSS = `
   font-size: 0.8rem;
   display: none;
   flex-shrink: 0;
+}
+.kwic-feedback {
+  margin: 6px 14px 0;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  font-size: 0.78rem;
+  display: none;
+  flex-shrink: 0;
+}
+.kwic-feedback.visible { display: block; }
+.kwic-feedback.success {
+  background: color-mix(in srgb, #15803d 12%, transparent);
+  border: 1px solid #15803d;
+  color: #166534;
+}
+.kwic-feedback.err {
+  background: color-mix(in srgb, #dc2626 10%, transparent);
+  border: 1px solid #dc2626;
+  color: #dc2626;
 }
 
 /* ── Results table ───────────────────────────────────────────── */
@@ -971,7 +999,7 @@ let _histOpen                      = false;
 let _expOpen                       = false;
 let _builderOpen                   = false;
 let _helpOpen                      = false;
-let _scope: "segments" | "cues" | "episodes" = "segments";
+let _shellCtx: ShellContext | null = null;
 let _builderMode: BuilderMode      = "simple";
 let _nearN                         = 5;
 let _showAligned                   = false;
@@ -992,7 +1020,7 @@ function loadHistory(): HistoryEntry[] {
 }
 
 function saveHistory(entry: HistoryEntry) {
-  const hist = loadHistory().filter((h) => !(h.term === entry.term && h.scope === entry.scope));
+  const hist = loadHistory().filter((h) => h.term !== entry.term);
   hist.unshift(entry);
   localStorage.setItem(HIST_KEY, JSON.stringify(hist.slice(0, 10)));
 }
@@ -1125,6 +1153,29 @@ function renderAnalytics(container: HTMLElement) {
   });
 }
 
+/** Après « Aucun résultat », enrichit avec le rapport QA (épisodes segmentés ou non). */
+function attachKwicEmptyQaLine(wrap: HTMLElement) {
+  const qaSlot = wrap.querySelector<HTMLElement>("#kwic-empty-qa");
+  if (!qaSlot) return;
+  void withNoDbRecovery(() => fetchQaReport("lenient"))
+    .then((qa) => {
+      if (!wrap.querySelector("#kwic-empty-qa")) return;
+      if (qa.n_segmented === 0) {
+        qaSlot.innerHTML =
+          `<strong>Aucun épisode segmenté</strong> pour l’instant` +
+          (qa.total_episodes > 0
+            ? ` (${qa.total_episodes} épisode(s) dans le projet). Sans lignes dans la table <code>segments</code>, le concordancier ne peut rien trouver.`
+            : ". Importez ou créez des épisodes, puis lancez la <strong>segmentation</strong> dans Préparer.");
+      } else {
+        qaSlot.textContent =
+          `Le projet compte ${qa.n_segmented} épisode(s) avec des segments — essayez un autre terme, retirez les filtres épisode / locuteur, ou passez le type sur « Tous ».`;
+      }
+    })
+    .catch(() => {
+      if (wrap.querySelector("#kwic-empty-qa")) qaSlot.textContent = "";
+    });
+}
+
 function renderResults(container: HTMLElement) {
   if (_showAligned) {
     renderAlignedCards(container);
@@ -1163,7 +1214,22 @@ function renderTableResults(container: HTMLElement) {
   if (exportBtn) exportBtn.disabled = display.length === 0;
 
   if (display.length === 0) {
-    wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:1.8rem">🔍</span><span>Aucun résultat.</span></div>`;
+    const q = container.querySelector<HTMLInputElement>("#kwic-input")?.value?.trim() ?? "";
+    const hint =
+      q.length > 0
+        ? `<div class="kwic-empty-hint" style="font-size:0.78rem;color:var(--text-muted);max-width:30rem;margin-top:10px;line-height:1.5;text-align:center">
+            <strong>Aucun segment ne correspond</strong> à cette requête avec les filtres actuels.
+            <span style="display:block;margin-top:8px">Le concordancier ne lit que le <strong>texte segmenté</strong> indexé en base (pas le brut ni un document non découpé).</span>
+            <span style="display:block;margin-top:6px">Pistes : assouplir épisode / locuteur / type, ou chercher un mot vraiment présent dans les segments.</span>
+          </div>
+          <div class="kwic-empty-qa" id="kwic-empty-qa" aria-live="polite"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="kwic-goto-const" style="margin-top:12px">Ouvrir Préparer (segmentation)…</button>`
+        : "";
+    wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:1.8rem">🔍</span><span>Aucun résultat.</span>${hint}</div>`;
+    wrap.querySelector("#kwic-goto-const")?.addEventListener("click", () => {
+      _shellCtx?.navigateTo("constituer");
+    });
+    if (q.length > 0) attachKwicEmptyQaLine(wrap);
     pag.classList.remove("visible");
     updateResultsToolbar(container);
     return;
@@ -1247,7 +1313,20 @@ function renderAlignedCards(container: HTMLElement) {
   pag.classList.remove("visible");
 
   if (display.length === 0) {
-    wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:1.8rem">🔍</span><span>Aucun résultat.</span></div>`;
+    const q = container.querySelector<HTMLInputElement>("#kwic-input")?.value?.trim() ?? "";
+    const extra =
+      q.length > 0
+        ? `<div class="kwic-empty-hint" style="font-size:0.78rem;color:var(--text-muted);max-width:30rem;margin-top:10px;line-height:1.5;text-align:center">
+            <strong>Aucun segment ne correspond</strong> — même aide qu’en vue tableau (filtres, texte segmenté uniquement).
+          </div>
+          <div class="kwic-empty-qa" id="kwic-empty-qa" aria-live="polite"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="kwic-goto-const" style="margin-top:12px">Ouvrir Préparer (segmentation)…</button>`
+        : "";
+    wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:1.8rem">🔍</span><span>Aucun résultat.</span>${extra}</div>`;
+    wrap.querySelector("#kwic-goto-const")?.addEventListener("click", () => {
+      _shellCtx?.navigateTo("constituer");
+    });
+    if (q.length > 0) attachKwicEmptyQaLine(wrap);
     updateResultsToolbar(container);
     return;
   }
@@ -1340,13 +1419,11 @@ function updateChips(container: HTMLElement) {
   if (!bar) return;
 
   const kind = (container.querySelector<HTMLSelectElement>("#kwic-kind")?.value ?? "");
-  const lang = (container.querySelector<HTMLInputElement>("#kwic-lang")?.value.trim() ?? "");
   const ep   = (container.querySelector<HTMLInputElement>("#kwic-episode-id")?.value.trim() ?? "");
   const sp   = (container.querySelector<HTMLInputElement>("#kwic-speaker")?.value.trim() ?? "");
 
   const chips: string[] = [];
   if (kind) chips.push(`<span class="kwic-chip">Type : ${escapeHtml(kind)} <button class="kwic-chip-rm" data-clear="kind">✕</button></span>`);
-  if (lang) chips.push(`<span class="kwic-chip">Langue : ${escapeHtml(lang)} <button class="kwic-chip-rm" data-clear="lang">✕</button></span>`);
   if (ep)   chips.push(`<span class="kwic-chip">Épisode : ${escapeHtml(ep)} <button class="kwic-chip-rm" data-clear="ep">✕</button></span>`);
   if (sp)   chips.push(`<span class="kwic-chip">Locuteur : ${escapeHtml(sp)} <button class="kwic-chip-rm" data-clear="sp">✕</button></span>`);
   bar.innerHTML = chips.join("");
@@ -1355,7 +1432,6 @@ function updateChips(container: HTMLElement) {
     btn.addEventListener("click", () => {
       const key = btn.dataset.clear!;
       if (key === "kind") { const el = container.querySelector<HTMLSelectElement>("#kwic-kind");     if (el) el.value = ""; }
-      if (key === "lang") { const el = container.querySelector<HTMLInputElement>("#kwic-lang");      if (el) el.value = ""; }
       if (key === "ep")   { const el = container.querySelector<HTMLInputElement>("#kwic-episode-id"); if (el) el.value = ""; }
       if (key === "sp")   { const el = container.querySelector<HTMLInputElement>("#kwic-speaker");   if (el) el.value = ""; }
       updateChips(container);
@@ -1365,15 +1441,10 @@ function updateChips(container: HTMLElement) {
 
 /** Panneau méta (épisode / source / ids) depuis un hit KWIC — voir `features/metaPanel.ts`. */
 function episodeSourceFromKwicHit(h: KwicHit): EpisodeSourceInfo {
-  let source_key: string;
-  if (_scope === "segments") source_key = "transcript";
-  else if (_scope === "cues") source_key = h.lang ? `srt_${h.lang}` : "subtitle_cue";
-  else source_key = "episode_document";
-
   return {
     episode_id: h.episode_id,
     title: h.title,
-    source_key,
+    source_key: "transcript",
     language: h.lang ?? undefined,
     segment_id: h.segment_id,
     cue_id: h.cue_id,
@@ -1394,6 +1465,7 @@ function wireKwicMetaButtons(container: HTMLElement) {
 // ── Mount ────────────────────────────────────────────────────────────────────
 
 export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
+  _shellCtx = ctx;
   injectGlobalCss();
 
   if (!_styleInjected) {
@@ -1412,7 +1484,6 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   _expOpen       = false;
   _builderOpen   = false;
   _helpOpen      = false;
-  _scope         = "segments";
   _builderMode   = "simple";
   _nearN         = 5;
   _showAligned   = false;
@@ -1426,13 +1497,16 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       <div class="kwic-toolbar">
         <div class="kwic-search-row">
           <input class="kwic-search-input" id="kwic-input" type="search"
-            placeholder="Rechercher (FTS5)… — / focus" autocomplete="off" spellcheck="false">
+            placeholder="Rechercher dans les segments (FTS5)… — / focus" autocomplete="off" spellcheck="false">
           <button class="btn btn-primary btn-sm kwic-search-btn" id="kwic-search-btn">Rechercher</button>
-          <div class="kwic-mode-tabs">
-            <button class="kwic-mode-tab active" data-scope="segments">Segments</button>
-            <button class="kwic-mode-tab" data-scope="cues">Sous-titres</button>
-            <button class="kwic-mode-tab" data-scope="episodes">Documents</button>
+          <div class="kwic-scope-hint" title="Seuls les segments en base (après job de segmentation) sont indexés ici.">
+            <span class="kwic-scope-badge">Segments</span>
+            <span class="kwic-scope-sub">Index FTS — pas de brut ni SRT seuls</span>
           </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="kwic-reindex-btn"
+            title="Reconstruit l’index plein texte (segments_fts) à partir de la table segments. À utiliser si le concordancier ne trouve rien alors que des segments existent.">
+            Réindexer FTS
+          </button>
         </div>
         <div class="kwic-controls-row">
           <div class="kwic-window-ctrl">
@@ -1495,6 +1569,8 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
                   <div class="kwic-help-note">Si votre requête contient déjà <code>AND</code>, <code>OR</code>, <code>NOT</code>, <code>NEAR</code> ou des guillemets, le builder ne la transforme pas — elle est envoyée telle quelle au moteur FTS5.</div>
                   <div class="kwic-help-note" style="margin-top:4px"><strong>NEAR</strong> requiert au moins 2 mots. Avec 1 seul mot, la requête est passée sans transformation.</div>
                   <div class="kwic-help-note" style="margin-top:4px"><strong>Guillemets internes :</strong> en mode Expression exacte, les guillemets sont convertis en apostrophes.</div>
+                  <div class="kwic-help-note" style="margin-top:10px">Ce concordancier interroge <strong>uniquement les segments</strong> (texte découpé et indexé). Pour du texte non segmenté, lancez d’abord la segmentation dans « Préparer ».</div>
+                  <div class="kwic-help-note" style="margin-top:6px">Si des segments existent mais la recherche ne renvoie rien, utilisez <strong>Réindexer FTS</strong> (reconstruit <code>segments_fts</code> depuis la table <code>segments</code>).</div>
                 </div>
               </div>
             </div>
@@ -1554,10 +1630,6 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
             <option value="sentence">Phrases</option>
           </select>
         </div>
-        <div class="kwic-filter-group" id="kwic-lang-group" style="display:none">
-          <span class="kwic-filter-label">Langue</span>
-          <input class="kwic-filter-input" id="kwic-lang" placeholder="en, fr, it…" style="width:70px">
-        </div>
         <div class="kwic-filter-group">
           <span class="kwic-filter-label">Épisode</span>
           <input class="kwic-filter-input" id="kwic-episode-id" placeholder="S01E01…" list="kwic-ep-datalist" autocomplete="off">
@@ -1596,12 +1668,14 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
 
       <!-- Error -->
       <div class="kwic-error" id="kwic-error"></div>
+      <div class="kwic-feedback" id="kwic-feedback" role="status" aria-live="polite"></div>
 
       <!-- Results -->
       <div class="kwic-table-wrap">
         <div class="kwic-empty">
           <span style="font-size:2.2rem">🔍</span>
           <span>Entrez un terme et lancez la recherche.</span>
+          <div class="kwic-empty-hint" style="font-size:0.78rem;color:var(--text-muted);max-width:26rem;margin-top:8px;line-height:1.45;text-align:center">Uniquement les <strong>segments</strong> déjà présents en base (après segmentation). Sinon le corpus reste vide ici.</div>
         </div>
       </div>
 
@@ -1622,7 +1696,6 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   const exportMenu     = container.querySelector<HTMLElement>("#kwic-export-menu")!;
   const errEl          = container.querySelector<HTMLElement>("#kwic-error")!;
   const kindGroup      = container.querySelector<HTMLElement>("#kwic-kind-group")!;
-  const langGroup      = container.querySelector<HTMLElement>("#kwic-lang-group")!;
   const alignedBtn     = container.querySelector<HTMLButtonElement>("#kwic-aligned-btn")!;
   const parallelBtn    = container.querySelector<HTMLButtonElement>("#kwic-parallel-btn")!;
   const builderBtn     = container.querySelector<HTMLButtonElement>("#kwic-builder-btn")!;
@@ -1640,6 +1713,13 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   const sortSel        = container.querySelector<HTMLSelectElement>("#kwic-sort")!;
   const compactBtn     = container.querySelector<HTMLButtonElement>("#kwic-compact-btn")!;
   const loadMoreBtn    = container.querySelector<HTMLButtonElement>("#kwic-load-more")!;
+  const feedbackEl     = container.querySelector<HTMLElement>("#kwic-feedback")!;
+  const reindexBtn     = container.querySelector<HTMLButtonElement>("#kwic-reindex-btn")!;
+
+  function hideFeedback() {
+    feedbackEl.classList.remove("visible", "success", "err");
+    feedbackEl.textContent = "";
+  }
 
   _sortMode = readSortMode();
   _compactView = localStorage.getItem(COMPACT_LS_KEY) === "1";
@@ -1683,19 +1763,30 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     }
   }
 
-  // ── Mode tabs ───────────────────────────────────────────────────────────────
-  container.querySelectorAll<HTMLButtonElement>(".kwic-mode-tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      container.querySelectorAll(".kwic-mode-tab").forEach((t) => t.classList.remove("active"));
-      tab.classList.add("active");
-      _scope = tab.dataset.scope as typeof _scope;
-      kindGroup.style.display = _scope === "segments" ? "flex" : "none";
-      langGroup.style.display = _scope === "cues"     ? "flex" : "none";
-    });
-  });
-
   // ── Window slider ───────────────────────────────────────────────────────────
   windowRange.addEventListener("input", () => { windowVal.textContent = windowRange.value; });
+
+  reindexBtn.addEventListener("click", () => {
+    hideFeedback();
+    errEl.style.display = "none";
+    reindexBtn.disabled = true;
+    reindexBtn.textContent = "…";
+    void withNoDbRecovery(() => rebuildSegmentsFts())
+      .then((r) => {
+        feedbackEl.textContent =
+          `Index segments FTS reconstruit — ${r.segments_rows} segment(s) en base, ${r.segments_fts_rows} ligne(s) dans l’index. Vous pouvez relancer une recherche.`;
+        feedbackEl.className = "kwic-feedback visible success";
+      })
+      .catch((e) => {
+        const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+        feedbackEl.textContent = msg;
+        feedbackEl.className = "kwic-feedback visible err";
+      })
+      .finally(() => {
+        reindexBtn.disabled = false;
+        reindexBtn.textContent = "Réindexer FTS";
+      });
+  });
 
   // ── Aligned toggle ──────────────────────────────────────────────────────────
   alignedBtn.addEventListener("click", () => {
@@ -1796,12 +1887,11 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   });
   container.querySelector<HTMLButtonElement>("#kwic-clear-filters")?.addEventListener("click", () => {
     (container.querySelector<HTMLSelectElement>("#kwic-kind")!).value = "";
-    (container.querySelector<HTMLInputElement>("#kwic-lang")!).value = "";
     (container.querySelector<HTMLInputElement>("#kwic-episode-id")!).value = "";
     (container.querySelector<HTMLInputElement>("#kwic-speaker")!).value = "";
     updateChips(container);
   });
-  ["#kwic-kind", "#kwic-lang", "#kwic-episode-id", "#kwic-speaker"].forEach((sel) => {
+  ["#kwic-kind", "#kwic-episode-id", "#kwic-speaker"].forEach((sel) => {
     container.querySelector(sel)?.addEventListener("change", () => updateChips(container));
     container.querySelector(sel)?.addEventListener("input",  () => updateChips(container));
   });
@@ -1815,8 +1905,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     }
     histMenu.innerHTML = hist.map((h, i) =>
       `<button class="kwic-dd-item" data-idx="${i}">
-        <span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(h.term.slice(0, 28))}</span>
-        <span class="kwic-dd-scope-tag">${h.scope}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(h.term.slice(0, 36))}</span>
        </button>`
     ).join("") +
       `<div class="kwic-dd-sep"></div>
@@ -1826,14 +1915,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       btn.addEventListener("click", () => {
         const entry = hist[Number(btn.dataset.idx)];
         input.value = entry.term;
-        container.querySelectorAll<HTMLButtonElement>(".kwic-mode-tab").forEach((t) => {
-          t.classList.toggle("active", t.dataset.scope === entry.scope);
-        });
-        _scope = entry.scope as typeof _scope;
-        kindGroup.style.display = _scope === "segments" ? "flex" : "none";
-        langGroup.style.display = _scope === "cues"     ? "flex" : "none";
         const kEl = container.querySelector<HTMLSelectElement>("#kwic-kind");     if (kEl) kEl.value = entry.kind;
-        const lEl = container.querySelector<HTMLInputElement>("#kwic-lang");      if (lEl) lEl.value = entry.lang;
         const eEl = container.querySelector<HTMLInputElement>("#kwic-episode-id"); if (eEl) eEl.value = entry.episode_id;
         const sEl = container.querySelector<HTMLInputElement>("#kwic-speaker");   if (sEl) sEl.value = entry.speaker;
         updateChips(container);
@@ -1926,15 +2008,15 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     nearNInput.value = "5";
     // Reset filters
     const kEl = container.querySelector<HTMLSelectElement>("#kwic-kind");     if (kEl) kEl.value = "";
-    const lEl = container.querySelector<HTMLInputElement>("#kwic-lang");      if (lEl) lEl.value = "";
     const eEl = container.querySelector<HTMLInputElement>("#kwic-episode-id"); if (eEl) eEl.value = "";
     const sEl = container.querySelector<HTMLInputElement>("#kwic-speaker");   if (sEl) sEl.value = "";
     updateChips(container);
     container.querySelector<HTMLElement>("#kwic-analytics")!.classList.add("hidden");
     container.querySelector<HTMLElement>("#kwic-results-toolbar")?.classList.add("hidden");
     errEl.style.display = "none";
+    hideFeedback();
     const wrap = container.querySelector<HTMLElement>(".kwic-table-wrap")!;
-    wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:2.2rem">🔍</span><span>Entrez un terme et lancez la recherche.</span></div>`;
+    wrap.innerHTML = `<div class="kwic-empty"><span style="font-size:2.2rem">🔍</span><span>Entrez un terme et lancez la recherche.</span><div class="kwic-empty-hint" style="font-size:0.78rem;color:var(--text-muted);max-width:26rem;margin-top:8px;line-height:1.45;text-align:center">Uniquement les <strong>segments</strong> déjà présents en base (après segmentation).</div></div>`;
     container.querySelector<HTMLElement>(".kwic-pagination")!.classList.remove("visible");
     exportBtn.disabled = true;
   });
@@ -1963,7 +2045,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       if (h.lang) langs.add(h.lang);
     }
     return {
-      term, scope: _scope,
+      term, scope: KWIC_SCOPE,
       total_hits: _hits.length,
       distinct_episodes: Object.keys(epMap).length,
       distinct_langs: langs.size,
@@ -1984,6 +2066,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     searchBtn.disabled = true;
     searchBtn.textContent = "…";
     errEl.style.display = "none";
+    hideFeedback();
     container.querySelector<HTMLElement>("#kwic-analytics")!.classList.add("hidden");
 
     const append = opts?.append ?? false;
@@ -2003,9 +2086,9 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     }
 
     const req: QueryRequest = {
-      term, scope: _scope,
-      kind:           _scope === "segments" ? (container.querySelector<HTMLSelectElement>("#kwic-kind")!.value || null) : null,
-      lang:           _scope === "cues"     ? (container.querySelector<HTMLInputElement>("#kwic-lang")!.value.trim() || null) : null,
+      term, scope: KWIC_SCOPE,
+      kind:           container.querySelector<HTMLSelectElement>("#kwic-kind")!.value || null,
+      lang:           null,
       episode_id:     container.querySelector<HTMLInputElement>("#kwic-episode-id")!.value.trim() || null,
       speaker:        container.querySelector<HTMLInputElement>("#kwic-speaker")!.value.trim() || null,
       window:         Number(windowRange.value),
@@ -2028,7 +2111,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       _hasMore = res.has_more ?? false;
 
       if (!opts?.skipHistory) {
-        saveHistory({ term: raw, scope: _scope, kind: req.kind ?? "", lang: req.lang ?? "",
+        saveHistory({ term: raw, scope: KWIC_SCOPE, kind: req.kind ?? "", lang: "",
           episode_id: req.episode_id ?? "", speaker: req.speaker ?? "", ts: Date.now() });
       }
 
@@ -2040,7 +2123,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
         _facets = null;
         withNoDbRecovery(() =>
           apiPost<FacetsResponse>("/query/facets", {
-            term, scope: _scope, kind: req.kind, lang: req.lang,
+            term, scope: KWIC_SCOPE, kind: req.kind, lang: req.lang,
             episode_id: req.episode_id, speaker: req.speaker,
           }),
         ).then((f) => {
@@ -2087,6 +2170,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
 // ── Dispose ───────────────────────────────────────────────────────────────────
 
 export function disposeConcordancier() {
+  _shellCtx = null;
   if (_unsubscribe)       { _unsubscribe(); _unsubscribe = null; }
   if (_closeDropdownsRef) { document.removeEventListener("click", _closeDropdownsRef); _closeDropdownsRef = null; }
   if (_kbdHandler)       { document.removeEventListener("keydown", _kbdHandler); _kbdHandler = null; }
