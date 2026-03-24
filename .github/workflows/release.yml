@@ -21,7 +21,7 @@ jobs:
             rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
             label: macOS
           - platform: windows-latest
-            args: ""
+            args: "--config src-tauri/tauri.release.conf.json"
             rust_targets: ""
             label: Windows
           - platform: ubuntu-22.04
@@ -67,6 +67,16 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev
 
+      # ── Sidecar PyInstaller (Windows uniquement) ───────────────────────────
+      - name: Build Python sidecar
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[api]" pyinstaller
+          python -m PyInstaller himyc-backend.spec --noconfirm
+
       # ── Dépendances npm ────────────────────────────────────────────────────
       - name: Install npm dependencies
         run: npm install
@@ -91,20 +101,24 @@ jobs:
             | Plateforme | Fichier | Notes |
             |---|---|---|
             | macOS (Apple Silicon + Intel) | `.dmg` | Universal binary |
-            | Windows | `_x64-setup.exe` ou `.msi` | |
+            | Windows | `_x64-setup.exe` ou `.msi` | Backend Python intégré — aucun prérequis |
             | Linux | `.AppImage` | Universel, pas d'installation |
             | Linux | `.deb` | Debian / Ubuntu |
+
+            ### Windows — aucun prérequis
+
+            Le backend Python (uvicorn + howimetyourcorpus) est compilé et embarqué dans l'installeur grâce à PyInstaller. Aucune installation Python requise.
+
+            ### macOS / Linux — Backend Python requis
+
+            L'app lance automatiquement `python3 -m uvicorn howimetyourcorpus.api.server:app`.
+            Prérequis : `pip install howimetyourcorpus`
 
             ### macOS — application non signée (pilote interne)
 
             Au premier lancement, macOS bloquera l'app. Deux options :
             - **Clic-droit → Ouvrir** sur le `.app` ou le `.dmg`, puis confirmer.
             - Ou en terminal : `xattr -cr /Applications/HIMYC.app`
-
-            ### Backend Python requis
-
-            L'app lance automatiquement `python3 -m uvicorn howimetyourcorpus.api.server:app`.
-            Pré-requis : `pip install howimetyourcorpus`
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
