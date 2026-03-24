@@ -9421,7 +9421,17 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   // ── Actions tree link clicks ──────────────────────────────────────────────
   container.querySelectorAll<HTMLButtonElement>(".cons-nav-tree-link").forEach((btn) => {
     btn.addEventListener("click", () => {
-      activateSection("actions");
+      // Activer la section "actions" sans déclencher le reset vers le hub
+      // (activateSection("actions") appelle activateSubView("hub") ce qui est voulu
+      // quand l'utilisateur clique l'onglet "Actions", mais pas depuis un lien d'arborescence)
+      if (_activeSection !== "actions") {
+        _activeSection = "actions";
+        localStorage.setItem("cons-active-section", "actions");
+        container.querySelectorAll<HTMLButtonElement>(".cons-nav-tab")
+          .forEach((b) => b.classList.toggle("active", b.dataset.section === "actions"));
+        container.querySelectorAll<HTMLElement>(".cons-section-pane")
+          .forEach((p) => p.classList.toggle("active", p.dataset.section === "actions"));
+      }
       activateSubView(btn.dataset.subview as "curation" | "distribution" | "segmentation" | "alignement");
     });
   });
@@ -9647,8 +9657,9 @@ export function disposeConstituer() {
     document.removeEventListener("himyc:open-distribution", _openDistributionNavListener);
     _openDistributionNavListener = null;
   }
-  _container = null;
-  _ctx = null;
+  _container      = null;
+  _ctx            = null;
   _cachedEpisodes = null;
   _cachedConfig   = null;
+  _tradViewMounted = false;
 }

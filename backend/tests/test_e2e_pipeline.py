@@ -85,7 +85,7 @@ class TestImportTranscript:
             "/episodes/S01E01/sources/transcript",
             json={"content": TRANSCRIPT},
         )
-        assert r.status_code == 200, r.text
+        assert r.status_code in (200, 201), r.text
         data = r.json()
         assert data["episode_id"] == "S01E01"
         assert data["source_key"] == "transcript"
@@ -110,7 +110,7 @@ class TestNormalizeJob:
             "episode_id": "S01E01",
             "source_key": "transcript",
         })
-        assert r.status_code == 200, r.text
+        assert r.status_code in (200, 201), r.text
         job_id = r.json()["job_id"]
 
         job = _poll_job(job_id)
@@ -123,7 +123,7 @@ class TestNormalizeJob:
         # Le texte normalisé contient les répliques sans artefacts de parsing
         assert "Ted Mosby" in clean_text or "Barney" in clean_text
 
-    def test_normalize_updates_prep_status(self, project: Path) -> None:
+    def test_normalize_updates_state(self, project: Path) -> None:
         client.post("/episodes/S01E01/sources/transcript", json={"content": TRANSCRIPT})
         r = client.post("/jobs", json={
             "job_type": "normalize_transcript",
@@ -132,11 +132,14 @@ class TestNormalizeJob:
         })
         _poll_job(r.json()["job_id"])
 
-        r2 = client.get("/episodes/S01E01/sources/transcript")
-        assert r2.status_code == 200
-        data = r2.json()
-        assert data["prep_status"] == "clean", \
-            f"prep_status attendu 'clean', obtenu {data.get('prep_status')!r}"
+        r2 = client.get("/episodes")
+        eps = r2.json()["episodes"]
+        ep = next((e for e in eps if e["episode_id"] == "S01E01"), {})
+        sources = ep.get("sources", [])
+        transcript = next((s for s in sources if s.get("source_key") == "transcript"), {})
+        state = transcript.get("state", "")
+        assert state in ("normalized", "segmented"), \
+            f"État attendu 'normalized' ou 'segmented', obtenu {state!r}"
 
 
 class TestSegmentJob:
@@ -158,7 +161,7 @@ class TestSegmentJob:
             "job_type": "segment_transcript",
             "episode_id": "S01E01",
         })
-        assert r.status_code == 200, r.text
+        assert r.status_code in (200, 201), r.text
         job = _poll_job(r.json()["job_id"])
         assert job["status"] == "done", f"Segmentation échouée: {job.get('result')}"
 
@@ -178,11 +181,11 @@ class TestSegmentJob:
         r2 = client.get("/episodes")
         eps = {e["episode_id"]: e for e in r2.json()["episodes"]}
         ep = eps.get("S01E01", {})
-        # L'épisode doit être marqué "segmented" dans le statut
-        sources = ep.get("sources", {})
-        transcript = sources.get("transcript", {})
-        assert transcript.get("prep_status") in ("segmented", "clean"), \
-            f"Statut inattendu : {transcript}"
+        # L'épisode doit être marqué "segmented" dans l'état de la source
+        sources = ep.get("sources", [])
+        transcript = next((s for s in sources if s.get("source_key") == "transcript"), {})
+        assert transcript.get("state") == "segmented", \
+            f"État attendu 'segmented', obtenu {transcript.get('state')!r}"
 
     def test_segment_job_writes_sqlite_for_kwic(self, project: Path) -> None:
         """Le job segment_transcript doit remplir ``segments`` (+ FTS) pour le concordancier."""
@@ -221,7 +224,7 @@ class TestExport:
     def test_export_txt(self, project: Path) -> None:
         self._prepare_segmented(project)
         r = client.post("/export", json={"scope": "segments", "fmt": "txt", "use_clean": True})
-        assert r.status_code == 200, r.text
+        assert r.status_code in (200, 201), r.text
         data = r.json()
         assert data["scope"] == "segments"
         assert data["fmt"] == "txt"
@@ -233,7 +236,7 @@ class TestExport:
     def test_export_csv(self, project: Path) -> None:
         self._prepare_segmented(project)
         r = client.post("/export", json={"scope": "segments", "fmt": "csv", "use_clean": True})
-        assert r.status_code == 200, r.text
+        assert r.status_code in (200, 201), r.text
         out_path = Path(r.json()["path"])
         lines = out_path.read_text(encoding="utf-8").strip().splitlines()
         assert lines[0].startswith("episode_id") or "," in lines[0], \

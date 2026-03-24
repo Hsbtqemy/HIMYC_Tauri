@@ -984,8 +984,10 @@ const CSS = `
 /* ── Stats panel ────────────────────────────────────────────────────────────── */
 .kwic-stats-toggle.active { background: var(--accent,#6366f1); color: #fff; border-color: var(--accent,#6366f1); }
 .kwic-stats-panel { display: flex; flex-direction: column; gap: 14px; padding: 14px 12px; }
+.kwic-stats-panel.hidden { display: none; }
 .kwic-stats-filter-block { background: var(--bg-card,#f8f9fb); border: 1px solid var(--border,#e0e0e6); border-radius: 8px; padding: 14px 16px; }
 .kwic-stats-filter-block-b { border-color: #f97316; }
+.kwic-stats-filter-block-b.hidden { display: none; }
 .kwic-stats-filter-hd { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; font-weight: 600; margin-bottom: 10px; color: var(--text,#1a1a2e); }
 .kwic-stats-filters { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
 .kwic-stats-filter-group { display: flex; flex-direction: column; gap: 4px; }
