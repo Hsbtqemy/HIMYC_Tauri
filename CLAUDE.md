@@ -12,7 +12,7 @@ Monorepo contenant le frontend Tauri **et** le backend Python FastAPI de HIMYC.
 - Serveur HTTP sur `http://127.0.0.1:8765`
 - 42+ routes backend couplées au frontend (dont `POST /project/init_corpus_db` pour créer `corpus.db` si absent)
 - Base de données SQLite avec FTS5, 8 migrations
-- Le backend est lancé automatiquement par Tauri via `python3 -m uvicorn howimetyourcorpus.api.server:app`
+- Le backend est lancé automatiquement par Tauri : **sidecar PyInstaller en priorité** (builds release), sinon `python3 -m uvicorn ...` (dev / fallback)
 
 **Dépôt GitHub** : `https://github.com/Hsbtqemy/HIMYC_Tauri`
 **Branche principale** : `main`
@@ -64,6 +64,44 @@ HIMYC_Tauri/
 ├── start-dev.sh                # Runbook lancement dev
 └── CLAUDE.md                   # Ce fichier
 ```
+
+---
+
+## Distribution (release)
+
+```bash
+# 1. Compiler le sidecar PyInstaller (Windows — produit backend/dist/himyc-backend.exe)
+.\scripts\build-sidecar.ps1 -SidecarOnly
+
+# 2. Build Tauri complet (sidecar embarqué dans NSIS + MSI)
+.\scripts\build-sidecar.ps1
+
+# Ou via CI : pousser un tag déclenche GitHub Actions sur les 3 plateformes
+git tag v0.x.y && git push origin v0.x.y
+```
+
+**Sidecar PyInstaller — état par plateforme**
+
+| Plateforme | Sidecar embarqué | Prérequis utilisateur |
+|---|---|---|
+| Windows `.exe` / `.msi` | ✅ Oui | Aucun |
+| macOS `.dmg` (Apple Silicon) | ✅ Oui (arm64) | Aucun |
+| macOS `.dmg` (Intel) | ⚠️ Non — fallback Python | `pip install howimetyourcorpus` |
+| Linux `.AppImage` / `.deb` | ✅ Oui | Aucun |
+
+> **Limite macOS Intel** : le runner CI `macos-latest` est arm64 → PyInstaller produit un binaire arm64. Sur Intel, `find_sidecar()` trouve le binaire mais `spawn()` échoue (mauvaise arch) → `main.rs` retombe automatiquement sur `python3` système.
+
+**Fichiers clés pour la distribution**
+
+| Fichier | Rôle |
+|---|---|
+| `backend/himyc_server.py` | Point d'entrée PyInstaller |
+| `backend/himyc-backend.spec` | Spec PyInstaller (`copy_metadata` inclus pour `importlib.metadata`) |
+| `src-tauri/tauri.release.conf.json` | Resources Windows (`himyc-backend.exe`) |
+| `src-tauri/tauri.release.unix.conf.json` | Resources Unix (`himyc-backend`) |
+| `src-tauri/src/main.rs` → `find_sidecar()` | Détection sidecar + `chmod 755` Unix |
+| `scripts/build-sidecar.ps1` | Build local Windows complet |
+| `.github/workflows/release.yml` | CI : PyInstaller + Tauri sur 3 plateformes |
 
 ---
 
