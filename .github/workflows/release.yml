@@ -17,7 +17,7 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: "--target universal-apple-darwin"
+            args: "--target universal-apple-darwin --config src-tauri/tauri.release.unix.conf.json"
             rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
             label: macOS
           - platform: windows-latest
@@ -25,7 +25,7 @@ jobs:
             rust_targets: ""
             label: Windows
           - platform: ubuntu-22.04
-            args: ""
+            args: "--config src-tauri/tauri.release.unix.conf.json"
             rust_targets: ""
             label: Linux
 
@@ -67,8 +67,8 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev
 
-      # ── Sidecar PyInstaller (Windows uniquement) ───────────────────────────
-      - name: Build Python sidecar
+      # ── Sidecar PyInstaller ────────────────────────────────────────────────
+      - name: Build Python sidecar (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         working-directory: backend
@@ -76,6 +76,22 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[api]" pyinstaller
           python -m PyInstaller himyc-backend.spec --noconfirm
+
+      - name: Build Python sidecar (macOS)
+        if: matrix.platform == 'macos-latest'
+        working-directory: backend
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e ".[api]" pyinstaller
+          python3 -m PyInstaller himyc-backend.spec --noconfirm
+
+      - name: Build Python sidecar (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        working-directory: backend
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e ".[api]" pyinstaller
+          python3 -m PyInstaller himyc-backend.spec --noconfirm
 
       # ── Dépendances npm ────────────────────────────────────────────────────
       - name: Install npm dependencies
@@ -100,19 +116,16 @@ jobs:
 
             | Plateforme | Fichier | Notes |
             |---|---|---|
-            | macOS (Apple Silicon + Intel) | `.dmg` | Universal binary |
+            | macOS (Apple Silicon) | `.dmg` | Backend Python intégré — aucun prérequis |
             | Windows | `_x64-setup.exe` ou `.msi` | Backend Python intégré — aucun prérequis |
-            | Linux | `.AppImage` | Universel, pas d'installation |
-            | Linux | `.deb` | Debian / Ubuntu |
+            | Linux | `.AppImage` | Backend Python intégré — aucun prérequis |
+            | Linux | `.deb` | Backend Python intégré — aucun prérequis |
 
-            ### Windows — aucun prérequis
+            ### Aucun prérequis sur toutes les plateformes
 
-            Le backend Python (uvicorn + howimetyourcorpus) est compilé et embarqué dans l'installeur grâce à PyInstaller. Aucune installation Python requise.
+            Le backend Python (uvicorn + howimetyourcorpus) est compilé et embarqué dans chaque installeur grâce à PyInstaller. Aucune installation Python requise.
 
-            ### macOS / Linux — Backend Python requis
-
-            L'app lance automatiquement `python3 -m uvicorn howimetyourcorpus.api.server:app`.
-            Prérequis : `pip install howimetyourcorpus`
+            > **macOS Intel** : le sidecar embarqué est arm64. Sur un Mac Intel, l'app utilise automatiquement le Python système en fallback (`pip install howimetyourcorpus` requis).
 
             ### macOS — application non signée (pilote interne)
 

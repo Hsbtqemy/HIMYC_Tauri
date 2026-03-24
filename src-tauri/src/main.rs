@@ -207,7 +207,17 @@ fn find_sidecar(app: &AppHandle) -> Option<PathBuf> {
     #[cfg(not(windows))]
     let name = "himyc-backend";
     let path = resource_dir.join(name);
-    if path.is_file() { Some(path) } else { None }
+    if path.is_file() {
+        // Sur Unix, s'assurer que le binaire PyInstaller est exécutable.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        }
+        Some(path)
+    } else {
+        None
+    }
 }
 
 fn spawn_uvicorn(app: &AppHandle, project_path: &str, log_path: Option<&PathBuf>) -> Result<Child, String> {
