@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": {
+      "../backend/dist/himyc-backend.exe": "himyc-backend.exe"
+    }
+  }
+}

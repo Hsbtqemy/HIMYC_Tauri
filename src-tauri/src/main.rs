@@ -7,6 +7,13 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Masque la fenêtre console pour le process Python (Windows).
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 // ─── Backend state ────────────────────────────────────────────────────────────
 
 struct BackendState {
@@ -54,7 +61,10 @@ fn write_project_path(app: &AppHandle, path: &str) -> Result<(), String> {
 
 // ─── Python discovery ─────────────────────────────────────────────────────────
 
+type PythonCandidate = (String, Vec<String>);
+
 /// Cherche python3 via un login shell (PATH complet : pyenv, brew, conda…).
+#[cfg(not(windows))]
 fn find_python_via_login_shell() -> Option<String> {
     for shell in ["/bin/zsh", "/bin/bash"] {
         if let Ok(out) = Command::new(shell)
@@ -70,69 +80,202 @@ fn find_python_via_login_shell() -> Option<String> {
     None
 }
 
-fn open_log(log_path: Option<&PathBuf>) -> Stdio {
-    log_path
-        .and_then(|p| {
-            if let Some(parent) = p.parent() {
-                let _ = std::fs::create_dir_all(parent);
+/// Chemins Python usuels sous Windows (hors PATH — les apps GUI ont souvent un PATH minimal).
+#[cfg(windows)]
+fn push_windows_python_install_dirs(out: &mut Vec<PythonCandidate>) {
+    let mut seen = std::collections::HashSet::<String>::new();
+
+    let try_push = |out: &mut Vec<PythonCandidate>, seen: &mut std::collections::HashSet<String>, path: PathBuf| {
+        if path.is_file() {
+            let s = path.to_string_lossy().to_string();
+            if seen.insert(s.clone()) {
+                out.push((s, vec![]));
             }
-            std::fs::OpenOptions::new()
-                .create(true).write(true).truncate(true)
-                .open(p).ok()
-        })
-        .map(Stdio::from)
-        .unwrap_or_else(Stdio::null)
+        }
+    };
+
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        let base = PathBuf::from(local).join("Programs").join("Python");
+        if let Ok(entries) = std::fs::read_dir(&base) {
+            let mut dirs: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+            dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+            for e in dirs {
+                try_push(out, &mut seen, e.path().join("python.exe"));
+            }
+        }
+    }
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        for sub in ["Python312", "Python311", "Python310", "Python39"] {
+            try_push(out, &mut seen, PathBuf::from(&pf).join(sub).join("python.exe"));
+        }
+    }
+}
+
+#[cfg(windows)]
+fn python_candidates_windows() -> Vec<PythonCandidate> {
+    let mut out: Vec<PythonCandidate> = Vec::new();
+    // py.exe est souvent dans C:\Windows\ — reste dans le PATH même pour une .exe lancée sans console
+    out.push(("py".into(), vec!["-3".into()]));
+    out.push(("py".into(), vec![]));
+    out.push(("python".into(), vec![]));
+    out.push(("python3".into(), vec![]));
+    push_windows_python_install_dirs(&mut out);
+    out
+}
+
+#[cfg(not(windows))]
+fn python_candidates_unix() -> Vec<PythonCandidate> {
+    let mut out: Vec<PythonCandidate> = Vec::new();
+    if let Some(p) = find_python_via_login_shell() {
+        out.push((p, vec![]));
+    }
+    out.extend([
+        ("/opt/homebrew/bin/python3".into(), vec![]),
+        ("/usr/local/bin/python3".into(), vec![]),
+        ("python3".into(), vec![]),
+        ("python".into(), vec![]),
+    ]);
+    out
+}
+
+fn python_candidates() -> Vec<PythonCandidate> {
+    let mut out: Vec<PythonCandidate> = Vec::new();
+    if let Ok(p) = std::env::var("HIMYC_PYTHON") {
+        let p = p.trim();
+        if !p.is_empty() {
+            out.push((p.to_string(), vec![]));
+        }
+    }
+    #[cfg(windows)]
+    {
+        out.extend(python_candidates_windows());
+    }
+    #[cfg(not(windows))]
+    {
+        out.extend(python_candidates_unix());
+    }
+    out
+}
+
+/// Stderr backend : en-tête puis logs uvicorn en append (sans écraser après spawn).
+fn stderr_log_for_attempt(log_path: Option<&PathBuf>, header_line: &str) -> Stdio {
+    let Some(p) = log_path else {
+        return Stdio::null();
+    };
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(p, header_line);
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(p)
+    {
+        Ok(f) => Stdio::from(f),
+        Err(_) => Stdio::null(),
+    }
 }
 
 /// Tue tout process occupant le port 8765 (ancien uvicorn d'une session précédente).
 fn kill_port_8765() {
-    let _ = Command::new("sh")
-        .args(["-c", "lsof -ti tcp:8765 2>/dev/null | xargs kill -9 2>/dev/null"])
-        .output();
-    // Laisser le port se libérer
+    #[cfg(windows)]
+    {
+        let _ = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-NetTCPConnection -LocalPort 8765 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
+            ])
+            .output();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("sh")
+            .args(["-c", "lsof -ti tcp:8765 2>/dev/null | xargs kill -9 2>/dev/null"])
+            .output();
+    }
     std::thread::sleep(std::time::Duration::from_millis(400));
 }
 
-fn spawn_uvicorn(project_path: &str, log_path: Option<&PathBuf>) -> Result<Child, String> {
-    kill_port_8765();
-    let mut candidates: Vec<String> = Vec::new();
-    if let Some(p) = find_python_via_login_shell() {
-        candidates.push(p);
-    }
-    candidates.extend([
-        "/opt/homebrew/bin/python3".into(),
-        "/usr/local/bin/python3".into(),
-        "python3".into(),
-        "python".into(),
-    ]);
+/// Cherche le sidecar PyInstaller dans le dossier resources de l'app.
+/// Présent dans les builds release ; absent en mode dev.
+fn find_sidecar(app: &AppHandle) -> Option<PathBuf> {
+    let resource_dir = app.path().resource_dir().ok()?;
+    #[cfg(windows)]
+    let name = "himyc-backend.exe";
+    #[cfg(not(windows))]
+    let name = "himyc-backend";
+    let path = resource_dir.join(name);
+    if path.is_file() { Some(path) } else { None }
+}
 
-    let mut errors: Vec<String> = Vec::new();
-    for candidate in &candidates {
-        let stderr = open_log(log_path);
-        match Command::new(candidate)
-            .args([
-                "-m", "uvicorn",
-                "howimetyourcorpus.api.server:app",
-                "--host", "127.0.0.1",
-                "--port", "8765",
-                "--no-access-log",
-            ])
-            .env("HIMYC_PROJECT_PATH", project_path)
+fn spawn_uvicorn(app: &AppHandle, project_path: &str, log_path: Option<&PathBuf>) -> Result<Child, String> {
+    kill_port_8765();
+
+    // Priorité 1 : sidecar PyInstaller (builds release)
+    if let Some(sidecar) = find_sidecar(app) {
+        let header = format!("[HIMYC] Sidecar : {}\n", sidecar.display());
+        let stderr = stderr_log_for_attempt(log_path, &header);
+        let mut cmd = Command::new(&sidecar);
+        cmd.env("HIMYC_PROJECT_PATH", project_path)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(stderr)
-            .spawn()
-        {
-            Ok(child) => {
+            .stderr(stderr);
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        match cmd.spawn() {
+            Ok(child) => return Ok(child),
+            Err(e) => {
+                let msg = format!("[HIMYC] Sidecar échec ({}): {}\n", sidecar.display(), e);
                 if let Some(p) = log_path {
-                    let header = format!("[HIMYC] Démarré avec : {}\n", candidate);
-                    let _ = std::fs::write(p, header);
+                    let _ = std::fs::write(p, &msg);
                 }
-                return Ok(child);
             }
-            Err(e) => errors.push(format!("{}: {}", candidate, e)),
         }
     }
+
+    // Priorité 2 : Python système (mode dev)
+    let candidates = python_candidates();
+    let mut errors: Vec<String> = Vec::new();
+
+    for (exe, prefix) in candidates {
+        let label = if prefix.is_empty() {
+            exe.clone()
+        } else {
+            format!("{} {}", exe, prefix.join(" "))
+        };
+        let header = format!("[HIMYC] Démarré avec : {}\n", label);
+        let stderr = stderr_log_for_attempt(log_path, &header);
+
+        let mut cmd = Command::new(&exe);
+        for a in &prefix {
+            cmd.arg(a);
+        }
+        cmd.args([
+            "-m",
+            "uvicorn",
+            "howimetyourcorpus.api.server:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8765",
+            "--no-access-log",
+        ])
+        .env("HIMYC_PROJECT_PATH", project_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(stderr);
+
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        match cmd.spawn() {
+            Ok(child) => return Ok(child),
+            Err(e) => errors.push(format!("{}: {}", label, e)),
+        }
+    }
+
     let msg = format!("spawn_uvicorn échec:\n{}", errors.join("\n"));
     if let Some(p) = log_path {
         let _ = std::fs::write(p, format!("[HIMYC] {}\n", msg));
@@ -157,7 +300,7 @@ fn set_project_path(
     write_project_path(&app, &path)?;
     let log = log_path_for(&app);
     *state.log_path.lock().unwrap() = log.clone();
-    let child = spawn_uvicorn(&path, log.as_ref())?;
+    let child = spawn_uvicorn(&app, &path, log.as_ref())?;
     *state.process.lock().unwrap() = Some(child);
     Ok(())
 }
@@ -246,7 +389,7 @@ fn main() {
                 let log = log_path_for(app.handle());
                 let state = app.state::<BackendState>();
                 *state.log_path.lock().unwrap() = log.clone();
-                match spawn_uvicorn(&path, log.as_ref()) {
+                match spawn_uvicorn(app.handle(), &path, log.as_ref()) {
                     Ok(child) => { *state.process.lock().unwrap() = Some(child); }
                     Err(e)    => { eprintln!("HIMYC: {}", e); }
                 }
