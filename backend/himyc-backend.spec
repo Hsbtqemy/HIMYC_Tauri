@@ -7,6 +7,7 @@
 #   pyinstaller himyc-backend.spec
 
 from pathlib import Path
+from PyInstaller.utils.hooks import copy_metadata
 
 SRC = Path("src")
 
@@ -20,6 +21,8 @@ a = Analysis(
          "howimetyourcorpus/core/storage"),
         (str(SRC / "howimetyourcorpus" / "core" / "storage" / "migrations" / "*.sql"),
          "howimetyourcorpus/core/storage/migrations"),
+        # Métadonnées du package — nécessaire pour importlib.metadata.version()
+        *copy_metadata("HowIMetYourCorpus"),
     ],
     hiddenimports=[
         # uvicorn internals non détectés par analyse statique
