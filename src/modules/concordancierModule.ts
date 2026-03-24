@@ -1005,6 +1005,8 @@ const CSS = `
 .kwic-stats-table th { text-align: left; padding: 5px 10px; font-size: 0.67rem; font-weight: 600; color: var(--text-muted,#888); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border,#e0e0e6); }
 .kwic-stats-table td { padding: 5px 10px; border-bottom: 1px solid rgba(0,0,0,0.04); white-space: nowrap; }
 .kwic-stats-table tr:last-child td { border-bottom: none; }
+.kwic-stats-table-wrap { max-height: 360px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--border,#e0e0e6); border-radius: 4px; }
+.kwic-stats-cmp-table-wrap { max-height: 480px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--border,#e0e0e6); border-radius: 4px; }
 .kwic-stats-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--accent,#6366f1); opacity: 0.65; vertical-align: middle; }
 .kwic-stats-bar-b { background: #f97316; }
 .kwic-stats-split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -1228,7 +1230,7 @@ function _renderSingleStats(d: StatsResult): string {
         <span class="kwic-stats-section-title">Mots les plus fréquents — top ${d.top_words.length}</span>
         <button class="kwic-toolbar-btn kwic-stats-csv-btn" data-type="top" style="font-size:0.75rem">⬇ CSV</button>
       </div>
-      <div style="overflow-x:auto">
+      <div class="kwic-stats-table-wrap">
         <table class="kwic-stats-table">
           <thead><tr><th>#</th><th>Mot</th><th>Occurrences</th><th>% corpus</th><th style="width:110px"></th></tr></thead>
           <tbody>${d.top_words.map((w, i) => `
@@ -1249,7 +1251,7 @@ function _renderSingleStats(d: StatsResult): string {
         <span class="kwic-stats-section-title">Mots les moins fréquents (hapax &amp; rares)</span>
         <button class="kwic-toolbar-btn kwic-stats-csv-btn" data-type="rare" style="font-size:0.75rem">⬇ CSV</button>
       </div>
-      <div style="overflow-x:auto">
+      <div class="kwic-stats-table-wrap">
         <table class="kwic-stats-table">
           <thead><tr><th>Mot</th><th>Occurrences</th><th>% corpus</th></tr></thead>
           <tbody>${d.rare_words.map((w) => `
@@ -1299,7 +1301,7 @@ function _renderCompareStats(d: StatsCompareResult): string {
         <span class="kwic-stats-section-title">Comparaison de fréquences</span>
         <button class="kwic-toolbar-btn" id="kwic-stats-cmp-csv" style="font-size:0.75rem">⬇ CSV</button>
       </div>
-      <div style="overflow-x:auto">
+      <div class="kwic-stats-cmp-table-wrap">
         <table class="kwic-stats-cmp-table">
           <thead><tr>
             <th style="text-align:left">Mot</th>
@@ -1744,20 +1746,24 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     _styleInjected = true;
   }
 
-  _hits          = [];
-  _page          = 0;
-  _hasMore       = false;
-  _facets        = null;
-  _filterOpen    = false;
-  _histOpen      = false;
-  _expOpen       = false;
-  _builderOpen   = false;
-  _helpOpen      = false;
-  _builderMode   = "simple";
-  _nearN         = 5;
-  _showAligned   = false;
-  _showParallel  = false;
-  _caseSensitive = false;
+  _hits                = [];
+  _page                = 0;
+  _hasMore             = false;
+  _facets              = null;
+  _filterOpen          = false;
+  _histOpen            = false;
+  _expOpen             = false;
+  _builderOpen         = false;
+  _helpOpen            = false;
+  _builderMode         = "simple";
+  _nearN               = 5;
+  _showAligned         = false;
+  _showParallel        = false;
+  _caseSensitive       = false;
+  _statsMode           = false;
+  _statsResults        = null;
+  _statsCompareMode    = false;
+  _statsCompareResults = null;
 
   container.innerHTML = `
     <div class="kwic-root">
@@ -2311,6 +2317,17 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
 
   // ── Reset button ────────────────────────────────────────────────────────────
   resetBtn.addEventListener("click", () => {
+    // Sortir du mode Stats si actif
+    if (_statsMode) _toggleStatsMode(false);
+    _statsResults        = null;
+    _statsCompareResults = null;
+    _statsCompareMode    = false;
+    container.querySelector<HTMLElement>("#kwic-stats-results")?.replaceChildren();
+    container.querySelector<HTMLElement>("#kwic-stats-filter-b")?.classList.add("hidden");
+    container.querySelector<HTMLElement>("#kwic-stats-badge-a")?.style.setProperty("display", "none");
+    const cmpBtn = container.querySelector<HTMLButtonElement>("#kwic-stats-compare-btn");
+    if (cmpBtn) { cmpBtn.textContent = "⇄ Comparer"; cmpBtn.classList.remove("active"); }
+
     input.value = "";
     _hits        = [];
     _page        = 0;

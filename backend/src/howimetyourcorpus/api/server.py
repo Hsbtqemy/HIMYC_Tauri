@@ -1392,7 +1392,10 @@ def _stats_tokenize(text: str, min_length: int) -> list[str]:
     return [w for w in _TOKEN_RE.findall(text.lower()) if len(w) >= min_length]
 
 
-def _stats_compute(texts: list[str], slot: _StatsSlot, n_episodes: int, label: str = "") -> dict:
+def _stats_compute(
+    texts: list[str], slot: _StatsSlot, n_episodes: int, label: str = ""
+) -> tuple[dict, "_Counter[str]", int]:
+    """Retourne (résultat_dict, counter, total_tokens) pour éviter une re-tokenisation."""
     tokens: list[str] = []
     for t in texts:
         tokens.extend(_stats_tokenize(t, slot.min_length))
@@ -1409,7 +1412,7 @@ def _stats_compute(texts: list[str], slot: _StatsSlot, n_episodes: int, label: s
             for w, c in pairs
         ]
 
-    return {
+    result = {
         "label":                  label,
         "total_tokens":           total,
         "total_segments":         len(texts),
@@ -1419,6 +1422,7 @@ def _stats_compute(texts: list[str], slot: _StatsSlot, n_episodes: int, label: s
         "top_words":              _fmt(top),
         "rare_words":             _fmt(rare),
     }
+    return result, counter, total
 
 
 @app.post("/stats/lexical", summary="Statistiques lexicales d'un corpus ou d'une sélection")
@@ -1431,8 +1435,9 @@ def stats_lexical(
         return {"label": body.label, "total_tokens": 0, "total_segments": 0,
                 "total_episodes": 0, "vocabulary_size": 0,
                 "avg_tokens_per_segment": 0.0, "top_words": [], "rare_words": []}
-    n_ep = _stats_count_episodes(db.conn, body.slot)
-    return _stats_compute(texts, body.slot, n_ep, body.label)
+    n_ep        = _stats_count_episodes(db.conn, body.slot)
+    result, _, _ = _stats_compute(texts, body.slot, n_ep, body.label)
+    return result
 
 
 @app.post("/stats/compare", summary="Comparaison lexicale de deux sous-corpus")
@@ -1444,20 +1449,14 @@ def stats_compare(
     texts_b = _stats_fetch_texts(db.conn, body.b)
     n_ep_a  = _stats_count_episodes(db.conn, body.a)
     n_ep_b  = _stats_count_episodes(db.conn, body.b)
-    stats_a = _stats_compute(texts_a, body.a, n_ep_a, body.label_a)
-    stats_b = _stats_compute(texts_b, body.b, n_ep_b, body.label_b)
 
-    def _build_counter(texts: list[str], slot: _StatsSlot):
-        tokens: list[str] = []
-        for t in texts:
-            tokens.extend(_stats_tokenize(t, slot.min_length))
-        return _Counter(tokens), len(tokens)
+    # _stats_compute retourne aussi le Counter → pas de re-tokenisation
+    stats_a, ca, ta = _stats_compute(texts_a, body.a, n_ep_a, body.label_a)
+    stats_b, cb, tb = _stats_compute(texts_b, body.b, n_ep_b, body.label_b)
 
-    ca, ta = _build_counter(texts_a, body.a)
-    cb, tb = _build_counter(texts_b, body.b)
-    top_n  = body.a.top_n
-
+    top_n       = body.a.top_n
     words_union = {w for w, _ in ca.most_common(top_n)} | {w for w, _ in cb.most_common(top_n)}
+
     comparison: list[dict] = []
     for w in words_union:
         cnt_a = ca.get(w, 0)
