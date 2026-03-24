@@ -935,3 +935,62 @@ export async function exportAlignments(
   const qs = new URLSearchParams({ episode_id: episodeId, run_id: runId, fmt });
   return apiGet<AlignExportResult>(`/export/alignments?${qs}`);
 }
+
+// ── /stats (statistiques lexicales) ──────────────────────────────────────────
+
+export interface StatsSlot {
+  episode_ids?: string[] | null;
+  kind?: string | null;
+  speaker?: string | null;
+  top_n?: number;
+  min_length?: number;
+}
+
+export interface StatsWord {
+  word: string;
+  count: number;
+  freq_pct: number;
+}
+
+export interface StatsResult {
+  label: string;
+  total_tokens: number;
+  total_segments: number;
+  total_episodes: number;
+  vocabulary_size: number;
+  avg_tokens_per_segment: number;
+  top_words: StatsWord[];
+  rare_words: StatsWord[];
+}
+
+export interface StatsCompareWord {
+  word: string;
+  count_a: number;
+  count_b: number;
+  freq_a: number;
+  freq_b: number;
+  ratio: number;
+}
+
+export interface StatsCompareResult {
+  label_a: string;
+  label_b: string;
+  a: StatsResult;
+  b: StatsResult;
+  comparison: StatsCompareWord[];
+}
+
+export async function fetchLexicalStats(slot: StatsSlot, label?: string): Promise<StatsResult> {
+  return apiPost<StatsResult>("/stats/lexical", { slot, label: label ?? "" });
+}
+
+export async function fetchStatsCompare(
+  a: StatsSlot,
+  b: StatsSlot,
+  labelA?: string,
+  labelB?: string,
+): Promise<StatsCompareResult> {
+  return apiPost<StatsCompareResult>("/stats/compare", {
+    a, b, label_a: labelA ?? "A", label_b: labelB ?? "B",
+  });
+}

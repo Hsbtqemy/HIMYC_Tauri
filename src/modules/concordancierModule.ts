@@ -94,6 +94,40 @@ interface HistoryEntry {
   ts: number;
 }
 
+interface StatsWord {
+  word: string;
+  count: number;
+  freq_pct: number;
+}
+
+interface StatsResult {
+  label: string;
+  total_tokens: number;
+  total_segments: number;
+  total_episodes: number;
+  vocabulary_size: number;
+  avg_tokens_per_segment: number;
+  top_words: StatsWord[];
+  rare_words: StatsWord[];
+}
+
+interface StatsCompareWord {
+  word: string;
+  count_a: number;
+  count_b: number;
+  freq_a: number;
+  freq_b: number;
+  ratio: number;
+}
+
+interface StatsCompareResult {
+  label_a: string;
+  label_b: string;
+  a: StatsResult;
+  b: StatsResult;
+  comparison: StatsCompareWord[];
+}
+
 // ── CSS ──────────────────────────────────────────────────────────────────────
 
 const CSS = `
@@ -946,6 +980,44 @@ const CSS = `
 .kwic-root.kwic-compact .kwic-match-pill { font-size: 0.78rem; }
 .kwic-root.kwic-compact .kwic-card { padding: 6px 10px; }
 .kwic-root.kwic-compact .kwic-card-context { font-size: 0.8rem; line-height: 1.45; }
+
+/* ── Stats panel ────────────────────────────────────────────────────────────── */
+.kwic-stats-toggle.active { background: var(--accent,#6366f1); color: #fff; border-color: var(--accent,#6366f1); }
+.kwic-stats-panel { display: flex; flex-direction: column; gap: 14px; padding: 14px 12px; }
+.kwic-stats-filter-block { background: var(--bg-card,#f8f9fb); border: 1px solid var(--border,#e0e0e6); border-radius: 8px; padding: 14px 16px; }
+.kwic-stats-filter-block-b { border-color: #f97316; }
+.kwic-stats-filter-hd { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; font-weight: 600; margin-bottom: 10px; color: var(--text,#1a1a2e); }
+.kwic-stats-filters { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.kwic-stats-filter-group { display: flex; flex-direction: column; gap: 4px; }
+.kwic-stats-filter-group label { font-size: 0.67rem; font-weight: 600; color: var(--text-muted,#888); text-transform: uppercase; letter-spacing: 0.05em; }
+.kwic-stats-filter-group input, .kwic-stats-filter-group select { font-size: 0.82rem; padding: 5px 8px; border: 1px solid var(--border,#e0e0e6); border-radius: 4px; background: var(--bg,#fff); color: var(--text,#1a1a2e); min-width: 140px; }
+.kwic-stats-badge { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; font-size: 0.65rem; font-weight: 700; flex-shrink: 0; }
+.kwic-stats-badge-a { background: #3b82f6; color: #fff; }
+.kwic-stats-badge-b { background: #f97316; color: #fff; }
+.kwic-stats-cards { display: flex; gap: 10px; flex-wrap: wrap; }
+.kwic-stats-card { background: var(--bg-card,#f8f9fb); border: 1px solid var(--border,#e0e0e6); border-radius: 8px; padding: 12px 16px; flex: 1 1 110px; text-align: center; }
+.kwic-stats-card-val { font-size: 1.45rem; font-weight: 700; color: var(--accent,#6366f1); font-variant-numeric: tabular-nums; }
+.kwic-stats-card-lbl { font-size: 0.67rem; color: var(--text-muted,#888); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+.kwic-stats-section { background: var(--bg-card,#f8f9fb); border: 1px solid var(--border,#e0e0e6); border-radius: 8px; padding: 14px 16px; }
+.kwic-stats-section-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.kwic-stats-section-title { font-size: 0.85rem; font-weight: 600; }
+.kwic-stats-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.kwic-stats-table th { text-align: left; padding: 5px 10px; font-size: 0.67rem; font-weight: 600; color: var(--text-muted,#888); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border,#e0e0e6); }
+.kwic-stats-table td { padding: 5px 10px; border-bottom: 1px solid rgba(0,0,0,0.04); white-space: nowrap; }
+.kwic-stats-table tr:last-child td { border-bottom: none; }
+.kwic-stats-bar { display: inline-block; height: 6px; border-radius: 3px; background: var(--accent,#6366f1); opacity: 0.65; vertical-align: middle; }
+.kwic-stats-bar-b { background: #f97316; }
+.kwic-stats-split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 680px) { .kwic-stats-split { grid-template-columns: 1fr; } }
+.kwic-stats-cmp-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.kwic-stats-cmp-table th { text-align: right; padding: 4px 8px; font-size: 0.65rem; font-weight: 600; color: var(--text-muted,#888); text-transform: uppercase; border-bottom: 1px solid var(--border,#e0e0e6); }
+.kwic-stats-cmp-table th:first-child { text-align: left; }
+.kwic-stats-cmp-table td { padding: 4px 8px; text-align: right; border-bottom: 1px solid rgba(0,0,0,0.04); font-variant-numeric: tabular-nums; }
+.kwic-stats-cmp-table td:first-child { text-align: left; font-weight: 500; }
+.kwic-stats-cmp-table tr:last-child td { border-bottom: none; }
+.kwic-stats-more-a { color: #3b82f6; }
+.kwic-stats-more-b { color: #f97316; }
+.kwic-stats-loading { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--text-muted,#888); font-size: 0.85rem; padding: 32px; }
 `;
 
 // ── Constants & State ────────────────────────────────────────────────────────
@@ -1011,6 +1083,10 @@ let _searchToken                   = 0; // token anti-race pour les facettes
 let _sortMode: SortMode            = "relevance";
 let _compactView                   = false;
 let _kbdHandler: ((e: KeyboardEvent) => void) | null = null;
+let _statsMode              = false;
+let _statsResults: StatsResult | null = null;
+let _statsCompareMode       = false;
+let _statsCompareResults: StatsCompareResult | null = null;
 
 // ── History ──────────────────────────────────────────────────────────────────
 
@@ -1115,6 +1191,199 @@ function exportJsonlParallel() {
   }
   const lines = Object.values(groups).map((g) => JSON.stringify(g)).join("\n");
   dlBlob(new Blob([lines], { type: "application/json;charset=utf-8;" }), `kwic_parallel_${Date.now()}.jsonl`);
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+
+function exportStatsCsv(words: StatsWord[], filename: string) {
+  const hdr  = "mot,occurrences,freq_pct\n";
+  const rows = words.map((w) => [csvQ(w.word), String(w.count), String(w.freq_pct)].join(",")).join("\n");
+  dlBlob(new Blob([hdr + rows], { type: "text/csv;charset=utf-8;" }), filename);
+}
+
+function exportCompareCsv(d: StatsCompareResult) {
+  const hdr  = `mot,${csvQ(d.label_a)}_count,${csvQ(d.label_a)}_pct,${csvQ(d.label_b)}_count,${csvQ(d.label_b)}_pct,ratio\n`;
+  const rows = d.comparison
+    .map((w) => [csvQ(w.word), String(w.count_a), String(w.freq_a), String(w.count_b), String(w.freq_b), String(w.ratio)].join(","))
+    .join("\n");
+  dlBlob(new Blob([hdr + rows], { type: "text/csv;charset=utf-8;" }), `stats_compare_${Date.now()}.csv`);
+}
+
+function _renderSingleStats(d: StatsResult): string {
+  const fmt = (n: number) => n.toLocaleString("fr-FR");
+  const maxCount = d.top_words[0]?.count ?? 1;
+  if (!d.total_tokens) {
+    return `<div class="kwic-stats-loading" style="color:var(--text-muted)">Aucun segment trouvé pour ces filtres.</div>`;
+  }
+  return `
+    <div class="kwic-stats-cards">
+      <div class="kwic-stats-card"><div class="kwic-stats-card-val">${fmt(d.total_tokens)}</div><div class="kwic-stats-card-lbl">Tokens</div></div>
+      <div class="kwic-stats-card"><div class="kwic-stats-card-val">${fmt(d.vocabulary_size)}</div><div class="kwic-stats-card-lbl">Vocabulaire</div></div>
+      <div class="kwic-stats-card"><div class="kwic-stats-card-val">${fmt(d.total_segments)}</div><div class="kwic-stats-card-lbl">Segments</div></div>
+      <div class="kwic-stats-card"><div class="kwic-stats-card-val">${fmt(d.total_episodes)}</div><div class="kwic-stats-card-lbl">Épisodes</div></div>
+      <div class="kwic-stats-card"><div class="kwic-stats-card-val">${d.avg_tokens_per_segment}</div><div class="kwic-stats-card-lbl">Moy.&nbsp;mots/seg</div></div>
+    </div>
+    <div class="kwic-stats-section">
+      <div class="kwic-stats-section-hd">
+        <span class="kwic-stats-section-title">Mots les plus fréquents — top ${d.top_words.length}</span>
+        <button class="kwic-toolbar-btn kwic-stats-csv-btn" data-type="top" style="font-size:0.75rem">⬇ CSV</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="kwic-stats-table">
+          <thead><tr><th>#</th><th>Mot</th><th>Occurrences</th><th>% corpus</th><th style="width:110px"></th></tr></thead>
+          <tbody>${d.top_words.map((w, i) => `
+            <tr>
+              <td style="color:var(--text-muted);font-variant-numeric:tabular-nums">${i + 1}</td>
+              <td><strong>${escapeHtml(w.word)}</strong></td>
+              <td style="font-variant-numeric:tabular-nums">${fmt(w.count)}</td>
+              <td style="font-variant-numeric:tabular-nums">${w.freq_pct.toFixed(2)}&nbsp;%</td>
+              <td><span class="kwic-stats-bar" style="width:${Math.round(w.count / maxCount * 100)}px"></span></td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ${d.rare_words.length ? `
+    <div class="kwic-stats-section">
+      <div class="kwic-stats-section-hd">
+        <span class="kwic-stats-section-title">Mots les moins fréquents (hapax &amp; rares)</span>
+        <button class="kwic-toolbar-btn kwic-stats-csv-btn" data-type="rare" style="font-size:0.75rem">⬇ CSV</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="kwic-stats-table">
+          <thead><tr><th>Mot</th><th>Occurrences</th><th>% corpus</th></tr></thead>
+          <tbody>${d.rare_words.map((w) => `
+            <tr>
+              <td><strong>${escapeHtml(w.word)}</strong></td>
+              <td style="font-variant-numeric:tabular-nums">${fmt(w.count)}</td>
+              <td style="font-variant-numeric:tabular-nums">${w.freq_pct.toFixed(3)}&nbsp;%</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>` : ""}
+  `;
+}
+
+function _renderCompareStats(d: StatsCompareResult): string {
+  const fmt     = (n: number) => n.toLocaleString("fr-FR");
+  const maxFreq = Math.max(...d.comparison.map((w) => Math.max(w.freq_a, w.freq_b)), 0.001);
+  const summaryRow = (lbl: string, val: string) =>
+    `<div style="display:flex;justify-content:space-between;font-size:0.82rem;padding:3px 0"><span style="color:var(--text-muted)">${lbl}</span><strong>${val}</strong></div>`;
+
+  return `
+    <div class="kwic-stats-split">
+      <div class="kwic-stats-section">
+        <div class="kwic-stats-section-hd">
+          <span><span class="kwic-stats-badge kwic-stats-badge-a">A</span>&nbsp;${escapeHtml(d.label_a)}</span>
+        </div>
+        ${summaryRow("Tokens", fmt(d.a.total_tokens))}
+        ${summaryRow("Vocabulaire", fmt(d.a.vocabulary_size))}
+        ${summaryRow("Segments", fmt(d.a.total_segments))}
+        ${summaryRow("Épisodes", fmt(d.a.total_episodes))}
+        ${summaryRow("Moy. mots/seg", String(d.a.avg_tokens_per_segment))}
+      </div>
+      <div class="kwic-stats-section">
+        <div class="kwic-stats-section-hd">
+          <span><span class="kwic-stats-badge kwic-stats-badge-b">B</span>&nbsp;${escapeHtml(d.label_b)}</span>
+        </div>
+        ${summaryRow("Tokens", fmt(d.b.total_tokens))}
+        ${summaryRow("Vocabulaire", fmt(d.b.vocabulary_size))}
+        ${summaryRow("Segments", fmt(d.b.total_segments))}
+        ${summaryRow("Épisodes", fmt(d.b.total_episodes))}
+        ${summaryRow("Moy. mots/seg", String(d.b.avg_tokens_per_segment))}
+      </div>
+    </div>
+    <div class="kwic-stats-section">
+      <div class="kwic-stats-section-hd">
+        <span class="kwic-stats-section-title">Comparaison de fréquences</span>
+        <button class="kwic-toolbar-btn" id="kwic-stats-cmp-csv" style="font-size:0.75rem">⬇ CSV</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="kwic-stats-cmp-table">
+          <thead><tr>
+            <th style="text-align:left">Mot</th>
+            <th><span class="kwic-stats-badge kwic-stats-badge-a" style="width:14px;height:14px;font-size:0.55rem;line-height:14px">A</span>&nbsp;%</th>
+            <th><span class="kwic-stats-badge kwic-stats-badge-b" style="width:14px;height:14px;font-size:0.55rem;line-height:14px">B</span>&nbsp;%</th>
+            <th>Ratio A/B</th>
+            <th>Visualisation</th>
+          </tr></thead>
+          <tbody>${d.comparison.map((w) => {
+            const moreA    = w.freq_a > w.freq_b;
+            const moreB    = w.freq_b > w.freq_a;
+            const ratioTxt = w.ratio >= 999 ? "∞" : w.ratio.toFixed(2);
+            const barA     = Math.max(2, Math.round(w.freq_a / maxFreq * 90));
+            const barB     = Math.max(2, Math.round(w.freq_b / maxFreq * 90));
+            return `<tr>
+              <td class="${moreA ? "kwic-stats-more-a" : moreB ? "kwic-stats-more-b" : ""}"><strong>${escapeHtml(w.word)}</strong></td>
+              <td class="${moreA ? "kwic-stats-more-a" : ""}">${w.freq_a.toFixed(2)}</td>
+              <td class="${moreB ? "kwic-stats-more-b" : ""}">${w.freq_b.toFixed(2)}</td>
+              <td class="${moreA ? "kwic-stats-more-a" : moreB ? "kwic-stats-more-b" : ""}">${ratioTxt}</td>
+              <td>
+                <span class="kwic-stats-bar" style="width:${barA}px"></span>&nbsp;<span class="kwic-stats-bar kwic-stats-bar-b" style="width:${barB}px"></span>
+              </td>
+            </tr>`;
+          }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderStatsResults(container: HTMLElement) {
+  const el = container.querySelector<HTMLElement>("#kwic-stats-results")!;
+  if (_statsCompareMode && _statsCompareResults) {
+    el.innerHTML = _renderCompareStats(_statsCompareResults);
+    el.querySelector<HTMLButtonElement>("#kwic-stats-cmp-csv")?.addEventListener("click", () => {
+      if (_statsCompareResults) exportCompareCsv(_statsCompareResults);
+    });
+  } else if (_statsResults) {
+    el.innerHTML = _renderSingleStats(_statsResults);
+    el.querySelectorAll<HTMLButtonElement>(".kwic-stats-csv-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!_statsResults) return;
+        if (btn.dataset["type"] === "rare") exportStatsCsv(_statsResults.rare_words, `stats_rares_${Date.now()}.csv`);
+        else exportStatsCsv(_statsResults.top_words, `stats_top_${Date.now()}.csv`);
+      });
+    });
+  }
+}
+
+async function runStats(container: HTMLElement) {
+  const resultsEl = container.querySelector<HTMLElement>("#kwic-stats-results")!;
+  const runBtn    = container.querySelector<HTMLButtonElement>("#kwic-stats-run-btn")!;
+  const epA       = (container.querySelector<HTMLInputElement>("#kwic-stats-ep-a")?.value ?? "").trim();
+  const kindA     = container.querySelector<HTMLSelectElement>("#kwic-stats-kind-a")?.value ?? "";
+  const speakerA  = (container.querySelector<HTMLInputElement>("#kwic-stats-speaker-a")?.value ?? "").trim();
+  const topN      = Math.min(200, Math.max(10, parseInt(container.querySelector<HTMLInputElement>("#kwic-stats-topn")?.value ?? "50", 10) || 50));
+  const slotA     = { episode_ids: epA ? [epA] : null, kind: kindA || null, speaker: speakerA || null, top_n: topN, min_length: 2 };
+  const labelA    = epA || kindA || speakerA || "Corpus complet";
+
+  runBtn.disabled     = true;
+  runBtn.textContent  = "Analyse…";
+  resultsEl.innerHTML = `<div class="kwic-stats-loading">⏳ Analyse en cours…</div>`;
+
+  try {
+    if (_statsCompareMode) {
+      const epB      = (container.querySelector<HTMLInputElement>("#kwic-stats-ep-b")?.value ?? "").trim();
+      const kindB    = container.querySelector<HTMLSelectElement>("#kwic-stats-kind-b")?.value ?? "";
+      const speakerB = (container.querySelector<HTMLInputElement>("#kwic-stats-speaker-b")?.value ?? "").trim();
+      const slotB    = { episode_ids: epB ? [epB] : null, kind: kindB || null, speaker: speakerB || null, top_n: topN, min_length: 2 };
+      const labelB   = epB || kindB || speakerB || "Corpus complet";
+      _statsCompareResults = await apiPost<StatsCompareResult>("/stats/compare", {
+        a: slotA, b: slotB, label_a: labelA, label_b: labelB,
+      });
+    } else {
+      _statsResults = await apiPost<StatsResult>("/stats/lexical", { slot: slotA, label: labelA });
+    }
+    renderStatsResults(container);
+  } catch (e) {
+    resultsEl.innerHTML = `<div class="kwic-stats-loading" style="color:var(--danger,#e53e3e)">Erreur : ${escapeHtml(String(e))}</div>`;
+  } finally {
+    runBtn.disabled    = false;
+    runBtn.textContent = "Analyser";
+  }
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
@@ -1592,6 +1861,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
             </div>
           </div>
           <button class="kwic-toolbar-btn danger" id="kwic-reset-btn" title="Réinitialiser la recherche et tous les filtres">✕ Réinit.</button>
+          <button class="kwic-toolbar-btn kwic-stats-toggle" id="kwic-stats-btn" title="Statistiques lexicales — fréquences, vocabulaire, comparaison de corpus">📊 Stats</button>
         </div>
       </div>
 
@@ -1681,6 +1951,69 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
 
       <!-- Pagination -->
       <div class="kwic-pagination"></div>
+
+      <!-- Stats panel -->
+      <div class="kwic-stats-panel hidden" id="kwic-stats-panel">
+        <div class="kwic-stats-filter-block" id="kwic-stats-filter-a">
+          <div class="kwic-stats-filter-hd">
+            <span class="kwic-stats-badge kwic-stats-badge-a" id="kwic-stats-badge-a" style="display:none">A</span>
+            <span class="kwic-stats-section-title">Filtres du corpus</span>
+          </div>
+          <div class="kwic-stats-filters">
+            <div class="kwic-stats-filter-group">
+              <label>Épisode</label>
+              <input id="kwic-stats-ep-a" placeholder="Tout le corpus" list="kwic-stats-datalist-a" autocomplete="off">
+              <datalist id="kwic-stats-datalist-a"></datalist>
+            </div>
+            <div class="kwic-stats-filter-group">
+              <label>Type</label>
+              <select id="kwic-stats-kind-a">
+                <option value="">Tous</option>
+                <option value="utterance">Tours de parole</option>
+                <option value="sentence">Phrases</option>
+              </select>
+            </div>
+            <div class="kwic-stats-filter-group">
+              <label>Locuteur</label>
+              <input id="kwic-stats-speaker-a" placeholder="Tous">
+            </div>
+            <div class="kwic-stats-filter-group">
+              <label>Top N mots</label>
+              <input type="number" id="kwic-stats-topn" min="10" max="200" value="50" style="min-width:0;width:70px">
+            </div>
+            <button class="btn btn-primary btn-sm" id="kwic-stats-run-btn">Analyser</button>
+            <button class="kwic-toolbar-btn" id="kwic-stats-compare-btn" title="Comparer deux sous-corpus côte à côte">⇄ Comparer</button>
+          </div>
+        </div>
+
+        <div class="kwic-stats-filter-block kwic-stats-filter-block-b hidden" id="kwic-stats-filter-b">
+          <div class="kwic-stats-filter-hd">
+            <span class="kwic-stats-badge kwic-stats-badge-b">B</span>
+            <span class="kwic-stats-section-title">Corpus B</span>
+          </div>
+          <div class="kwic-stats-filters">
+            <div class="kwic-stats-filter-group">
+              <label>Épisode</label>
+              <input id="kwic-stats-ep-b" placeholder="Tout le corpus" list="kwic-stats-datalist-b" autocomplete="off">
+              <datalist id="kwic-stats-datalist-b"></datalist>
+            </div>
+            <div class="kwic-stats-filter-group">
+              <label>Type</label>
+              <select id="kwic-stats-kind-b">
+                <option value="">Tous</option>
+                <option value="utterance">Tours de parole</option>
+                <option value="sentence">Phrases</option>
+              </select>
+            </div>
+            <div class="kwic-stats-filter-group">
+              <label>Locuteur</label>
+              <input id="kwic-stats-speaker-b" placeholder="Tous">
+            </div>
+          </div>
+        </div>
+
+        <div id="kwic-stats-results"></div>
+      </div>
     </div>`;
 
   // ── Refs ────────────────────────────────────────────────────────────────────
@@ -2150,6 +2483,60 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   searchBtn.addEventListener("click", () => void runSearch());
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") void runSearch(); });
 
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  const statsBtn   = container.querySelector<HTMLButtonElement>("#kwic-stats-btn")!;
+  const statsPanel = container.querySelector<HTMLElement>("#kwic-stats-panel")!;
+
+  const _statsHideSelectors = [
+    "#kwic-fts-preview", "#kwic-chips-bar", "#kwic-analytics",
+    "#kwic-results-toolbar", "#kwic-error", "#kwic-feedback",
+    ".kwic-table-wrap", ".kwic-pagination",
+  ];
+
+  function _toggleStatsMode(active: boolean) {
+    _statsMode = active;
+    statsBtn.classList.toggle("active", active);
+    statsPanel.classList.toggle("hidden", !active);
+    for (const sel of _statsHideSelectors) {
+      const el = container.querySelector<HTMLElement>(sel);
+      if (el) el.style.display = active ? "none" : "";
+    }
+  }
+
+  let _statsEpsLoaded = false;
+  async function _populateStatsEpDatalists() {
+    if (_statsEpsLoaded) return;
+    try {
+      const data = await apiGet<{ episodes: { episode_id: string; title: string }[] }>("/episodes");
+      const opts = data.episodes
+        .map((ep) => `<option value="${escapeHtml(ep.episode_id)}" label="${escapeHtml(ep.title)}">`)
+        .join("");
+      const dlA = container.querySelector<HTMLDataListElement>("#kwic-stats-datalist-a");
+      const dlB = container.querySelector<HTMLDataListElement>("#kwic-stats-datalist-b");
+      if (dlA) dlA.innerHTML = opts;
+      if (dlB) dlB.innerHTML = opts;
+      _statsEpsLoaded = true;
+    } catch { /* ignore */ }
+  }
+
+  statsBtn.addEventListener("click", () => {
+    _toggleStatsMode(!_statsMode);
+    if (_statsMode) void _populateStatsEpDatalists();
+  });
+
+  container.querySelector<HTMLButtonElement>("#kwic-stats-compare-btn")!.addEventListener("click", (e) => {
+    _statsCompareMode = !_statsCompareMode;
+    container.querySelector<HTMLElement>("#kwic-stats-filter-b")!.classList.toggle("hidden", !_statsCompareMode);
+    container.querySelector<HTMLElement>("#kwic-stats-badge-a")!.style.display = _statsCompareMode ? "" : "none";
+    const btn = e.currentTarget as HTMLButtonElement;
+    btn.textContent = _statsCompareMode ? "✕ Comparaison" : "⇄ Comparer";
+    btn.classList.toggle("active", _statsCompareMode);
+    _statsCompareResults = null;
+    container.querySelector<HTMLElement>("#kwic-stats-results")!.innerHTML = "";
+  });
+
+  container.querySelector<HTMLButtonElement>("#kwic-stats-run-btn")!.addEventListener("click", () => void runStats(container));
+
   _kbdHandler = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       closeAllPanels();
@@ -2175,11 +2562,15 @@ export function disposeConcordancier() {
   if (_closeDropdownsRef) { document.removeEventListener("click", _closeDropdownsRef); _closeDropdownsRef = null; }
   if (_kbdHandler)       { document.removeEventListener("keydown", _kbdHandler); _kbdHandler = null; }
   _searchToken++;
-  _hits          = [];
-  _facets        = null;
-  _showAligned   = false;
-  _showParallel  = false;
-  _builderMode   = "simple";
-  _nearN         = 5;
-  _caseSensitive = false;
+  _hits                = [];
+  _facets              = null;
+  _showAligned         = false;
+  _showParallel        = false;
+  _builderMode         = "simple";
+  _nearN               = 5;
+  _caseSensitive       = false;
+  _statsMode           = false;
+  _statsResults        = null;
+  _statsCompareMode    = false;
+  _statsCompareResults = null;
 }

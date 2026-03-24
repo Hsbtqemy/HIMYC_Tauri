@@ -1328,6 +1328,151 @@ def query_facets(
     }
 
 
+# ─── /stats (statistiques lexicales) ─────────────────────────────────────────
+
+import re as _re_stats
+from collections import Counter as _Counter
+
+_TOKEN_RE = _re_stats.compile(r"[^\W\d_]+", _re_stats.UNICODE)
+
+
+class _StatsSlot(BaseModel):
+    episode_ids: list[str] | None = None  # None = tout le corpus
+    kind:        str | None       = None  # "utterance" | "sentence" | None
+    speaker:     str | None       = None
+    top_n:       int              = 50
+    min_length:  int              = 2
+
+
+class _StatsRequest(BaseModel):
+    slot:  _StatsSlot
+    label: str = ""
+
+
+class _StatsCompareRequest(BaseModel):
+    a:       _StatsSlot
+    b:       _StatsSlot
+    label_a: str = "A"
+    label_b: str = "B"
+
+
+def _stats_fetch_texts(conn, slot: _StatsSlot) -> list[str]:
+    sql    = "SELECT COALESCE(text,'') FROM segments WHERE 1=1"
+    params: list = []
+    if slot.episode_ids:
+        ph  = ",".join("?" * len(slot.episode_ids))
+        sql += f" AND episode_id IN ({ph})"
+        params.extend(slot.episode_ids)
+    if slot.kind:
+        sql += " AND kind = ?"
+        params.append(slot.kind)
+    if slot.speaker:
+        sql += " AND LOWER(COALESCE(speaker_explicit,'')) LIKE ?"
+        params.append(f"%{slot.speaker.lower()}%")
+    return [row[0] for row in conn.execute(sql, params).fetchall()]
+
+
+def _stats_count_episodes(conn, slot: _StatsSlot) -> int:
+    sql    = "SELECT COUNT(DISTINCT episode_id) FROM segments WHERE 1=1"
+    params: list = []
+    if slot.episode_ids:
+        ph  = ",".join("?" * len(slot.episode_ids))
+        sql += f" AND episode_id IN ({ph})"
+        params.extend(slot.episode_ids)
+    if slot.kind:
+        sql += " AND kind = ?"
+        params.append(slot.kind)
+    if slot.speaker:
+        sql += " AND LOWER(COALESCE(speaker_explicit,'')) LIKE ?"
+        params.append(f"%{slot.speaker.lower()}%")
+    return conn.execute(sql, params).fetchone()[0]
+
+
+def _stats_tokenize(text: str, min_length: int) -> list[str]:
+    return [w for w in _TOKEN_RE.findall(text.lower()) if len(w) >= min_length]
+
+
+def _stats_compute(texts: list[str], slot: _StatsSlot, n_episodes: int, label: str = "") -> dict:
+    tokens: list[str] = []
+    for t in texts:
+        tokens.extend(_stats_tokenize(t, slot.min_length))
+    total   = len(tokens)
+    counter = _Counter(tokens)
+    vocab   = len(counter)
+    top     = counter.most_common(slot.top_n)
+    rare    = list(reversed(counter.most_common()))[:slot.top_n]
+
+    def _fmt(pairs: list) -> list[dict]:
+        return [
+            {"word": w, "count": c,
+             "freq_pct": round(c / total * 100, 3) if total else 0.0}
+            for w, c in pairs
+        ]
+
+    return {
+        "label":                  label,
+        "total_tokens":           total,
+        "total_segments":         len(texts),
+        "total_episodes":         n_episodes,
+        "vocabulary_size":        vocab,
+        "avg_tokens_per_segment": round(total / len(texts), 1) if texts else 0.0,
+        "top_words":              _fmt(top),
+        "rare_words":             _fmt(rare),
+    }
+
+
+@app.post("/stats/lexical", summary="Statistiques lexicales d'un corpus ou d'une sélection")
+def stats_lexical(
+    body: _StatsRequest,
+    db:   CorpusDB = Depends(_get_db),
+) -> dict[str, Any]:
+    texts = _stats_fetch_texts(db.conn, body.slot)
+    if not texts:
+        return {"label": body.label, "total_tokens": 0, "total_segments": 0,
+                "total_episodes": 0, "vocabulary_size": 0,
+                "avg_tokens_per_segment": 0.0, "top_words": [], "rare_words": []}
+    n_ep = _stats_count_episodes(db.conn, body.slot)
+    return _stats_compute(texts, body.slot, n_ep, body.label)
+
+
+@app.post("/stats/compare", summary="Comparaison lexicale de deux sous-corpus")
+def stats_compare(
+    body: _StatsCompareRequest,
+    db:   CorpusDB = Depends(_get_db),
+) -> dict[str, Any]:
+    texts_a = _stats_fetch_texts(db.conn, body.a)
+    texts_b = _stats_fetch_texts(db.conn, body.b)
+    n_ep_a  = _stats_count_episodes(db.conn, body.a)
+    n_ep_b  = _stats_count_episodes(db.conn, body.b)
+    stats_a = _stats_compute(texts_a, body.a, n_ep_a, body.label_a)
+    stats_b = _stats_compute(texts_b, body.b, n_ep_b, body.label_b)
+
+    def _build_counter(texts: list[str], slot: _StatsSlot):
+        tokens: list[str] = []
+        for t in texts:
+            tokens.extend(_stats_tokenize(t, slot.min_length))
+        return _Counter(tokens), len(tokens)
+
+    ca, ta = _build_counter(texts_a, body.a)
+    cb, tb = _build_counter(texts_b, body.b)
+    top_n  = body.a.top_n
+
+    words_union = {w for w, _ in ca.most_common(top_n)} | {w for w, _ in cb.most_common(top_n)}
+    comparison: list[dict] = []
+    for w in words_union:
+        cnt_a = ca.get(w, 0)
+        cnt_b = cb.get(w, 0)
+        fa    = round(cnt_a / ta * 100, 3) if ta else 0.0
+        fb    = round(cnt_b / tb * 100, 3) if tb else 0.0
+        ratio = round(fa / fb, 2) if fb > 0 else (999.0 if fa > 0 else 1.0)
+        comparison.append({"word": w, "count_a": cnt_a, "count_b": cnt_b,
+                           "freq_a": fa, "freq_b": fb, "ratio": ratio})
+    comparison.sort(key=lambda x: x["freq_a"] + x["freq_b"], reverse=True)
+
+    return {"label_a": body.label_a, "label_b": body.label_b,
+            "a": stats_a, "b": stats_b, "comparison": comparison}
+
+
 # ─── /characters (MX-021c) ────────────────────────────────────────────────────
 
 class _CharacterCatalogBody(BaseModel):
