@@ -1587,6 +1587,7 @@ class _ExportBody(BaseModel):
     scope: str = "corpus"          # "corpus" | "segments" | "jobs" | "characters" | "assignments"
     fmt: str = "txt"               # "txt" | "csv" | "json" | "tsv" | "jsonl"
     use_clean: bool = True         # clean.txt si disponible, sinon raw.txt
+    episode_ids: list[str] | None = None  # corpus / segments : sous-ensemble (None = tous l'index)
 
 
 @app.post("/export", status_code=201, summary="Exporter corpus, segments ou jobs (Exporter section)")
@@ -1669,9 +1670,30 @@ def run_export(
     if index is None or not index.episodes:
         raise HTTPException(422, detail={"error": "NO_EPISODES", "message": "Aucun épisode dans le projet."})
 
+    index_ids = {ep.episode_id for ep in index.episodes}
+    ep_filter: set[str] | None = None
+    if body.episode_ids is not None:
+        if len(body.episode_ids) == 0:
+            raise HTTPException(
+                422,
+                detail={"error": "EMPTY_EPISODE_FILTER", "message": "episode_ids vide : sélectionnez au moins un épisode."},
+            )
+        unknown = [eid for eid in body.episode_ids if eid not in index_ids]
+        if unknown:
+            raise HTTPException(
+                422,
+                detail={
+                    "error": "INVALID_EPISODE_FILTER",
+                    "message": f"Épisode(s) inconnus dans l'index : {unknown[:5]}",
+                },
+            )
+        ep_filter = set(body.episode_ids)
+
     if scope == "corpus":
         pairs: list[tuple[EpisodeRef, str]] = []
         for ep in index.episodes:
+            if ep_filter is not None and ep.episode_id not in ep_filter:
+                continue
             kind = "clean" if (body.use_clean and store.has_episode_clean(ep.episode_id)) else "raw"
             text = store.load_episode_text(ep.episode_id, kind=kind)
             if text.strip():
@@ -1703,6 +1725,8 @@ def run_export(
     # scope == "segments"
     all_segments: list[dict[str, Any]] = []
     for ep in index.episodes:
+        if ep_filter is not None and ep.episode_id not in ep_filter:
+            continue
         seg_path = Path(store.root_dir) / EPISODES_DIR_NAME / ep.episode_id / SEGMENTS_JSONL_FILENAME
         if seg_path.exists():
             for line in seg_path.read_text(encoding="utf-8").splitlines():
@@ -1730,15 +1754,18 @@ def run_export(
 def export_qa_report(
     policy: str = Query("lenient", pattern="^(strict|lenient)$"),
     store: ProjectStore = Depends(_get_store),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB | None = Depends(_get_db_optional),
 ) -> dict[str, Any]:
     """Diagnostics corpus : état normalisation, segmentation, alignement."""
     import json as _json
 
     index = store.load_series_index()
     if index is None or not index.episodes:
+        # En lenient, pas de bandeau « bloquant » : projet vide = avertissement seulement.
+        empty_gate = "warnings" if policy == "lenient" else "blocking"
+        empty_level = "warning" if policy == "lenient" else "blocking"
         return {
-            "gate": "blocking",
+            "gate": empty_gate,
             "policy": policy,
             "total_episodes": 0,
             "n_raw": 0,
@@ -1746,7 +1773,7 @@ def export_qa_report(
             "n_segmented": 0,
             "n_with_srts": 0,
             "n_alignment_runs": 0,
-            "issues": [{"level": "blocking", "code": "NO_EPISODES", "message": "Aucun épisode dans le projet."}],
+            "issues": [{"level": empty_level, "code": "NO_EPISODES", "message": "Aucun épisode dans le projet."}],
         }
 
     episodes = index.episodes
@@ -1780,12 +1807,16 @@ def export_qa_report(
                 if sub.is_dir() and (sub / "report.json").exists():
                     n_alignment_runs += 1
 
-        if not has_raw:
+        # Ne pas exiger raw.txt si clean ou segments existent (workflow sans fichier raw conservé).
+        has_any_transcript = bool(has_raw or has_clean or has_segments)
+        if not has_any_transcript:
+            # Épisode listé dans l’index TV sans aucun contenu sur disque (catalogue seul).
+            level = "blocking" if policy == "strict" else "warning"
             issues.append({
-                "level": "blocking",
-                "code": "NO_TRANSCRIPT",
+                "level": level,
+                "code": "NO_EPISODE_CONTENT",
                 "episode": eid,
-                "message": f"Transcript manquant : {eid}",
+                "message": f"Aucun transcript (raw/clean/segments) : {eid}",
             })
             continue
 
@@ -1812,6 +1843,9 @@ def export_qa_report(
 
     has_blocking = any(i["level"] == "blocking" for i in issues)
     has_warnings = any(i["level"] == "warning" for i in issues)
+    # Politique lenient : jamais de gate « blocking » (export reste possible ; détails dans issues).
+    if policy == "lenient":
+        has_blocking = False
     gate = "blocking" if has_blocking else ("warnings" if has_warnings else "ok")
 
     return {

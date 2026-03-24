@@ -541,7 +541,7 @@ async function loadQaData(container: HTMLElement) {
     const labels: Record<string, string> = {
       ok: "Corpus en bon état — aucun problème détecté",
       warnings: `${qa.issues.length} avertissement(s) — export possible`,
-      blocking: `${qa.issues.filter(i => i.level === "blocking").length} problème(s) bloquant(s)`,
+      blocking: `${qa.issues.filter(i => i.level === "blocking").length} problème(s) bloquant(s) — vérifier la curation`,
     };
     banner.className = `exp-gate-banner ${qa.gate}`;
     gateText.innerHTML = `<span>${icons[qa.gate]}</span> ${escapeHtml(labels[qa.gate])} <span style="margin-left:8px;font-size:0.72rem;opacity:.7">[${qa.policy}]</span>`;
