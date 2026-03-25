@@ -805,6 +805,10 @@ const CSS = `
 }
 .acts-ep-list-title {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -813,7 +817,51 @@ const CSS = `
   padding: 4px 6px 3px;
   margin: 0;
   border-bottom: 1px solid var(--border);
+  user-select: none;
 }
+/* Bouton de collapse du volet épisodes */
+.acts-ep-collapse-btn {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.acts-ep-collapse-btn:hover { background: var(--surface2); color: var(--text); }
+/* ── État réduit du volet ─────────────────────────────────────────────────── */
+.acts-ep-list {
+  transition: width 0.18s ease, min-width 0.18s ease;
+}
+.acts-ep-list--collapsed {
+  width: 32px !important;
+  min-width: 32px !important;
+  overflow: hidden;
+}
+.acts-ep-list--collapsed .acts-ep-list-title {
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  padding: 6px 4px;
+  border-bottom: none;
+  gap: 10px;
+  height: 100%;
+}
+/* Masquer le label "Épisodes" quand collapsed — le bouton suffit */
+.acts-ep-list--collapsed .acts-ep-list-label { display: none; }
+/* Masquer filtres et table quand collapsed */
+.acts-ep-list--collapsed .acts-ep-filters,
+.acts-ep-list--collapsed .seg-table-wrap,
+.acts-ep-list--collapsed .align-ep-wrap { display: none; }
 .seg-table-wrap,
 .align-ep-wrap {
   flex: 1 1 0;
@@ -5576,8 +5624,42 @@ function fillSeasonOptions(sel: HTMLSelectElement, episodes: Episode[], previous
   sel.value = valid ? previousValue : "all";
 }
 
+/**
+ * Rend le volet liste-épisodes rétractable.
+ * Mémorise l'état dans localStorage (clé = `acts-ep-collapse-${listId}`).
+ * À appeler une seule fois par volet (garde interne sur `data-collapseWired`).
+ */
+function wireEpListCollapse(container: HTMLElement, listId: string) {
+  const list = container.querySelector<HTMLElement>(`#${listId}`);
+  if (!list || list.dataset.collapseWired === "1") return;
+  list.dataset.collapseWired = "1";
+
+  const btn = list.querySelector<HTMLButtonElement>(".acts-ep-collapse-btn");
+  if (!btn) return;
+
+  const lsKey = `acts-ep-collapse-${listId}`;
+  let collapsed = localStorage.getItem(lsKey) === "1";
+
+  const apply = () => {
+    list.classList.toggle("acts-ep-list--collapsed", collapsed);
+    btn.textContent  = collapsed ? "›" : "‹";
+    btn.title        = collapsed ? "Afficher la liste des épisodes" : "Réduire la liste";
+    btn.setAttribute("aria-expanded", String(!collapsed));
+  };
+
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    collapsed = !collapsed;
+    localStorage.setItem(lsKey, collapsed ? "1" : "0");
+    apply();
+  });
+
+  apply(); // restore persisted state
+}
+
 function wireSegEpListFilters(container: HTMLElement) {
   const root = container.querySelector<HTMLElement>("#seg-acts-ep-list");
+  wireEpListCollapse(container, "seg-acts-ep-list");
   if (!root || root.dataset.filterWired === "1") return;
   const season = container.querySelector<HTMLSelectElement>("#seg-ep-season");
   const search = container.querySelector<HTMLInputElement>("#seg-ep-search");
@@ -5590,6 +5672,7 @@ function wireSegEpListFilters(container: HTMLElement) {
 
 function wireAlignEpListFilters(container: HTMLElement) {
   const root = container.querySelector<HTMLElement>("#align-acts-ep-list");
+  wireEpListCollapse(container, "align-acts-ep-list");
   if (!root || root.dataset.filterWired === "1") return;
   const season = container.querySelector<HTMLSelectElement>("#align-ep-season");
   const search = container.querySelector<HTMLInputElement>("#align-ep-search");
@@ -8985,7 +9068,10 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             <!-- Vue Table -->
             <div id="seg-view-table" class="acts-split" style="flex:1;min-height:0;overflow:hidden">
               <div class="acts-ep-list" id="seg-acts-ep-list">
-                <div class="acts-ep-list-title">Épisodes</div>
+                <div class="acts-ep-list-title">
+                  <span class="acts-ep-list-label">Épisodes</span>
+                  <button type="button" class="acts-ep-collapse-btn" data-collapse-target="seg-acts-ep-list" title="Réduire la liste" aria-expanded="true" aria-controls="seg-acts-ep-list">‹</button>
+                </div>
                 <div class="acts-ep-filters" role="search">
                   <div class="acts-ep-filter-row">
                     <label class="acts-ep-filter-label" for="seg-ep-season">Saison</label>
@@ -9065,7 +9151,10 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             <!-- Vue Inspection -->
             <div id="align-view-inspect" class="acts-split" style="flex:1;min-height:0;overflow:hidden">
               <div class="acts-ep-list" id="align-acts-ep-list">
-                <div class="acts-ep-list-title">Épisodes</div>
+                <div class="acts-ep-list-title">
+                  <span class="acts-ep-list-label">Épisodes</span>
+                  <button type="button" class="acts-ep-collapse-btn" data-collapse-target="align-acts-ep-list" title="Réduire la liste" aria-expanded="true" aria-controls="align-acts-ep-list">‹</button>
+                </div>
                 <div class="acts-ep-filters" role="search">
                   <div class="acts-ep-filter-row">
                     <label class="acts-ep-filter-label" for="align-ep-season">Saison</label>
