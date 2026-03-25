@@ -766,6 +766,7 @@ def import_source(
     source_key: str,
     body: _SrtImport,
     store: ProjectStore = Depends(_get_store),
+    db: CorpusDB | None = Depends(_get_db),
 ) -> dict[str, Any]:
     if not source_key.startswith("srt_") or len(source_key) < 5:
         raise HTTPException(
@@ -790,12 +791,30 @@ def import_source(
         )
     store.save_episode_subtitle_content(episode_id, lang, body.content, fmt)
     store.set_episode_prep_status(episode_id, source_key, "raw")
+
+    # Indexer immédiatement dans la DB (si disponible) pour que GET /episodes
+    # retourne la nouvelle piste dès le prochain refresh du panneau.
+    nb_cues = 0
+    if db is not None:
+        from howimetyourcorpus.core.subtitles.parsers import parse_subtitle_content
+        from datetime import datetime, timezone
+        try:
+            cues, _ = parse_subtitle_content(body.content)
+            track_id = f"{episode_id}:{lang}"
+            imported_at = datetime.now(timezone.utc).isoformat()
+            db.add_track(track_id, episode_id, lang, fmt, imported_at=imported_at)
+            db.upsert_cues(track_id, episode_id, lang, cues)
+            nb_cues = len(cues)
+        except Exception:
+            pass  # DB facultative — l'import fichier reste valide même sans indexation
+
     return {
         "episode_id": episode_id,
         "source_key": source_key,
         "language": lang,
         "fmt": fmt,
         "state": "raw",
+        "nb_cues": nb_cues,
     }
 
 
@@ -1051,6 +1070,27 @@ def get_subtitle_cues(
         "limit": limit,
         "cues": rows,
     }
+
+
+class _CuePatch(BaseModel):
+    text_clean: str
+
+
+@app.patch(
+    "/subtitle_cues/{cue_id}",
+    summary="Édite le text_clean d'une cue SRT (MX-042)",
+)
+def patch_subtitle_cue(
+    cue_id: str,
+    body: _CuePatch,
+    db: CorpusDB | None = Depends(_get_db),
+) -> dict[str, Any]:
+    """Met à jour manuellement le champ text_clean d'une cue SRT."""
+    if not db:
+        raise HTTPException(status_code=503, detail={"error": "DB_NOT_READY", "message": "corpus.db non disponible."})
+    text = body.text_clean.strip()
+    db.update_cue_text_clean(cue_id, text)
+    return {"cue_id": cue_id, "text_clean": text}
 
 
 class _RetargetBody(BaseModel):

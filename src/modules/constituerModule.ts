@@ -42,6 +42,7 @@ import {
   bulkSetAlignLinkStatus,
   fetchSubtitleCues,
   fetchAllSubtitleCues,
+  patchSubtitleCue,
   retargetAlignLink,
   fetchConcordance,
   fetchEpisodeSegments,
@@ -961,6 +962,8 @@ const CSS = `
 .acts-text-panel {
   flex: 1;
   min-width: 0;
+  /* Permet au panneau droit (aperçu segmentation, etc.) de rétrécir et défiler dans la chaîne flex */
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1162,6 +1165,11 @@ const CSS = `
 .cur-fr-count { font-size:0.72rem;min-height:1.2em;color:var(--text-muted);margin-bottom:4px; }
 .cur-fr-actions { display:flex;flex-direction:column;gap:4px;margin-top:4px;min-width:0;width:100%; }
 .cur-fr-actions .btn { width:100%;box-sizing:border-box;white-space:normal;text-align:center;line-height:1.25;padding:6px 8px; }
+.cur-srt-cue-row { border-bottom:1px solid var(--border);padding:4px 0; }
+.cur-srt-cue-row:last-child { border-bottom:none; }
+.cur-srt-cue-meta { display:flex;align-items:center;gap:6px;padding:2px 10px;font-size:0.72rem; }
+.cur-srt-cue-n { font-weight:600;color:var(--accent);min-width:2.5em; }
+.cur-srt-cue-tc { color:var(--text-muted);font-variant-numeric:tabular-nums; }
 .cur-rule-chip {
   padding: 2px 8px;
   border-radius: 20px;
@@ -4006,6 +4014,8 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
           ? "Re-normaliser et sauvegarder"
           : "Normaliser et sauvegarder";
       }
+      // Mettre à jour le sélecteur de pistes SRT
+      updateSrtLangSelector(container, ep);
       // Déclencher l'aperçu avec les paramètres courants dès qu'un épisode est sélectionné
       scheduleCurationPreview(container);
     });
@@ -4337,6 +4347,132 @@ function renderCurSourceBar(bar: HTMLElement, sources: EpisodeSource[], containe
 }
 
 /** Masque/affiche les tabs modes selon le type de source sélectionné. */
+// ── Curation SRT helpers ───────────────────────────────────────────────────
+
+function updateSrtLangSelector(container: HTMLElement, ep: Episode | undefined) {
+  const sel      = container.querySelector<HTMLSelectElement>("#cur-srt-lang");
+  const normBtn  = container.querySelector<HTMLButtonElement>("#cur-srt-normalize");
+  const viewBtn  = container.querySelector<HTMLButtonElement>("#cur-srt-view-btn");
+  if (!sel) return;
+  const srtSrcs = (ep?.sources ?? []).filter((s) => s.source_key.startsWith("srt_") && s.available);
+  sel.innerHTML = srtSrcs.length === 0
+    ? `<option value="">— Aucune piste SRT —</option>`
+    : srtSrcs.map((s) => {
+        const lang = s.source_key.replace("srt_", "");
+        return `<option value="${escapeHtml(lang)}">${escapeHtml(lang.toUpperCase())} (${s.state ?? "?"})</option>`;
+      }).join("");
+  sel.disabled  = srtSrcs.length === 0;
+  if (normBtn)  normBtn.disabled  = srtSrcs.length === 0;
+  if (viewBtn)  viewBtn.disabled  = srtSrcs.length === 0;
+}
+
+let _curSrtCuesOffset = 0;
+const CUR_SRT_CUES_LIMIT = 50;
+
+async function renderSrtCues(container: HTMLElement, epId: string, lang: string, append = false) {
+  const listEl  = container.querySelector<HTMLElement>("#cur-srt-cues-list");
+  const moreEl  = container.querySelector<HTMLElement>("#cur-srt-cues-more");
+  if (!listEl) return;
+
+  if (!append) {
+    _curSrtCuesOffset = 0;
+    listEl.innerHTML = `<div style="padding:12px;font-size:0.8rem;color:var(--text-muted)">Chargement…</div>`;
+    if (moreEl) moreEl.style.display = "none";
+  }
+
+  let data: Awaited<ReturnType<typeof fetchSubtitleCues>>;
+  try {
+    data = await fetchSubtitleCues(epId, { lang, limit: CUR_SRT_CUES_LIMIT, offset: _curSrtCuesOffset });
+  } catch (e) {
+    if (!append) listEl.innerHTML = `<div style="padding:12px;color:var(--danger);font-size:0.8rem">${escapeHtml(String(e))}</div>`;
+    return;
+  }
+
+  if (!append) listEl.innerHTML = "";
+  if (data.cues.length === 0 && !append) {
+    listEl.innerHTML = `<div style="padding:12px;font-size:0.8rem;color:var(--text-muted)">Aucune cue pour ${lang.toUpperCase()}.</div>`;
+    return;
+  }
+
+  const _ms = (ms: number) => {
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    const f = ms % 1000;
+    return (h ? `${h}:` : "") + `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")},${String(f).padStart(3,"0")}`;
+  };
+
+  for (const cue of data.cues) {
+    const row = document.createElement("div");
+    row.className = "cur-srt-cue-row";
+    row.dataset.cueId = cue.cue_id;
+    const showClean = (cue.text_clean || cue.text_raw).replace(/</g, "&lt;");
+    const showRaw   = cue.text_raw.replace(/</g, "&lt;");
+    row.innerHTML = `
+      <div class="cur-srt-cue-meta">
+        <span class="cur-srt-cue-n">#${cue.n}</span>
+        <span class="cur-srt-cue-tc">${_ms(cue.start_ms)} → ${_ms(cue.end_ms)}</span>
+        <button class="btn btn-ghost btn-sm cur-srt-cue-edit-btn" style="margin-left:auto;padding:1px 6px;font-size:0.7rem">✏</button>
+      </div>
+      <div class="cur-srt-cue-raw" style="color:var(--text-muted);font-size:0.72rem;padding:0 10px 2px">${showRaw}</div>
+      <div class="cur-srt-cue-clean" style="padding:0 10px 4px;font-size:0.8rem">${showClean}</div>
+      <div class="cur-srt-cue-edit-area" style="display:none;padding:4px 10px 6px">
+        <textarea class="cur-srt-cue-textarea" rows="2" style="width:100%;font-size:0.8rem;resize:vertical;font-family:inherit;border:1px solid var(--border);border-radius:4px;padding:4px 6px;background:var(--surface);color:var(--text)">${(cue.text_clean || cue.text_raw).replace(/</g, "&lt;")}</textarea>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <button class="btn btn-primary btn-sm cur-srt-cue-save-btn" style="font-size:0.75rem">💾 Sauvegarder</button>
+          <button class="btn btn-ghost btn-sm cur-srt-cue-cancel-btn" style="font-size:0.75rem">✕</button>
+        </div>
+        <span class="cur-srt-cue-save-fb" style="font-size:0.7rem;color:var(--text-muted);display:block;margin-top:2px"></span>
+      </div>`;
+
+    // Wire edit toggle
+    row.querySelector<HTMLButtonElement>(".cur-srt-cue-edit-btn")!.addEventListener("click", () => {
+      const editArea = row.querySelector<HTMLElement>(".cur-srt-cue-edit-area")!;
+      const ta       = row.querySelector<HTMLTextAreaElement>(".cur-srt-cue-textarea")!;
+      const isOpen   = editArea.style.display !== "none";
+      editArea.style.display = isOpen ? "none" : "";
+      if (!isOpen) ta.focus();
+    });
+
+    // Wire save
+    row.querySelector<HTMLButtonElement>(".cur-srt-cue-save-btn")!.addEventListener("click", async () => {
+      const ta   = row.querySelector<HTMLTextAreaElement>(".cur-srt-cue-textarea")!;
+      const fb   = row.querySelector<HTMLElement>(".cur-srt-cue-save-fb")!;
+      const btn  = row.querySelector<HTMLButtonElement>(".cur-srt-cue-save-btn")!;
+      const newText = ta.value.trim();
+      btn.disabled = true; btn.textContent = "…";
+      fb.style.color = "var(--text-muted)"; fb.textContent = "";
+      try {
+        await patchSubtitleCue(cue.cue_id, newText);
+        // Update display
+        const cleanEl = row.querySelector<HTMLElement>(".cur-srt-cue-clean")!;
+        cleanEl.textContent = newText;
+        row.querySelector<HTMLElement>(".cur-srt-cue-edit-area")!.style.display = "none";
+        fb.style.color = "var(--success,#16a34a)"; fb.textContent = "✓ Sauvegardé";
+        setTimeout(() => { fb.textContent = ""; }, 2000);
+      } catch (e) {
+        fb.style.color = "var(--danger,#dc2626)";
+        fb.textContent = e instanceof Error ? e.message : String(e);
+      } finally {
+        btn.disabled = false; btn.textContent = "💾 Sauvegarder";
+      }
+    });
+
+    // Wire cancel
+    row.querySelector<HTMLButtonElement>(".cur-srt-cue-cancel-btn")!.addEventListener("click", () => {
+      row.querySelector<HTMLElement>(".cur-srt-cue-edit-area")!.style.display = "none";
+    });
+
+    listEl.appendChild(row);
+  }
+
+  _curSrtCuesOffset += data.cues.length;
+  if (moreEl) {
+    const hasMore = _curSrtCuesOffset < data.total;
+    moreEl.style.display = hasMore ? "" : "none";
+  }
+}
+
 function updateCurationModeTabsForSource(container: HTMLElement, sourceKey: string) {
   const isTranscript = sourceKey === "transcript";
   container.querySelectorAll<HTMLButtonElement>(".cur-preview-tab").forEach((t) => {
@@ -4999,12 +5135,24 @@ function renderDocPanel(ep: Episode, panel: HTMLElement, pane: HTMLElement) {
   const importSrtBtn = document.createElement("button");
   importSrtBtn.className = "btn btn-secondary btn-sm";
   importSrtBtn.textContent = "🔤 Importer SRT";
+  const newSrtFb = document.createElement("div");
+  newSrtFb.style.cssText = "font-size:0.72rem;min-height:1em;margin-top:4px;color:var(--danger,#dc2626)";
   importSrtBtn.addEventListener("click", async () => {
     const lang = srtLangInput.value.trim();
     if (!lang) return;
+    importSrtBtn.disabled = true;
+    importSrtBtn.textContent = "…";
+    newSrtFb.textContent = "";
+    const resetBtn = () => {
+      importSrtBtn.disabled = false;
+      importSrtBtn.textContent = "🔤 Importer SRT";
+    };
     await handleImportSrt(ep.episode_id, lang, onRefresh, (msg) => {
-      titleFb.textContent = msg; titleFb.style.color = "var(--danger, #dc2626)";
+      newSrtFb.textContent = msg;
+      resetBtn();
     });
+    // Réactiver si le dialog a été annulé (onDone/onError non appelés)
+    if (importSrtBtn.isConnected) resetBtn();
   });
   importSrtRow.innerHTML = `<div class="docs-panel-section-head" style="margin-bottom:4px">Nouvelle piste SRT</div>`;
   const row = document.createElement("div");
@@ -5012,6 +5160,7 @@ function renderDocPanel(ep: Episode, panel: HTMLElement, pane: HTMLElement) {
   row.appendChild(srtLangInput);
   row.appendChild(importSrtBtn);
   importSrtRow.appendChild(row);
+  importSrtRow.appendChild(newSrtFb);
   sourcesEl.appendChild(importSrtRow);
 }
 
@@ -5104,6 +5253,22 @@ function renderDocPanelSource(
     impBtn.textContent = "📄 Fichier local";
     impBtn.addEventListener("click", () => handleImportTranscript(ep.episode_id, onRefresh, (msg) => alert(msg)));
     actions.appendChild(impBtn);
+  } else if (sourceKey.startsWith("srt_")) {
+    // Piste SRT connue mais absente pour cet épisode — bouton d'import direct
+    const lang = sourceKey.slice(4);
+    const impSrtBtn = document.createElement("button");
+    impSrtBtn.className = "btn btn-secondary btn-sm";
+    impSrtBtn.textContent = "📁 Importer";
+    impSrtBtn.addEventListener("click", async () => {
+      impSrtBtn.disabled = true;
+      impSrtBtn.textContent = "…";
+      await handleImportSrt(ep.episode_id, lang, onRefresh, (msg) => {
+        impSrtBtn.disabled = false;
+        impSrtBtn.textContent = "📁 Importer";
+        alert(msg);
+      });
+    });
+    actions.appendChild(impSrtBtn);
   }
 
   if (actions.childElementCount > 0) row.appendChild(actions);
@@ -9118,6 +9283,16 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                   </div>
                 </div>
 
+                <div class="cur-param-section" id="cur-srt-section">
+                  <div class="cur-param-label">Pistes SRT</div>
+                  <select class="acts-params-select" id="cur-srt-lang" style="width:100%;margin-bottom:6px" disabled>
+                    <option value="">— Sélectionnez un épisode —</option>
+                  </select>
+                  <button type="button" class="btn btn-secondary btn-sm" id="cur-srt-normalize" disabled style="width:100%;margin-bottom:4px">🧹 Normaliser SRT</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="cur-srt-view-btn" disabled style="width:100%">📋 Voir / éditer cues</button>
+                  <span id="cur-srt-fb" style="font-size:0.72rem;color:var(--text-muted);display:block;margin-top:4px"></span>
+                </div>
+
               </div>
 
               <!-- Preview (centre) -->
@@ -9130,6 +9305,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                   <button class="cur-preview-tab" data-mode="raw">Brut seul</button>
                   <button class="cur-preview-tab" data-mode="clean">Normalisé seul</button>
                   <button class="cur-preview-tab" data-mode="diff">Diff mot</button>
+                  <button class="cur-preview-tab" data-mode="srt">SRT</button>
                   <span class="cur-preview-badge" id="cur-preview-badge"></span>
                   <button class="btn btn-ghost btn-sm" id="cur-edit-btn" style="margin-left:auto;font-size:0.72rem" title="Éditer le texte normalisé">✏ Éditer</button>
                 </div>
@@ -9143,6 +9319,12 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                 </div>
                 <div class="cur-preview-panes" id="cur-preview-panes">
                   <div class="acts-text-empty" style="width:100%">← Sélectionnez un épisode</div>
+                </div>
+                <div id="cur-srt-cues-pane" style="display:none;flex:1;min-height:0;overflow-y:auto;border-top:1px solid var(--border);padding:8px 0">
+                  <div id="cur-srt-cues-list" style="display:flex;flex-direction:column;gap:2px"></div>
+                  <div id="cur-srt-cues-more" style="display:none;padding:8px 12px">
+                    <button class="btn btn-ghost btn-sm" id="cur-srt-load-more" style="width:100%">Charger plus…</button>
+                  </div>
                 </div>
               </div>
 
@@ -9649,25 +9831,91 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       }
     });
 
-    // Wire preview mode tabs
+    // Wire preview mode tabs (dont "srt")
     cnt.querySelectorAll<HTMLButtonElement>(".cur-preview-tab").forEach((tab) => {
       tab.addEventListener("click", () => {
         cnt.querySelectorAll(".cur-preview-tab").forEach((t) => t.classList.remove("active"));
         tab.classList.add("active");
-        if (_curPreviewData && _curPreviewEpId) {
-          const activeItem = cnt.querySelector<HTMLElement>(".cur-ep-item.active");
-          const epTitle = activeItem?.dataset.epTitle ?? _curPreviewEpId;
-          const tabDisplayData = _clientPreviewClean !== null ? { raw: _curPreviewData.raw, clean: _clientPreviewClean } : _curPreviewData;
-          renderCurationPreviewMode(
-            cnt.querySelector<HTMLElement>("#cur-preview-panes")!,
-            tabDisplayData,
-            tab.dataset.mode!,
-            epTitle,
-            _curSearchRegex,
-            mergeSubtitleBreaksEnabled(cnt),
-          );
+        const mode = tab.dataset.mode!;
+        const srtPane    = cnt.querySelector<HTMLElement>("#cur-srt-cues-pane");
+        const previewEl  = cnt.querySelector<HTMLElement>("#cur-preview-panes")!;
+        const editBar    = cnt.querySelector<HTMLElement>("#cur-edit-bar");
+        const editBtn    = cnt.querySelector<HTMLButtonElement>("#cur-edit-btn");
+
+        if (mode === "srt") {
+          // Mode SRT : cacher le preview transcript, montrer le panneau cues
+          previewEl.style.display  = "none";
+          if (editBar) editBar.style.display = "none";
+          if (editBtn) editBtn.style.display = "none";
+          if (srtPane) srtPane.style.display = "";
+          const lang = cnt.querySelector<HTMLSelectElement>("#cur-srt-lang")?.value;
+          if (_curPreviewEpId && lang) renderSrtCues(cnt, _curPreviewEpId, lang);
+        } else {
+          // Mode transcript classique
+          if (srtPane) srtPane.style.display = "none";
+          previewEl.style.display = "";
+          if (editBtn) editBtn.style.display = "";
+          if (_curPreviewData && _curPreviewEpId) {
+            const activeItem = cnt.querySelector<HTMLElement>(".cur-ep-item.active");
+            const epTitle = activeItem?.dataset.epTitle ?? _curPreviewEpId;
+            const tabDisplayData = _clientPreviewClean !== null ? { raw: _curPreviewData.raw, clean: _clientPreviewClean } : _curPreviewData;
+            renderCurationPreviewMode(
+              previewEl,
+              tabDisplayData,
+              mode,
+              epTitle,
+              _curSearchRegex,
+              mergeSubtitleBreaksEnabled(cnt),
+            );
+          }
         }
       });
+    });
+
+    // ── Bouton "Normaliser SRT" ────────────────────────────────────────────────
+    cnt.querySelector<HTMLButtonElement>("#cur-srt-normalize")?.addEventListener("click", async () => {
+      const btn  = cnt.querySelector<HTMLButtonElement>("#cur-srt-normalize")!;
+      const fb   = cnt.querySelector<HTMLElement>("#cur-srt-fb")!;
+      const lang = cnt.querySelector<HTMLSelectElement>("#cur-srt-lang")?.value;
+      if (!_curPreviewEpId || !lang) return;
+      const profile = cnt.querySelector<HTMLSelectElement>("#cur-profile")?.value ?? "default_en_v1";
+      btn.disabled = true; btn.textContent = "Normalisation…";
+      fb.style.color = "var(--text-muted)"; fb.textContent = "";
+      try {
+        await createJob("normalize_srt", _curPreviewEpId, `srt_${lang}`, { normalize_profile: profile });
+        startJobPoll(cnt.closest<HTMLElement>(".cons-container") ?? cnt);
+        fb.style.color = "var(--success,#16a34a)";
+        fb.textContent = "✓ Job lancé";
+        btn.textContent = "🧹 Normaliser SRT";
+        setTimeout(() => { fb.textContent = ""; }, 3000);
+      } catch (e) {
+        fb.style.color = "var(--danger,#dc2626)";
+        fb.textContent = e instanceof Error ? e.message : String(e);
+        btn.textContent = "🧹 Normaliser SRT";
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // ── Bouton "Voir / éditer cues" ────────────────────────────────────────────
+    cnt.querySelector<HTMLButtonElement>("#cur-srt-view-btn")?.addEventListener("click", () => {
+      const srtTab = cnt.querySelector<HTMLButtonElement>('.cur-preview-tab[data-mode="srt"]');
+      srtTab?.click();
+    });
+
+    // ── Bouton "Charger plus" dans le panneau SRT ──────────────────────────────
+    cnt.querySelector<HTMLButtonElement>("#cur-srt-load-more")?.addEventListener("click", () => {
+      const lang = cnt.querySelector<HTMLSelectElement>("#cur-srt-lang")?.value;
+      if (_curPreviewEpId && lang) renderSrtCues(cnt, _curPreviewEpId, lang, true);
+    });
+
+    // ── Rechargement cues si langue SRT change ─────────────────────────────────
+    cnt.querySelector<HTMLSelectElement>("#cur-srt-lang")?.addEventListener("change", () => {
+      const activeTab = cnt.querySelector<HTMLElement>(".cur-preview-tab.active");
+      if (activeTab?.dataset.mode === "srt") {
+        const lang = cnt.querySelector<HTMLSelectElement>("#cur-srt-lang")?.value;
+        if (_curPreviewEpId && lang) renderSrtCues(cnt, _curPreviewEpId, lang);
+      }
     });
   }
 
