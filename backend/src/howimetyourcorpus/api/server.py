@@ -267,6 +267,42 @@ def normalize_preview(body: _NormalizePreviewBody) -> dict[str, Any]:
     return {"clean": clean, "merges": stats.merges}
 
 
+# ─── /segment/preview ─────────────────────────────────────────────────────────
+
+
+class _SegmentPreviewBody(BaseModel):
+    text:      str
+    lang_hint: str = "en"
+
+
+@app.post("/segment/preview", summary="Aperçu segmentation (phrases + tours) sans sauvegarder")
+def segment_preview(body: _SegmentPreviewBody) -> dict[str, Any]:
+    """
+    Segmente le texte fourni en phrases et en tours (utterances) en mémoire,
+    sans aucune écriture en base. Même moteur que le job segment_transcript.
+    """
+    from howimetyourcorpus.core.segment.segmenters import (
+        segmenter_sentences,
+        segmenter_utterances,
+    )
+
+    sentences  = segmenter_sentences(body.text, lang_hint=body.lang_hint)
+    utterances = segmenter_utterances(body.text)
+
+    return {
+        "n_sentences":  len(sentences),
+        "n_utterances": len(utterances),
+        "sentences": [
+            {"n": s.n, "text": s.text, "speaker_explicit": s.speaker_explicit}
+            for s in sentences
+        ],
+        "utterances": [
+            {"n": s.n, "text": s.text, "speaker_explicit": s.speaker_explicit}
+            for s in utterances
+        ],
+    }
+
+
 # ─── /series_index ────────────────────────────────────────────────────────────
 
 

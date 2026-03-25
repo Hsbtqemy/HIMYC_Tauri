@@ -429,6 +429,31 @@ def test_jobs_persistence(tmp_path):
         del os.environ["HIMYC_PROJECT_PATH"]
 
 
+def test_segment_preview_sentences_and_utterances():
+    """POST /segment/preview retourne phrases et tours (pas d'accès disque requis)."""
+    r = client.post(
+        "/segment/preview",
+        json={"text": "Hello world. How are you?\nTED: Fine thanks!", "lang_hint": "en"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["n_sentences"] >= 2
+    assert data["n_utterances"] >= 1
+    assert all("n" in s and "text" in s and "speaker_explicit" in s for s in data["sentences"])
+    # TED: devrait être détecté comme locuteur dans les utterances
+    utterances_with_speaker = [u for u in data["utterances"] if u["speaker_explicit"]]
+    assert len(utterances_with_speaker) >= 1
+
+
+def test_segment_preview_empty_text():
+    """POST /segment/preview avec texte vide retourne 0 segments."""
+    r = client.post("/segment/preview", json={"text": "", "lang_hint": "en"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["n_sentences"] == 0
+    assert data["n_utterances"] == 0
+
+
 def test_init_corpus_db_creates_then_idempotent(tmp_path):
     """POST /project/init_corpus_db crée corpus.db une fois puis created=false."""
     os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
