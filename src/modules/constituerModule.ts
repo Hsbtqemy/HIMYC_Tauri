@@ -3914,6 +3914,20 @@ function renderCurationRuleChips(container: HTMLElement) {
   });
 }
 
+/**
+ * Clique automatiquement sur le row/item correspondant à _constituerSharedEpId
+ * dans scopeEl, si cet élément n'est pas déjà actif.
+ * rowSel : sélecteur CSS de base (ex. "tr[data-ep-id]", ".cur-ep-item")
+ * activeCls : classe CSS qui indique l'état actif (ex. "active-row", "active")
+ */
+function autoSelectSharedEp(scopeEl: HTMLElement, rowSel: string, activeCls: string) {
+  if (!_constituerSharedEpId) return;
+  const el = scopeEl.querySelector<HTMLElement>(
+    `${rowSel}[data-ep-id="${window.CSS.escape(_constituerSharedEpId)}"]`,
+  );
+  if (el && !el.classList.contains(activeCls)) el.click();
+}
+
 function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
   const listEl = container.querySelector<HTMLElement>("#cur-ep-list");
   if (!listEl) return;
@@ -3955,6 +3969,7 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
       const epId    = item.dataset.epId!;
       const epTitle = item.dataset.epTitle!;
       const epState = item.dataset.epState!;
+      _constituerSharedEpId = epId;
 
       if (previewBadge) previewBadge.textContent = epId;
 
@@ -4026,15 +4041,19 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
     _pendingCurationEpisodeId = null;
     const targetItem = listEl.querySelector<HTMLElement>(`.cur-ep-item[data-ep-id="${target}"]`);
     if (targetItem) {
-      // Simuler le clic pour déclencher le chargement du preview
       targetItem.click();
       targetItem.scrollIntoView({ block: "nearest" });
     }
+  } else {
+    // Persistance inter-sous-vues : ré-ouvrir l'épisode actif si on revient sur Curation
+    autoSelectSharedEp(listEl, ".cur-ep-item", "active");
   }
 }
 
 let _pendingCurationEpisodeId: string | null = null; // N-2 : pré-sélection depuis Documents
 let _curPreviewEpId: string | null = null;
+/** Épisode actif partagé entre toutes les sous-vues (curation, segmentation, alignement) */
+let _constituerSharedEpId: string | null = null;
 let _curPreviewData: { raw: string; clean: string } | null = null;
 let _curPreviewSourceKey: string = "transcript";
 let _curPreviewEpSources: EpisodeSource[] = [];
@@ -5811,6 +5830,7 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
     row.addEventListener("click", async () => {
       wrap.querySelectorAll("tr[data-ep-id]").forEach((r) => r.classList.remove("active-row"));
       row.classList.add("active-row");
+      _constituerSharedEpId = row.dataset.epId!;
       if (segTextPanel) {
         const kind = (container.querySelector<HTMLSelectElement>("#seg-kind")?.value ?? "sentence") as "sentence" | "utterance";
         const st = row.dataset.epState ?? "unknown";
@@ -6023,7 +6043,7 @@ async function loadSegmentationRightPanel(
     const ta = panel.querySelector<HTMLTextAreaElement>("#seg-clean-edit")!;
     ta.value = cleanBaseline;
     fillSegmentPreviewLists(root, preview);
-    fillSegUttOptionsDom(root, segOptsRes.options);
+    if (segOptsRes.options) fillSegUttOptionsDom(root, segOptsRes.options);
 
     const saveBtn = panel.querySelector<HTMLButtonElement>("#seg-save-clean")!;
     const syncDirty = () => {
@@ -6317,6 +6337,9 @@ async function loadAndRenderSegmentation(container: HTMLElement) {
     _cachedEpisodes = data;
     renderSegmentationPane(container, data.episodes);
     updateHubStats(container);
+    // Persistance inter-sous-vues : ré-ouvrir l'épisode actif si on vient d'une autre sous-vue
+    const segWrap = container.querySelector<HTMLElement>(".seg-table-wrap");
+    if (segWrap) autoSelectSharedEp(segWrap, "tr[data-ep-id]", "active-row");
   } catch (e) {
     if (!wrap) return;
     const main = escapeHtml(formatApiError(e));
@@ -6725,6 +6748,7 @@ function renderAlignementPane(
         row.classList.add("active-row");
         const epId    = row.dataset.epId!;
         const epTitle = row.dataset.epTitle ?? epId;
+        _constituerSharedEpId = epId;
         loadAlignmentRunHistory(alignTextPanel, epId, epTitle);
       });
     });
@@ -8172,6 +8196,9 @@ async function loadAndRenderAlignement(container: HTMLElement) {
     }
     renderAlignementPane(container, episodesData.episodes, alignedLangs);
     updateHubStats(container);
+    // Persistance inter-sous-vues : ré-ouvrir l'épisode actif si on vient d'une autre sous-vue
+    const alignWrap = container.querySelector<HTMLElement>(".align-ep-wrap");
+    if (alignWrap) autoSelectSharedEp(alignWrap, "tr[data-ep-id]", "active-row");
   } catch (e) {
     if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
   }
@@ -9340,17 +9367,30 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       .forEach((b) => b.classList.toggle("active", b.dataset.subview === subview));
     // Lazy-load episode data for dynamic sub-views
     if (subview === "segmentation") {
-      const wrap = container.querySelector(".seg-table-wrap");
-      if (wrap?.classList.contains("cons-loading")) loadAndRenderSegmentation(container);
+      const wrap = container.querySelector<HTMLElement>(".seg-table-wrap");
+      if (wrap?.classList.contains("cons-loading")) {
+        loadAndRenderSegmentation(container); // auto-select géré en fin de chargement
+      } else if (wrap) {
+        autoSelectSharedEp(wrap, "tr[data-ep-id]", "active-row");
+      }
     }
     if (subview === "alignement") {
-      const wrap = container.querySelector(".align-ep-wrap");
-      if (wrap?.classList.contains("cons-loading")) loadAndRenderAlignement(container);
+      const wrap = container.querySelector<HTMLElement>(".align-ep-wrap");
+      if (wrap?.classList.contains("cons-loading")) {
+        loadAndRenderAlignement(container); // auto-select géré en fin de chargement
+      } else if (wrap) {
+        autoSelectSharedEp(wrap, "tr[data-ep-id]", "active-row");
+      }
+    }
+    if (subview === "curation") {
+      initCurationParams(container);
+      // Vue déjà chargée : ré-ouvrir l'épisode actif si différent de l'actuel
+      const listEl = container.querySelector<HTMLElement>("#cur-ep-list");
+      if (listEl) autoSelectSharedEp(listEl, ".cur-ep-item", "active");
     }
     if (subview === "distribution") void loadDistributionPanel(container);
     // Init params panels on first show
-    if (subview === "hub")      { initHubParams(container); updateHubStats(container); }
-    if (subview === "curation") initCurationParams(container);
+    if (subview === "hub") { initHubParams(container); updateHubStats(container); }
   }
 
   _openDistributionNavListener = () => {
@@ -9875,9 +9915,10 @@ export function disposeConstituer() {
     document.removeEventListener("himyc:open-distribution", _openDistributionNavListener);
     _openDistributionNavListener = null;
   }
-  _container      = null;
-  _ctx            = null;
-  _cachedEpisodes = null;
-  _cachedConfig   = null;
-  _tradViewMounted = false;
+  _container           = null;
+  _ctx                 = null;
+  _cachedEpisodes      = null;
+  _cachedConfig        = null;
+  _tradViewMounted     = false;
+  _constituerSharedEpId = null;
 }
