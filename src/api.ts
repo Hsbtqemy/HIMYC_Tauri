@@ -11,6 +11,11 @@ import { invoke } from "@tauri-apps/api/core";
 export { API_BASE, SUPPORTED_LANGUAGES } from "./constants";
 import { API_BASE, DEFAULT_ERROR_CODE, TAURI_SIDECAR_CMD } from "./constants";
 
+/** Encode un segment de chemin API (`episode_id`, `run_id`, `segment_id`, `source_key`…). */
+function epSeg(s: string): string {
+  return encodeURIComponent(s);
+}
+
 interface FetchResult {
   status: number;
   ok: boolean;
@@ -293,7 +298,7 @@ export async function fetchEpisodeSource(
   episodeId: string,
   sourceKey: string,
 ): Promise<SourceContent> {
-  return apiGet<SourceContent>(`/episodes/${episodeId}/sources/${sourceKey}`);
+  return apiGet<SourceContent>(`/episodes/${epSeg(episodeId)}/sources/${epSeg(sourceKey)}`);
 }
 
 // /episodes/{id}/sources/transcript  POST (MX-005)
@@ -310,7 +315,7 @@ export async function importTranscript(
   episodeId: string,
   content: string,
 ): Promise<ImportResult> {
-  return apiPost<ImportResult>(`/episodes/${episodeId}/sources/transcript`, {
+  return apiPost<ImportResult>(`/episodes/${epSeg(episodeId)}/sources/transcript`, {
     content,
   });
 }
@@ -318,21 +323,21 @@ export async function importTranscript(
 export async function deleteTranscript(
   episodeId: string,
 ): Promise<{ episode_id: string; source_key: string; removed: string[] }> {
-  return apiDelete(`/episodes/${episodeId}/sources/transcript`);
+  return apiDelete(`/episodes/${epSeg(episodeId)}/sources/transcript`);
 }
 
 export async function deleteSrt(
   episodeId: string,
   lang: string,
 ): Promise<{ episode_id: string; source_key: string; lang: string }> {
-  return apiDelete(`/episodes/${episodeId}/sources/srt_${lang}`);
+  return apiDelete(`/episodes/${epSeg(episodeId)}/sources/${epSeg(`srt_${lang}`)}`);
 }
 
 export async function patchTranscript(
   episodeId: string,
   clean: string,
 ): Promise<{ episode_id: string; source_key: string; state: string; chars: number }> {
-  return apiPatch(`/episodes/${episodeId}/sources/transcript`, { clean });
+  return apiPatch(`/episodes/${epSeg(episodeId)}/sources/transcript`, { clean });
 }
 
 export async function fetchNormalizePreview(
@@ -376,7 +381,7 @@ export async function importSrt(
   content: string,
   fmt: "srt" | "vtt" = "srt",
 ): Promise<ImportResult> {
-  return apiPost<ImportResult>(`/episodes/${episodeId}/sources/srt_${lang}`, {
+  return apiPost<ImportResult>(`/episodes/${epSeg(episodeId)}/sources/${epSeg(`srt_${lang}`)}`, {
     content,
     fmt,
   });
@@ -427,7 +432,7 @@ export async function createJob(
 }
 
 export async function fetchJob(jobId: string): Promise<JobRecord> {
-  return apiGet<JobRecord>(`/jobs/${jobId}`);
+  return apiGet<JobRecord>(`/jobs/${epSeg(jobId)}`);
 }
 
 // /episodes/{id}/alignment_runs  (MX-009)
@@ -449,7 +454,7 @@ export interface AlignmentRunsResponse {
 export async function fetchAlignmentRuns(
   episodeId: string,
 ): Promise<AlignmentRunsResponse> {
-  return apiGet<AlignmentRunsResponse>(`/episodes/${episodeId}/alignment_runs`);
+  return apiGet<AlignmentRunsResponse>(`/episodes/${epSeg(episodeId)}/alignment_runs`);
 }
 
 // ── Alignment Audit (MX-028) ──────────────────────────────────────────────────
@@ -519,7 +524,7 @@ export async function fetchAlignRunStats(
   runId: string,
 ): Promise<AlignRunStats> {
   return apiGet<AlignRunStats>(
-    `/episodes/${episodeId}/alignment_runs/${runId}/stats`,
+    `/episodes/${epSeg(episodeId)}/alignment_runs/${epSeg(runId)}/stats`,
   );
 }
 
@@ -535,7 +540,7 @@ export async function fetchAuditLinks(
   if (params.limit  != null) qs.set("limit",  String(params.limit));
   const query = qs.toString() ? `?${qs}` : "";
   return apiGet<AuditLinksResponse>(
-    `/episodes/${episodeId}/alignment_runs/${runId}/links${query}`,
+    `/episodes/${epSeg(episodeId)}/alignment_runs/${epSeg(runId)}/links${query}`,
   );
 }
 
@@ -544,7 +549,7 @@ export async function fetchAlignCollisions(
   runId: string,
 ): Promise<AlignCollisionsResponse> {
   return apiGet<AlignCollisionsResponse>(
-    `/episodes/${episodeId}/alignment_runs/${runId}/collisions`,
+    `/episodes/${epSeg(episodeId)}/alignment_runs/${epSeg(runId)}/collisions`,
   );
 }
 
@@ -552,14 +557,14 @@ export async function setAlignLinkStatus(
   linkId: string,
   status: "accepted" | "rejected" | "auto" | "ignored",
 ): Promise<{ link_id: string; status: string }> {
-  return apiPatch(`/alignment_links/${linkId}`, { status });
+  return apiPatch(`/alignment_links/${epSeg(linkId)}`, { status });
 }
 
 export async function setAlignLinkNote(
   linkId: string,
   note: string,
 ): Promise<{ link_id: string; note: string }> {
-  return apiPatch(`/alignment_links/${linkId}`, { note });
+  return apiPatch(`/alignment_links/${epSeg(linkId)}`, { note });
 }
 
 export interface BulkAlignStatusParams {
@@ -578,7 +583,7 @@ export async function bulkSetAlignLinkStatus(
   params: BulkAlignStatusParams,
 ): Promise<{ updated: number; new_status: string }> {
   return apiPatch(
-    `/episodes/${episodeId}/alignment_runs/${runId}/links/bulk`,
+    `/episodes/${epSeg(episodeId)}/alignment_runs/${epSeg(runId)}/links/bulk`,
     params,
   );
 }
@@ -622,7 +627,7 @@ export async function fetchSubtitleCues(
   if (params.around_window != null) qs.set("around_window", String(params.around_window));
   if (params.limit  != null) qs.set("limit",  String(params.limit));
   if (params.offset != null) qs.set("offset", String(params.offset));
-  return apiGet<SubtitleCuesResponse>(`/episodes/${episodeId}/subtitle_cues?${qs}`);
+  return apiGet<SubtitleCuesResponse>(`/episodes/${epSeg(episodeId)}/subtitle_cues?${qs}`);
 }
 
 /** Toutes les cues d’une langue (pagination serveur max 100). */
@@ -643,7 +648,7 @@ export async function retargetAlignLink(
   linkId: string,
   cueIdTarget: string,
 ): Promise<{ link_id: string; cue_id_target: string; status: string }> {
-  return apiPatch(`/alignment_links/${linkId}/retarget`, { cue_id_target: cueIdTarget });
+  return apiPatch(`/alignment_links/${epSeg(linkId)}/retarget`, { cue_id_target: cueIdTarget });
 }
 
 // ── Concordancier parallèle + Segments longtext (MX-029) ─────────────────────
@@ -694,7 +699,7 @@ export async function fetchConcordance(
   if (params.q)      qs.set("q", params.q);
   const query = qs.toString() ? `?${qs}` : "";
   return apiGet<ConcordanceResponse>(
-    `/episodes/${episodeId}/alignment_runs/${runId}/concordance${query}`,
+    `/episodes/${epSeg(episodeId)}/alignment_runs/${epSeg(runId)}/concordance${query}`,
   );
 }
 
@@ -705,7 +710,7 @@ export async function fetchEpisodeSegments(
 ): Promise<SegmentsResponse> {
   const qs = new URLSearchParams({ kind });
   if (q) qs.set("q", q);
-  return apiGet<SegmentsResponse>(`/episodes/${episodeId}/segments?${qs}`);
+  return apiGet<SegmentsResponse>(`/episodes/${epSeg(episodeId)}/segments?${qs}`);
 }
 
 export async function patchSegment(
@@ -713,11 +718,11 @@ export async function patchSegment(
   segmentId: string,
   patch: { text?: string; speaker_explicit?: string | null },
 ): Promise<SegmentRow> {
-  return apiPatch<SegmentRow>(`/episodes/${episodeId}/segments/${segmentId}`, patch);
+  return apiPatch<SegmentRow>(`/episodes/${epSeg(episodeId)}/segments/${epSeg(segmentId)}`, patch);
 }
 
 export async function cancelJob(jobId: string): Promise<{ job_id: string; status: string }> {
-  return apiDelete(`/jobs/${jobId}`);
+  return apiDelete(`/jobs/${epSeg(jobId)}`);
 }
 
 // ── /characters + /assignments (MX-021c) ─────────────────────────────────────
@@ -884,7 +889,7 @@ export async function propagateCharacters(
   runId: string,
 ): Promise<PropagateResult> {
   return apiPost<PropagateResult>(
-    `/episodes/${episodeId}/propagate_characters`,
+    `/episodes/${epSeg(episodeId)}/propagate_characters`,
     { run_id: runId },
   );
 }
@@ -914,7 +919,7 @@ export async function fetchLinkPositions(
   episodeId: string,
   runId: string,
 ): Promise<{ positions: LinkPosition[] }> {
-  return apiGet(`/episodes/${episodeId}/alignment_runs/${runId}/links/positions`);
+  return apiGet(`/episodes/${epSeg(episodeId)}/alignment_runs/${epSeg(runId)}/links/positions`);
 }
 
 // ── /export/alignments (MX-030) ───────────────────────────────────────────────

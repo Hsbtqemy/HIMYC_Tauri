@@ -168,6 +168,22 @@ def test_episodes_source_transcript_content(tmp_path):
         del os.environ["HIMYC_PROJECT_PATH"]
 
 
+def test_episodes_source_transcript_clean_only(tmp_path):
+    """Sans raw.txt mais avec clean.txt → GET transcript OK (raw vide), pour UI Segmentation."""
+    ep_dir = tmp_path / "episodes" / "S01E01"
+    ep_dir.mkdir(parents=True)
+    (ep_dir / "clean.txt").write_text("Only clean body")
+    os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
+    try:
+        r = client.get("/episodes/S01E01/sources/transcript")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["raw"] == ""
+        assert "Only clean body" in data["clean"]
+    finally:
+        del os.environ["HIMYC_PROJECT_PATH"]
+
+
 # ─── /config ──────────────────────────────────────────────────────────────────
 
 def test_config_minimal_project(tmp_path):

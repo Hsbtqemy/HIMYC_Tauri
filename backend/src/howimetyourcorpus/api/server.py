@@ -409,7 +409,8 @@ def list_episodes(
         sources: list[dict[str, Any]] = [
             {
                 "source_key": "transcript",
-                "available": store.has_episode_raw(eid),
+                # Contenu exploitable = raw et/ou clean (GET /sources/transcript sert aux deux)
+                "available": store.has_episode_raw(eid) or store.has_episode_clean(eid),
                 "has_clean": store.has_episode_clean(eid),
                 "state": _transcript_state,
             }
@@ -460,18 +461,22 @@ def get_episode_source(
     store: ProjectStore = Depends(_get_store),
 ) -> dict[str, Any]:
     if source_key == "transcript":
-        if not store.has_episode_raw(episode_id):
+        has_raw = store.has_episode_raw(episode_id)
+        has_clean = store.has_episode_clean(episode_id)
+        if not has_raw and not has_clean:
             raise HTTPException(
                 status_code=404,
                 detail={
                     "error": "SOURCE_NOT_FOUND",
-                    "message": f"Transcript RAW introuvable pour l episode {episode_id}.",
+                    "message": (
+                        f"Aucun fichier transcript (raw.txt / clean.txt) pour l'épisode {episode_id!r}."
+                    ),
                 },
             )
         return {
             "episode_id": episode_id,
             "source_key": "transcript",
-            "raw": store.load_episode_text(episode_id, kind="raw"),
+            "raw": store.load_episode_text(episode_id, kind="raw") if has_raw else "",
             "clean": store.load_episode_text(episode_id, kind="clean"),
         }
 
