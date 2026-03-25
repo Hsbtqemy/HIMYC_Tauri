@@ -1775,10 +1775,18 @@ const CSS = `
 
 /* ── S-1 : Table segments ───────────────────────────────────── */
 .seg-table-info {
-  font-size: 0.72rem; color: var(--text-muted); padding: 4px 10px;
-  border-bottom: 1px solid var(--border); flex-shrink: 0;
+  font-size: 0.72rem; color: var(--text-muted); padding: 4px 2px;
+  flex-shrink: 0;
 }
-.seg-segments-scroll { flex: 1; min-height: 0; overflow: auto; }
+.seg-segments-scroll {
+  /* Contrainte de hauteur : la table des segments a son propre scroll
+     pour ne pas forcer le scroll global sur une liste trop longue. */
+  max-height: min(420px, 50vh);
+  min-height: 60px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
 .seg-segments-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
 .seg-segments-table th { position: sticky; top: 0; background: var(--surface2); z-index: 1; }
 .seg-cell-n     { width: 36px; text-align: right; color: var(--text-muted); padding: 3px 6px; font-family: ui-monospace,monospace; }
@@ -2168,9 +2176,11 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 0;
   flex: 1;
-  /* Secours si aperçu très long : tout le panneau droit défile (sinon overflow:hidden du parent clippe le bas). */
+  min-height: 0;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  /* Conteneur maître : défile si le contenu dépasse la hauteur du panneau. */
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -2189,8 +2199,10 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
 .seg-preview-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .seg-preview-stats { font-size: 0.72rem; color: var(--text-muted); }
 .seg-preview-split {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-height: 0;
-  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  /* flex: 1 inutile dans un contexte overflow-y: auto — laisser la hauteur naturelle */
 }
 @media (max-width: 900px) {
   .seg-preview-split { grid-template-columns: 1fr; }
@@ -2209,8 +2221,12 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
 .seg-prev-tx { word-break: break-word; }
 .seg-prev-empty { font-size: 0.74rem; color: var(--text-muted); padding: 8px; text-align: center; }
 .seg-verify-section {
-  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
-  display: flex; flex-direction: column; min-height: 0; flex: 1;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  /* pas de flex: 1 — dans overflow-y: auto, flex-grow peut donner 0px si le reste dépasse */
 }
 .seg-verify-head {
   font-size: 0.72rem; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em;
@@ -2218,11 +2234,10 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
   flex-shrink: 0;
 }
 .seg-segments-slot {
-  flex: 1;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  gap: 4px;
+  min-height: 0;
 }
 .seg-segments-slot > .seg-warn-utterance,
 .seg-segments-slot > .seg-table-info {
