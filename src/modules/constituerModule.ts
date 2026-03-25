@@ -46,6 +46,8 @@ import {
   fetchConcordance,
   fetchEpisodeSegments,
   fetchSegmentPreview,
+  fetchEpisodeSegmentationOptions,
+  putEpisodeSegmentationOptions,
   patchSegment,
   propagateCharacters,
   type PropagateResult,
@@ -61,6 +63,7 @@ import {
   type ConcordanceRow,
   type SegmentRow,
   type SegmentPreviewResponse,
+  type UtteranceSegmentationOptions,
   type AutoAssignResult,
   type ConfigUpdate,
   type Episode,
@@ -2238,6 +2241,14 @@ dialog.cons-presets-modal::backdrop { background: rgba(0,0,0,.35); }
   font-size: 0.76rem; color: var(--text-muted);
 }
 .seg-preview-banner strong { color: var(--text); }
+.seg-utt-opts { margin-bottom: 8px; flex-shrink: 0; }
+.seg-utt-opts summary { font-size: 0.72rem; font-weight: 600; cursor: pointer; padding: 4px 0; }
+.seg-utt-opts-body { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.seg-utt-opts .seg-label { display: flex; flex-direction: column; gap: 4px; font-size: 0.72rem; color: var(--text-muted); }
+.seg-utt-opts .seg-check { font-size: 0.72rem; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.seg-opt-input { width: 100%; font-size: 0.74rem; font-family: ui-monospace, monospace; padding: 4px 8px; box-sizing: border-box; border-radius: 4px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+.seg-utt-opts-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg-utt-opts-hint { font-size: 0.68rem; color: var(--text-muted); margin: 0; line-height: 1.4; }
 .seg-clean-textarea {
   width: 100%; min-height: 120px; max-height: 220px; resize: vertical; box-sizing: border-box;
   font-size: 0.78rem; font-family: ui-monospace, monospace; line-height: 1.45;
@@ -5827,7 +5838,8 @@ function renderSegmentationPane(container: HTMLElement, episodes: Episode[]) {
       void (async () => {
         try {
           const lh = (t as HTMLSelectElement).value;
-          const pr = await withNoDbRecovery(() => fetchSegmentPreview(ta.value, lh));
+          const uo = readSegUttOptionsFromDom(root);
+          const pr = await withNoDbRecovery(() => fetchSegmentPreview(ta.value, lh, uo));
           fillSegmentPreviewLists(root, pr);
         } catch (e) {
           const st = root.querySelector<HTMLElement>("#seg-preview-stats");
@@ -5860,6 +5872,36 @@ function fillSegmentPreviewLists(root: HTMLElement, pr: SegmentPreviewResponse):
       : `<div class="seg-prev-empty">Aucune</div>`;
   }
   if (stats) stats.textContent = `${pr.n_sentences} phrases · ${pr.n_utterances} tours`;
+}
+
+function readSegUttOptionsFromDom(root: HTMLElement): Record<string, unknown> {
+  const speaker = root.querySelector<HTMLInputElement>("#seg-opt-speaker-regex")?.value ?? "";
+  const dashRe = root.querySelector<HTMLInputElement>("#seg-opt-dash-regex")?.value ?? "";
+  const markersStr = root.querySelector<HTMLInputElement>("#seg-opt-markers")?.value ?? "";
+  const markers = markersStr.split(",").map((s) => s.trim()).filter(Boolean);
+  return {
+    speaker_regex: speaker,
+    enable_dash_rule: root.querySelector<HTMLInputElement>("#seg-opt-dash-enable")?.checked ?? true,
+    dash_regex: dashRe,
+    continuation_markers: markers,
+    merge_if_prev_ends_with_marker: root.querySelector<HTMLInputElement>("#seg-opt-merge-marker")?.checked ?? true,
+    attach_unmarked_to_previous: root.querySelector<HTMLInputElement>("#seg-opt-attach-unmarked")?.checked ?? false,
+  };
+}
+
+function fillSegUttOptionsDom(root: HTMLElement, o: UtteranceSegmentationOptions) {
+  const sp = root.querySelector<HTMLInputElement>("#seg-opt-speaker-regex");
+  if (sp) sp.value = o.speaker_regex ?? "";
+  const en = root.querySelector<HTMLInputElement>("#seg-opt-dash-enable");
+  if (en) en.checked = Boolean(o.enable_dash_rule);
+  const dr = root.querySelector<HTMLInputElement>("#seg-opt-dash-regex");
+  if (dr) dr.value = o.dash_regex ?? "";
+  const mk = root.querySelector<HTMLInputElement>("#seg-opt-markers");
+  if (mk) mk.value = Array.isArray(o.continuation_markers) ? o.continuation_markers.join(", ") : "";
+  const mg = root.querySelector<HTMLInputElement>("#seg-opt-merge-marker");
+  if (mg) mg.checked = Boolean(o.merge_if_prev_ends_with_marker);
+  const at = root.querySelector<HTMLInputElement>("#seg-opt-attach-unmarked");
+  if (at) at.checked = Boolean(o.attach_unmarked_to_previous);
 }
 
 function refreshActiveSegmentationPanel(container: HTMLElement) {
@@ -5911,7 +5953,11 @@ async function loadSegmentationRightPanel(
       return;
     }
     const langHint = container.querySelector<HTMLSelectElement>("#seg-lang-hint")?.value ?? "en";
-    const preview = await withNoDbRecovery(() => fetchSegmentPreview(cleanBaseline, langHint));
+    let segOptsRes: { options: UtteranceSegmentationOptions | null } = { options: null };
+    try {
+      segOptsRes = await withNoDbRecovery(() => fetchEpisodeSegmentationOptions(epId));
+    } catch { /* route absente (vieux backend) — on utilise les défauts */ }
+    const preview = await withNoDbRecovery(() => fetchSegmentPreview(cleanBaseline, langHint, segOptsRes.options));
     const showVerify = transcriptState === "segmented" || transcriptState === "ready_for_alignment";
     const canRunFirst = transcriptState === "normalized";
     const canRunAgain = transcriptState === "segmented" || transcriptState === "ready_for_alignment";
@@ -5923,6 +5969,28 @@ async function loadSegmentationRightPanel(
     <span><strong>Aperçu</strong> — même moteur que le job (rien n’écrit en base).</span>
     <button type="button" class="btn btn-ghost btn-sm" id="seg-refresh-preview">Actualiser</button>
   </div>
+  <details class="seg-utt-opts" id="seg-utt-opts">
+    <summary>Options tours (regex, marqueurs)</summary>
+    <div class="seg-utt-opts-body">
+      <label class="seg-label">Regex locuteur
+        <input type="text" id="seg-opt-speaker-regex" class="seg-opt-input" spellcheck="false" autocomplete="off" />
+      </label>
+      <label class="seg-check"><input type="checkbox" id="seg-opt-dash-enable" /> Ligne commençant par tiret = nouveau tour</label>
+      <label class="seg-label">Regex tiret
+        <input type="text" id="seg-opt-dash-regex" class="seg-opt-input" spellcheck="false" autocomplete="off" />
+      </label>
+      <label class="seg-label">Marqueurs de continuation (virgules)
+        <input type="text" id="seg-opt-markers" class="seg-opt-input" placeholder="..., …" autocomplete="off" />
+      </label>
+      <label class="seg-check"><input type="checkbox" id="seg-opt-merge-marker" /> Fusionner si la ligne précédente finit par un marqueur</label>
+      <label class="seg-check"><input type="checkbox" id="seg-opt-attach-unmarked" /> Rattacher les lignes non marquées à la précédente</label>
+      <div class="seg-utt-opts-actions">
+        <button type="button" class="btn btn-secondary btn-sm" id="seg-save-utt-opts">Enregistrer pour cet épisode</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="seg-reset-utt-opts">Réinitialiser défauts</button>
+      </div>
+      <p class="seg-utt-opts-hint">Utilisées par l’aperçu et le job <code>segment_transcript</code> (<code>episode_segmentation_options.json</code>).</p>
+    </div>
+  </details>
   <textarea id="seg-clean-edit" class="seg-clean-textarea" spellcheck="false"></textarea>
   <div class="seg-preview-toolbar">
     <button type="button" class="btn btn-secondary btn-sm" id="seg-save-clean" disabled>Enregistrer le clean</button>
@@ -5955,6 +6023,7 @@ async function loadSegmentationRightPanel(
     const ta = panel.querySelector<HTMLTextAreaElement>("#seg-clean-edit")!;
     ta.value = cleanBaseline;
     fillSegmentPreviewLists(root, preview);
+    fillSegUttOptionsDom(root, segOptsRes.options);
 
     const saveBtn = panel.querySelector<HTMLButtonElement>("#seg-save-clean")!;
     const syncDirty = () => {
@@ -5964,7 +6033,8 @@ async function loadSegmentationRightPanel(
 
     const runPreviewNow = async () => {
       const lh = container.querySelector<HTMLSelectElement>("#seg-lang-hint")?.value ?? "en";
-      const pr = await withNoDbRecovery(() => fetchSegmentPreview(ta.value, lh));
+      const uo = readSegUttOptionsFromDom(root);
+      const pr = await withNoDbRecovery(() => fetchSegmentPreview(ta.value, lh, uo));
       fillSegmentPreviewLists(root, pr);
     };
 
@@ -5983,6 +6053,50 @@ async function loadSegmentationRightPanel(
 
     panel.querySelector<HTMLButtonElement>("#seg-refresh-preview")?.addEventListener("click", () => {
       void runPreviewNow().catch(() => { /* stats */ });
+    });
+
+    const optBox = root.querySelector<HTMLElement>("#seg-utt-opts");
+    const triggerOptPreview = () => {
+      if (_segSegPreviewTimer) clearTimeout(_segSegPreviewTimer);
+      _segSegPreviewTimer = setTimeout(() => {
+        _segSegPreviewTimer = null;
+        if (!root.isConnected) return;
+        void runPreviewNow().catch((e) => {
+          const st = root.querySelector<HTMLElement>("#seg-preview-stats");
+          if (st) st.textContent = e instanceof ApiError ? e.message : String(e);
+        });
+      }, 400);
+    };
+    optBox?.addEventListener("input", triggerOptPreview);
+    optBox?.addEventListener("change", triggerOptPreview);
+
+    panel.querySelector<HTMLButtonElement>("#seg-save-utt-opts")?.addEventListener("click", async () => {
+      const btn = panel.querySelector<HTMLButtonElement>("#seg-save-utt-opts")!;
+      btn.disabled = true;
+      try {
+        await withNoDbRecovery(() => putEpisodeSegmentationOptions(epId, readSegUttOptionsFromDom(root)));
+        await runPreviewNow();
+      } catch (e) {
+        const st = root.querySelector<HTMLElement>("#seg-preview-stats");
+        if (st) st.textContent = e instanceof ApiError ? e.message : String(e);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    panel.querySelector<HTMLButtonElement>("#seg-reset-utt-opts")?.addEventListener("click", async () => {
+      const btn = panel.querySelector<HTMLButtonElement>("#seg-reset-utt-opts")!;
+      btn.disabled = true;
+      try {
+        const res = await withNoDbRecovery(() => putEpisodeSegmentationOptions(epId, {}));
+        fillSegUttOptionsDom(root, res.options);
+        await runPreviewNow();
+      } catch (e) {
+        const st = root.querySelector<HTMLElement>("#seg-preview-stats");
+        if (st) st.textContent = e instanceof ApiError ? e.message : String(e);
+      } finally {
+        btn.disabled = false;
+      }
     });
 
     const errSeg = container.querySelector<HTMLElement>(".seg-error");
