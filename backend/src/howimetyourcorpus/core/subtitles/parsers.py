@@ -74,7 +74,7 @@ def parse_srt(content: str, source_path: str = "") -> list[Cue]:
         meta["source_path"] = source_path
     lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     i = 0
-    n = 0
+    n = 1  # Convention SRT : les blocs commencent à 1 (correspond au numéro de bloc du fichier)
     while i < len(lines):
         line = lines[i].strip()
         if not line:
@@ -132,7 +132,7 @@ def parse_vtt(content: str, source_path: str = "") -> list[Cue]:
         i += 1
     if i < len(lines):
         i += 1
-    n = 0
+    n = 1  # Convention cohérente avec SRT : commence à 1
     while i < len(lines):
         line = lines[i].strip()
         if not line:

@@ -24,7 +24,7 @@ How are you?
 """
     cues = parse_srt(content)
     assert len(cues) == 2
-    assert cues[0].n == 0
+    assert cues[0].n == 1  # convention SRT : les blocs commencent à 1
     assert cues[0].start_ms == 1000
     assert cues[0].end_ms == 3500
     assert cues[0].text_raw == "Hello world."
