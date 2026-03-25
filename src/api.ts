@@ -629,6 +629,7 @@ export interface SubtitleCue {
   n: number;
   start_ms: number;
   end_ms: number;
+  text_raw: string;
   text_clean: string;
 }
 
@@ -673,6 +674,13 @@ export async function fetchAllSubtitleCues(episodeId: string, lang: string): Pro
     offset += limit;
   }
   return out;
+}
+
+export async function patchSubtitleCue(
+  cueId: string,
+  textClean: string,
+): Promise<{ cue_id: string; text_clean: string }> {
+  return apiPatch(`/subtitle_cues/${encodeURIComponent(cueId)}`, { text_clean: textClean });
 }
 
 export async function retargetAlignLink(

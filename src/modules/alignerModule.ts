@@ -360,6 +360,8 @@ function renderForm(
   const pivotKeyDefault = handoff?.pivot_key ?? (transcript ? "transcript" : (resolveSrtPivot(episode) ?? srts[0]?.source_key ?? ""));
   const targetKeysDefault = handoff?.target_keys ?? srts.filter((s) => s.source_key !== pivotKeyDefault).map((s) => s.source_key);
   const segmentKindDefault = handoff?.segment_kind ?? "sentence";
+  const minConfDefault = handoff?.min_confidence ?? 0.3;
+  const useSimDefault  = handoff?.use_similarity_for_cues ?? false;
 
   const modeLabel = mode === "transcript_first" ? "Transcript-first" : "SRT-only";
   const pivotDisplay = pivotKeyDefault === "transcript" ? "transcript" : pivotKeyDefault.replace("srt_", "SRT ");
@@ -403,10 +405,33 @@ function renderForm(
       <label>Segmentation</label>
       <select class="align-select" id="align-segment-kind">${kindOptions}</select>
     </div>
+    <div class="align-field">
+      <label>Confiance min.</label>
+      <input type="range" id="align-min-conf" min="0.1" max="0.95" step="0.05"
+        value="${minConfDefault.toFixed(2)}"
+        style="flex:1;accent-color:var(--accent)">
+      <span id="align-min-conf-val" style="font-size:0.78rem;min-width:2.5em;text-align:right">${minConfDefault.toFixed(2)}</span>
+    </div>
+    <div class="align-field">
+      <label>Similarité cues</label>
+      <label style="display:flex;align-items:center;gap:5px;font-size:0.82rem;cursor:pointer">
+        <input type="checkbox" id="align-use-sim" ${useSimDefault ? "checked" : ""}
+          style="accent-color:var(--accent)">
+        Forcer similarité textuelle
+      </label>
+    </div>
     <div class="align-launch-row">
       <button class="btn btn-primary" id="align-btn-launch">▶ Lancer l'alignement</button>
       <span class="align-feedback" id="align-feedback"></span>
     </div>`;
+
+  // Mise à jour temps réel du label confiance
+  card.querySelector<HTMLInputElement>("#align-min-conf")
+    ?.addEventListener("input", (e) => {
+      const val = (e.target as HTMLInputElement).value;
+      const display = card.querySelector<HTMLElement>("#align-min-conf-val");
+      if (display) display.textContent = parseFloat(val).toFixed(2);
+    });
 
   container.querySelector<HTMLButtonElement>("#align-btn-launch")!
     .addEventListener("click", async () => {
@@ -440,12 +465,16 @@ function renderForm(
           return;
         }
         const runId = `${episode.episode_id}-${Date.now()}`;
+        const minConf = parseFloat(card.querySelector<HTMLInputElement>("#align-min-conf")?.value ?? "0.3");
+        const useSim  = card.querySelector<HTMLInputElement>("#align-use-sim")?.checked ?? false;
 
         const job = await createJob("align", episode.episode_id, "", {
-          pivot_lang:   pivotLang || targetLangs[0] || "",
-          target_langs: targetLangs,
-          segment_kind: segmentKind,
-          run_id:       runId,
+          pivot_lang:              pivotLang || targetLangs[0] || "",
+          target_langs:            targetLangs,
+          segment_kind:            segmentKind,
+          run_id:                  runId,
+          min_confidence:          isNaN(minConf) ? 0.3 : minConf,
+          use_similarity_for_cues: useSim,
         });
 
         fb.textContent = "Job créé — alignement en cours…";
