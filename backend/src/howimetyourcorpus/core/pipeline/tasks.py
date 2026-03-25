@@ -676,6 +676,44 @@ class AlignEpisodeStep(Step):
         self.use_similarity_for_cues = use_similarity_for_cues
         self.segment_kind = segment_kind if segment_kind in ("sentence", "utterance") else "sentence"
 
+    def _load_cues_for_lang(
+        self,
+        store: "ProjectStore",
+        db: "CorpusDB",
+        lang: str,
+    ) -> list[dict]:
+        """Retourne les cues pour (episode_id, lang) depuis la DB.
+        Si absentes, lit le fichier SRT/VTT depuis le disque et les indexe à la volée.
+        Garantit que les SRT importés avant l'indexation automatique sont utilisables.
+        """
+        from howimetyourcorpus.core.subtitles.parsers import parse_subtitle_content
+        import datetime as _dt
+
+        cues = db.get_cues_for_episode_lang(self.episode_id, lang)
+        if cues:
+            return cues
+
+        # Fallback : lire depuis le fichier sur disque
+        result = store.get_episode_subtitle_path(self.episode_id, lang)
+        if result is None:
+            return []
+        path, fmt = result
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+            parsed_cues, _ = parse_subtitle_content(content, str(path))
+        except Exception:
+            return []
+
+        track_id = f"{self.episode_id}:{lang}"
+        imported_at = _dt.datetime.now(_dt.UTC).isoformat().replace("+00:00", "Z")
+        try:
+            db.add_track(track_id, self.episode_id, lang, fmt, imported_at=imported_at)
+            db.upsert_cues(track_id, self.episode_id, lang, parsed_cues)
+        except Exception:
+            pass
+
+        return db.get_cues_for_episode_lang(self.episode_id, lang)
+
     def run(
         self,
         context: PipelineContext,
@@ -701,7 +739,7 @@ class AlignEpisodeStep(Step):
             on_progress(self.name, 0.0, f"Loading segments and cues for {self.episode_id}...")
         segments = db.get_segments_for_episode(self.episode_id, kind=self.segment_kind)
         has_segments = bool(segments)
-        cues_en = db.get_cues_for_episode_lang(self.episode_id, self.pivot_lang)
+        cues_en = self._load_cues_for_lang(store, db, self.pivot_lang)
         if not has_segments and not self.target_langs:
             return StepResult(
                 False,
@@ -711,7 +749,7 @@ class AlignEpisodeStep(Step):
         effective_pivot_lang = self.pivot_lang
         if not cues_en and self.target_langs and has_segments:
             for tl in self.target_langs:
-                cues_t = db.get_cues_for_episode_lang(self.episode_id, tl)
+                cues_t = self._load_cues_for_lang(store, db, tl)
                 if cues_t:
                     effective_pivot_lang = tl
                     cues_en = cues_t
@@ -742,13 +780,9 @@ class AlignEpisodeStep(Step):
                 cues_en,
                 min_confidence=self.min_confidence,
                 on_progress=on_align_progress,
+                lang=effective_pivot_lang,
             )
             all_links = list(pivot_links)
-            # Mettre à jour la langue des liens pivot si pivot effectif != EN (ex. segment↔FR direct)
-            if effective_pivot_lang != self.pivot_lang:
-                for link in all_links:
-                    if link.role == "pivot":
-                        link.lang = effective_pivot_lang
             if on_progress:
                 on_progress(self.name, 0.4, f"Aligned {len(pivot_links)} segment↔cue links; aligning target langs...")
         elif on_progress:
@@ -761,7 +795,7 @@ class AlignEpisodeStep(Step):
                 "Alignement cues↔cues impossible : choisissez au moins une langue cible différente du pivot.",
             )
         for tl in remaining_targets:
-            cues_target = db.get_cues_for_episode_lang(self.episode_id, tl)
+            cues_target = self._load_cues_for_lang(store, db, tl)
             if cues_target:
                 use_time = (
                     not self.use_similarity_for_cues

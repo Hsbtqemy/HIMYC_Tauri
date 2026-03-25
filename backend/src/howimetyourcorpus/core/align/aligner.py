@@ -46,6 +46,7 @@ def align_segments_to_cues(
     min_confidence: float = 0.3,
     on_progress: Callable[[int, int], None] | None = None,
     monotonic: bool = True,
+    lang: str = "en",
 ) -> list[AlignLink]:
     """
     Aligne les segments (phrases) aux cues EN par similarité textuelle.
@@ -106,7 +107,7 @@ def align_segments_to_cues(
                 AlignLink(
                     segment_id=seg_id,
                     cue_id=best_cue_id,
-                    lang="en",
+                    lang=lang,
                     role="pivot",
                     confidence=round(best_score, 4),
                     status="auto",
