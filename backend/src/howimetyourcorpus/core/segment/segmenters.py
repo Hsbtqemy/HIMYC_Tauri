@@ -164,3 +164,58 @@ def segmenter_utterances(text: str) -> list[Segment]:
             )
         n += 1
     return segments
+
+
+def utterance_rows_to_segments(episode_id: str, full_text: str, rows: list[dict[str, Any]]) -> list[Segment]:
+    """
+    Convertit les lignes utterance du module preparer (segment_text_to_utterance_rows)
+    en ``Segment`` avec positions caractères dans ``full_text``.
+    """
+    segments: list[Segment] = []
+    cursor = 0
+    for row in rows or []:
+        payload = (row.get("text") or "").strip()
+        if not payload:
+            continue
+        idx = full_text.find(payload, cursor)
+        if idx < 0:
+            idx = full_text.find(payload)
+        if idx < 0:
+            idx = cursor
+        end = idx + len(payload)
+        speaker = (row.get("speaker_explicit") or "").strip() or None
+        segments.append(
+            Segment(
+                episode_id=episode_id,
+                kind="utterance",
+                n=len(segments),
+                start_char=idx,
+                end_char=end,
+                text=payload,
+                speaker_explicit=speaker,
+                meta={},
+            )
+        )
+        cursor = max(cursor, end)
+    return segments
+
+
+def segmenter_utterances_with_options(
+    text: str,
+    episode_id: str,
+    options: dict[str, Any] | None,
+) -> list[Segment]:
+    """
+    Tours de parole selon les options Préparer (regex locuteur, tirets, marqueurs…).
+    Même logique que ``segment_text_to_utterance_rows``, avec positions pour ``segments.jsonl``.
+    """
+    from howimetyourcorpus.core.preparer.segmentation import (
+        normalize_segmentation_options,
+        segment_text_to_utterance_rows,
+        validate_segmentation_options,
+    )
+
+    normalized = normalize_segmentation_options(options)
+    validate_segmentation_options(normalized)
+    rows = segment_text_to_utterance_rows(text, normalized)
+    return utterance_rows_to_segments(episode_id, text, rows)

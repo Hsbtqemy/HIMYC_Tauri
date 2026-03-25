@@ -454,6 +454,43 @@ def test_segment_preview_empty_text():
     assert data["n_utterances"] == 0
 
 
+def test_episode_segmentation_options_get_put(tmp_path):
+    """GET/PUT /episodes/{id}/segmentation_options — roundtrip options utterances."""
+    os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
+    try:
+        r = client.get("/episodes/S01E01/segmentation_options")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["episode_id"] == "S01E01"
+        assert data["source_key"] == "transcript"
+        assert "speaker_regex" in data["options"]
+
+        r2 = client.put(
+            "/episodes/S01E01/segmentation_options",
+            json={"source_key": "transcript", "options": {"enable_dash_rule": False}},
+        )
+        assert r2.status_code == 200
+        assert r2.json()["options"]["enable_dash_rule"] is False
+
+        r3 = client.get("/episodes/S01E01/segmentation_options")
+        assert r3.json()["options"]["enable_dash_rule"] is False
+    finally:
+        del os.environ["HIMYC_PROJECT_PATH"]
+
+
+def test_segment_preview_invalid_regex_422():
+    """POST /segment/preview avec regex invalide → 422."""
+    r = client.post(
+        "/segment/preview",
+        json={
+            "text": "A\nB",
+            "lang_hint": "en",
+            "utterance_options": {"speaker_regex": "["},
+        },
+    )
+    assert r.status_code == 422
+
+
 def test_init_corpus_db_creates_then_idempotent(tmp_path):
     """POST /project/init_corpus_db crée corpus.db une fois puis created=false."""
     os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)

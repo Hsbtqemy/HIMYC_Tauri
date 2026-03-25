@@ -19,7 +19,8 @@ from howimetyourcorpus.core.models import EpisodeRef, EpisodeStatus, ProjectConf
 from howimetyourcorpus.core.normalize.profiles import get_profile
 from howimetyourcorpus.core.pipeline.context import PipelineContext
 from howimetyourcorpus.core.pipeline.steps import Step, StepResult
-from howimetyourcorpus.core.segment import Segment, segmenter_sentences, segmenter_utterances
+from howimetyourcorpus.core.preparer.segmentation import DEFAULT_SEGMENTATION_OPTIONS
+from howimetyourcorpus.core.segment import Segment, segmenter_sentences, segmenter_utterances_with_options
 from howimetyourcorpus.core.storage.db import CorpusDB
 from howimetyourcorpus.core.storage.project_store import ProjectStore
 from howimetyourcorpus.core.opensubtitles import OpenSubtitlesClient, OpenSubtitlesError
@@ -428,7 +429,12 @@ class SegmentEpisodeStep(Step):
         if on_progress:
             on_progress(self.name, 0.0, f"Segmenting {self.episode_id}...")
         sentences = segmenter_sentences(clean, self.lang_hint)
-        utterances = segmenter_utterances(clean)
+        utt_opts = store.get_episode_segmentation_options(
+            self.episode_id,
+            "transcript",
+            default=DEFAULT_SEGMENTATION_OPTIONS,
+        )
+        utterances = segmenter_utterances_with_options(clean, self.episode_id, utt_opts)
         for s in sentences:
             s.episode_id = self.episode_id
         for u in utterances:

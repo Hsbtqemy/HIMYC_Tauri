@@ -364,15 +364,46 @@ export interface SegmentPreviewResponse {
   n_utterances: number;
 }
 
+/** Options utterances (épisode transcript) — alignées sur Préparer / ``episode_segmentation_options.json``. */
+export interface UtteranceSegmentationOptions {
+  speaker_regex: string;
+  enable_dash_rule: boolean;
+  dash_regex: string;
+  continuation_markers: string[];
+  merge_if_prev_ends_with_marker: boolean;
+  attach_unmarked_to_previous: boolean;
+}
+
+export async function fetchEpisodeSegmentationOptions(
+  episodeId: string,
+  sourceKey = "transcript",
+): Promise<{ episode_id: string; source_key: string; options: UtteranceSegmentationOptions }> {
+  const q = encodeURIComponent(sourceKey);
+  return apiGet<{ episode_id: string; source_key: string; options: UtteranceSegmentationOptions }>(
+    `/episodes/${epSeg(episodeId)}/segmentation_options?source_key=${q}`,
+  );
+}
+
+export async function putEpisodeSegmentationOptions(
+  episodeId: string,
+  options: Record<string, unknown>,
+  sourceKey = "transcript",
+): Promise<{ episode_id: string; source_key: string; options: UtteranceSegmentationOptions }> {
+  return apiPut<{ episode_id: string; source_key: string; options: UtteranceSegmentationOptions }>(
+    `/episodes/${epSeg(episodeId)}/segmentation_options`,
+    { source_key: sourceKey, options },
+  );
+}
+
 /** Même moteur Python que le job segment_transcript, sans écriture disque. */
 export async function fetchSegmentPreview(
   text: string,
   langHint: string,
+  utteranceOptions?: UtteranceSegmentationOptions | Record<string, unknown> | null,
 ): Promise<SegmentPreviewResponse> {
-  return apiPost<SegmentPreviewResponse>("/segment/preview", {
-    text,
-    lang_hint: langHint,
-  });
+  const body: Record<string, unknown> = { text, lang_hint: langHint };
+  if (utteranceOptions != null) body.utterance_options = utteranceOptions;
+  return apiPost<SegmentPreviewResponse>("/segment/preview", body);
 }
 
 export async function importSrt(

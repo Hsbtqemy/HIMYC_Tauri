@@ -271,8 +271,9 @@ def normalize_preview(body: _NormalizePreviewBody) -> dict[str, Any]:
 
 
 class _SegmentPreviewBody(BaseModel):
-    text:      str
+    text: str
     lang_hint: str = "en"
+    utterance_options: dict[str, Any] | None = None
 
 
 @app.post("/segment/preview", summary="Aperçu segmentation (phrases + tours) sans sauvegarder")
@@ -280,14 +281,20 @@ def segment_preview(body: _SegmentPreviewBody) -> dict[str, Any]:
     """
     Segmente le texte fourni en phrases et en tours (utterances) en mémoire,
     sans aucune écriture en base. Même moteur que le job segment_transcript.
+    Les tours utilisent les options Préparer (regex locuteur, tirets, marqueurs) si fournies.
     """
+    from howimetyourcorpus.core.preparer.segmentation import normalize_segmentation_options
     from howimetyourcorpus.core.segment.segmenters import (
         segmenter_sentences,
-        segmenter_utterances,
+        segmenter_utterances_with_options,
     )
 
-    sentences  = segmenter_sentences(body.text, lang_hint=body.lang_hint)
-    utterances = segmenter_utterances(body.text)
+    merged = normalize_segmentation_options(body.utterance_options)
+    sentences = segmenter_sentences(body.text, lang_hint=body.lang_hint)
+    try:
+        utterances = segmenter_utterances_with_options(body.text, "preview", merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return {
         "n_sentences":  len(sentences),
@@ -301,6 +308,46 @@ def segment_preview(body: _SegmentPreviewBody) -> dict[str, Any]:
             for s in utterances
         ],
     }
+
+
+class _EpisodeSegmentationOptionsBody(BaseModel):
+    source_key: str = "transcript"
+    options: dict[str, Any]
+
+
+@app.get(
+    "/episodes/{episode_id}/segmentation_options",
+    summary="Options segmentation utterances (épisode + source)",
+)
+def get_episode_segmentation_options(
+    episode_id: str,
+    source_key: str = Query("transcript"),
+    store: ProjectStore = Depends(_get_store),
+) -> dict[str, Any]:
+    from howimetyourcorpus.core.preparer.segmentation import DEFAULT_SEGMENTATION_OPTIONS
+
+    opts = store.get_episode_segmentation_options(episode_id, source_key, default=DEFAULT_SEGMENTATION_OPTIONS)
+    return {"episode_id": episode_id, "source_key": source_key, "options": opts}
+
+
+@app.put(
+    "/episodes/{episode_id}/segmentation_options",
+    summary="Enregistrer les options segmentation utterances",
+)
+def put_episode_segmentation_options(
+    episode_id: str,
+    body: _EpisodeSegmentationOptionsBody,
+    store: ProjectStore = Depends(_get_store),
+) -> dict[str, Any]:
+    from howimetyourcorpus.core.preparer.segmentation import normalize_segmentation_options, validate_segmentation_options
+
+    try:
+        normalized = normalize_segmentation_options(body.options)
+        validate_segmentation_options(normalized)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    store.set_episode_segmentation_options(episode_id, body.source_key, normalized)
+    return {"episode_id": episode_id, "source_key": body.source_key, "options": normalized}
 
 
 # ─── /series_index ────────────────────────────────────────────────────────────
