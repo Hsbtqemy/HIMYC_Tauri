@@ -2518,7 +2518,17 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     statsPanel.classList.toggle("hidden", !active);
     for (const sel of _statsHideSelectors) {
       const el = container.querySelector<HTMLElement>(sel);
-      if (el) el.style.display = active ? "none" : "";
+      if (!el) continue;
+      if (active) {
+        // Sauvegarder l'état display actuel avant de cacher
+        el.dataset.kwicPrevDisplay = el.style.display;
+        el.style.display = "none";
+      } else {
+        // Restaurer l'état exact (pas juste ""), évite de rendre visibles
+        // des éléments contrôlés uniquement par inline-style (ex: #kwic-error)
+        el.style.display = el.dataset.kwicPrevDisplay ?? "";
+        delete el.dataset.kwicPrevDisplay;
+      }
     }
   }
 

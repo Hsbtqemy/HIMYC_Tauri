@@ -1430,13 +1430,14 @@ def stats_lexical(
     body: _StatsRequest,
     db:   CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    texts = _stats_fetch_texts(db.conn, body.slot)
-    if not texts:
-        return {"label": body.label, "total_tokens": 0, "total_segments": 0,
-                "total_episodes": 0, "vocabulary_size": 0,
-                "avg_tokens_per_segment": 0.0, "top_words": [], "rare_words": []}
-    n_ep        = _stats_count_episodes(db.conn, body.slot)
-    result, _, _ = _stats_compute(texts, body.slot, n_ep, body.label)
+    with db.connection() as conn:
+        texts = _stats_fetch_texts(conn, body.slot)
+        if not texts:
+            return {"label": body.label, "total_tokens": 0, "total_segments": 0,
+                    "total_episodes": 0, "vocabulary_size": 0,
+                    "avg_tokens_per_segment": 0.0, "top_words": [], "rare_words": []}
+        n_ep         = _stats_count_episodes(conn, body.slot)
+        result, _, _ = _stats_compute(texts, body.slot, n_ep, body.label)
     return result
 
 
@@ -1445,10 +1446,11 @@ def stats_compare(
     body: _StatsCompareRequest,
     db:   CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    texts_a = _stats_fetch_texts(db.conn, body.a)
-    texts_b = _stats_fetch_texts(db.conn, body.b)
-    n_ep_a  = _stats_count_episodes(db.conn, body.a)
-    n_ep_b  = _stats_count_episodes(db.conn, body.b)
+    with db.connection() as conn:
+        texts_a = _stats_fetch_texts(conn, body.a)
+        texts_b = _stats_fetch_texts(conn, body.b)
+        n_ep_a  = _stats_count_episodes(conn, body.a)
+        n_ep_b  = _stats_count_episodes(conn, body.b)
 
     # _stats_compute retourne aussi le Counter → pas de re-tokenisation
     stats_a, ca, ta = _stats_compute(texts_a, body.a, n_ep_a, body.label_a)
