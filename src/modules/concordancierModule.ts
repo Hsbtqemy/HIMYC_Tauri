@@ -2670,13 +2670,16 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       if (dlB) dlB.innerHTML = opts;
       _statsEpsLoaded = true;
     } catch (e) {
-      // Datalists non critiques : on loggue et on laisse vides (pas de blocage)
-      const dlA = container.querySelector<HTMLDataListElement>("#kwic-stats-datalist-a");
-      if (dlA) {
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.label = `(chargement épisodes impossible : ${e instanceof Error ? e.message : String(e)})`;
-        dlA.appendChild(opt);
+      // Datalists non critiques : on signale l'erreur dans les deux datalists (A et B)
+      const errMsg = `(chargement épisodes impossible : ${e instanceof Error ? e.message : String(e)})`;
+      for (const sel of ["#kwic-stats-datalist-a", "#kwic-stats-datalist-b"]) {
+        const dl = container.querySelector<HTMLDataListElement>(sel);
+        if (dl) {
+          const opt = document.createElement("option");
+          opt.value = "";
+          opt.label = errMsg;
+          dl.appendChild(opt);
+        }
       }
     }
   }

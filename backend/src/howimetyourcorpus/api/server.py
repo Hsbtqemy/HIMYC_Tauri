@@ -1158,6 +1158,13 @@ def patch_alignment_link(
     """
     if body.status is None and body.note is None:
         raise HTTPException(422, detail={"error": "NOTHING_TO_UPDATE", "message": "Fournissez au moins status ou note."})
+    # Vérifier que le lien existe avant de tenter la mise à jour (évite un 200 silencieux sur ID inconnu)
+    with db.connection() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM align_links WHERE link_id = ? LIMIT 1", (link_id,)
+        ).fetchone()
+    if not exists:
+        raise HTTPException(404, detail={"error": "LINK_NOT_FOUND", "message": f"Lien {link_id!r} introuvable."})
     result: dict[str, Any] = {"link_id": link_id}
     if body.status is not None:
         if body.status not in _VALID_LINK_STATUSES:
@@ -1360,12 +1367,13 @@ def get_episode_segments(
     conn = db._conn()
     try:
         if q:
-            # FTS5 search
+            # FTS5 search — q est échappé pour éviter les erreurs de syntaxe FTS5
+            from howimetyourcorpus.core.storage.db_kwic import fts5_match_query as _fts5_match_query
             try:
                 conn.row_factory = __import__("sqlite3").Row
                 fts_rows = conn.execute(
                     "SELECT segment_id FROM segments_fts WHERE episode_id=? AND kind=? AND text MATCH ? ORDER BY rank LIMIT 500",
-                    [episode_id, kind, q],
+                    [episode_id, kind, _fts5_match_query(q)],
                 ).fetchall()
                 ids = [r["segment_id"] for r in fts_rows]
                 if ids:
@@ -1976,7 +1984,7 @@ def web_tvmaze_discover(body: _TvmazeDiscoverBody) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail={"error": "TVMAZE_ERROR", "message": str(exc)},
+            detail={"error": "TVMAZE_ERROR", "message": "Service TVMaze indisponible ou réponse inattendue."},
         ) from exc
     return {
         "series_title": index.series_title,
@@ -2001,7 +2009,7 @@ def web_subslikescript_discover(body: _SubslikeDiscoverBody) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail={"error": "SUBSLIKE_ERROR", "message": str(exc)},
+            detail={"error": "SUBSLIKE_ERROR", "message": "Service Subslikescript indisponible ou réponse inattendue."},
         ) from exc
     return {
         "series_title": index.series_title,
@@ -2035,7 +2043,7 @@ def web_subslikescript_fetch_transcript(
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail={"error": "FETCH_ERROR", "message": str(exc)},
+            detail={"error": "FETCH_ERROR", "message": "Impossible de récupérer le transcript (service externe indisponible ou URL invalide)."},
         ) from exc
     ep_dir = store._episode_dir(episode_id)
     ep_dir.mkdir(parents=True, exist_ok=True)

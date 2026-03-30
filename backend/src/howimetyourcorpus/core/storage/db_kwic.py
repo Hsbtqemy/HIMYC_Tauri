@@ -49,6 +49,10 @@ def query_kwic(
         return []
     conn.row_factory = sqlite3.Row
     fts_query = fts5_match_query(term)
+    # SQL LIMIT sur le nombre de documents (chaque document peut contenir plusieurs hits Python).
+    # Borne à 4× la limite hit pour éviter de charger tous les épisodes d'un gros corpus,
+    # tout en garantissant qu'on trouve assez de documents pour remplir la limite hit.
+    doc_limit = max(limit * 4, 500)
     if season is not None and episode is not None:
         rows = conn.execute(
             """
@@ -57,8 +61,9 @@ def query_kwic(
             JOIN documents d ON d.rowid = documents_fts.rowid
             JOIN episodes e ON e.episode_id = d.episode_id
             WHERE documents_fts MATCH ? AND e.season = ? AND e.episode = ?
+            LIMIT ?
             """,
-            (fts_query, season, episode),
+            (fts_query, season, episode, doc_limit),
         ).fetchall()
     elif season is not None:
         rows = conn.execute(
@@ -68,8 +73,9 @@ def query_kwic(
             JOIN documents d ON d.rowid = documents_fts.rowid
             JOIN episodes e ON e.episode_id = d.episode_id
             WHERE documents_fts MATCH ? AND e.season = ?
+            LIMIT ?
             """,
-            (fts_query, season),
+            (fts_query, season, doc_limit),
         ).fetchall()
     else:
         rows = conn.execute(
@@ -79,8 +85,9 @@ def query_kwic(
             JOIN documents d ON d.rowid = documents_fts.rowid
             JOIN episodes e ON e.episode_id = d.episode_id
             WHERE documents_fts MATCH ?
+            LIMIT ?
             """,
-            (fts_query,),
+            (fts_query, doc_limit),
         ).fetchall()
 
     hits: list[KwicHit] = []
@@ -141,6 +148,9 @@ def query_kwic_segments(
     if episode is not None:
         where_extra += " AND e.episode = ?"
         params.append(episode)
+    # SQL LIMIT : chaque segment est court (~1 hit), donc LIMIT ≈ limit est suffisant.
+    # On prend limit + 1 pour ne pas tronquer prématurément quand un segment a 0 hit Python.
+    params.append(limit + 1)
     rows = conn.execute(
         f"""
         SELECT s.segment_id, s.episode_id, s.kind, s.text, s.speaker_explicit,
@@ -149,6 +159,8 @@ def query_kwic_segments(
         JOIN segments s ON s.rowid = segments_fts.rowid
         LEFT JOIN episodes e ON e.episode_id = s.episode_id
         WHERE segments_fts MATCH ?{where_extra}
+        ORDER BY rank
+        LIMIT ?
         """,
         params,
     ).fetchall()
@@ -217,6 +229,8 @@ def query_kwic_cues(
     if episode is not None:
         where_extra += " AND e.episode = ?"
         params.append(episode)
+    # SQL LIMIT : chaque cue est court (~1 hit), LIMIT ≈ limit est suffisant.
+    params.append(limit + 1)
     rows = conn.execute(
         f"""
         SELECT c.cue_id, c.episode_id, c.lang, c.text_clean, e.title
@@ -224,6 +238,8 @@ def query_kwic_cues(
         JOIN subtitle_cues c ON c.rowid = cues_fts.rowid
         JOIN episodes e ON e.episode_id = c.episode_id
         WHERE cues_fts MATCH ?{where_extra}
+        ORDER BY rank
+        LIMIT ?
         """,
         params,
     ).fetchall()

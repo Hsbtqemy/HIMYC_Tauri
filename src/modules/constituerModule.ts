@@ -2980,13 +2980,16 @@ function wireDistributionPanel(cnt: HTMLElement): void {
     const prev = (seg?.speaker_explicit ?? "").trim();
     if (raw === prev) return;
     inp.classList.remove("dist-sp-saved", "dist-sp-err");
+    const myMountId = _constituerMountId;
     void (async () => {
       try {
         const updated = await patchSegment(epId, sid, { speaker_explicit: raw || null });
+        if (_constituerMountId !== myMountId) return; // navigation survenue pendant l'await
         if (seg) seg.speaker_explicit = updated.speaker_explicit;
         inp.classList.add("dist-sp-saved");
         setTimeout(() => inp.classList.remove("dist-sp-saved"), 900);
       } catch (err) {
+        if (_constituerMountId !== myMountId) return;
         inp.classList.add("dist-sp-err");
         inp.value = prev;
         const errEl = cnt.querySelector<HTMLElement>("#dist-error");
@@ -3438,6 +3441,7 @@ async function refreshJobs(container: HTMLElement) {
       if (_activeSection === "actions") {
         if (_activeActionsSubView === "curation") {
           await loadAndRender(container);
+          if (_constituerMountId !== myMountId) return; // navigation survenue pendant loadAndRender
           // Re-marquer l'épisode actif après le re-rendu de la liste
           if (_curPreviewEpId && !_curEditMode) {
             const listEl   = container.querySelector<HTMLElement>("#cur-ep-list");
@@ -3449,12 +3453,14 @@ async function refreshJobs(container: HTMLElement) {
             if (panes) {
               _curPreviewData = null; // forcer le rechargement depuis le serveur
               await loadCurationPreview(panes, _curPreviewEpId, epTitle, mode, container);
+              if (_constituerMountId !== myMountId) return; // navigation survenue pendant loadCurationPreview
             }
             // Remettre le bouton normaliser à "Re-normaliser" après job terminé
             const normBtn = container.querySelector<HTMLButtonElement>("#cur-apply-normalize");
             if (normBtn) { normBtn.disabled = false; normBtn.textContent = "Re-normaliser et sauvegarder"; }
           }
         }
+        if (_constituerMountId !== myMountId) return;
         if (_activeActionsSubView === "segmentation") loadAndRenderSegmentation(container);
         if (_activeActionsSubView === "alignement")   loadAndRenderAlignement(container);
         if (_activeActionsSubView === "distribution") void loadDistributionPanel(container);
@@ -4078,9 +4084,16 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
         startJobPoll(container);
         btn.textContent = "✓";
         setTimeout(() => btn.remove(), 800);
-      } catch {
+      } catch (err) {
         btn.disabled = false;
         btn.textContent = "⚡";
+        btn.title = formatApiError(err); // message d'erreur visible au survol
+        const fb = container.querySelector<HTMLElement>("#cur-normalize-fb");
+        if (fb) {
+          fb.textContent = `Erreur normalisation ${epId} : ${formatApiError(err)}`;
+          fb.style.color = "var(--danger, #dc2626)";
+          fb.style.display = "block";
+        }
       }
     });
   });
@@ -5723,16 +5736,19 @@ function wireImporterButtons(pane: HTMLElement) {
   };
 
   let _tvLastData: import("../api").WebDiscoverResult | null = null;
+  let _tvSearchToken = 0; // anti-race : invalide la réponse d'une recherche précédente
 
   pane.querySelector<HTMLButtonElement>("#tvmaze-search-btn")!
     .addEventListener("click", async () => {
       const name = tvInput.value.trim();
       if (!name) { setTvFeedback("Saisissez un nom de série.", false); return; }
+      const myToken = ++_tvSearchToken;
       setTvFeedback("Recherche en cours…");
       tvResults.style.display = "none";
       _tvLastData = null;
       try {
         const data = await discoverTvmaze(name);
+        if (_tvSearchToken !== myToken) return; // résultat périmé (nouvelle recherche lancée)
         _tvLastData = data;
         setTvFeedback(`${data.series_title} — ${data.episode_count} épisodes.`);
         tvResults.style.display = "block";
@@ -5762,6 +5778,7 @@ function wireImporterButtons(pane: HTMLElement) {
             }
           });
       } catch (e) {
+        if (_tvSearchToken !== myToken) return;
         setTvFeedback(e instanceof ApiError ? e.message : String(e), false);
       }
     });
@@ -5781,16 +5798,19 @@ function wireImporterButtons(pane: HTMLElement) {
   };
 
   let _slLastData: import("../api").WebDiscoverResult | null = null;
+  let _slSearchToken = 0; // anti-race : invalide la réponse d'une découverte précédente
 
   pane.querySelector<HTMLButtonElement>("#subslike-discover-btn")!
     .addEventListener("click", async () => {
       const url = slInput.value.trim();
       if (!url) { setSlFeedback("Saisissez l'URL de la série.", false); return; }
+      const myToken = ++_slSearchToken;
       setSlFeedback("Découverte en cours…");
       slResults.style.display = "none";
       _slLastData = null;
       try {
         const data = await discoverSubslikescript(url);
+        if (_slSearchToken !== myToken) return; // résultat périmé (nouvelle découverte lancée)
         _slLastData = data;
         setSlFeedback(`${data.series_title} — ${data.episode_count} épisodes.`);
         slResults.style.display = "block";
@@ -5821,6 +5841,7 @@ function wireImporterButtons(pane: HTMLElement) {
             }
           });
       } catch (e) {
+        if (_slSearchToken !== myToken) return;
         setSlFeedback(e instanceof ApiError ? e.message : String(e), false);
       }
     });

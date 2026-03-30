@@ -131,13 +131,16 @@ def bulk_set_align_status(
         if not link_ids:
             return 0
         total_updated = 0
-        # SQLite SQLITE_LIMIT_VARIABLE_NUMBER ≈ 999 — on chunk par SQLITE_BULK_CHUNK_SIZE pour la marge
+        # SQLite SQLITE_LIMIT_VARIABLE_NUMBER ≈ 999 — on chunk par SQLITE_BULK_CHUNK_SIZE pour la marge.
+        # On filtre aussi par align_run_id ET episode_id pour garantir que seul le run concerné
+        # est modifiable, même si un client fournit des link_id appartenant à un autre run.
         for i in range(0, len(link_ids), SQLITE_BULK_CHUNK_SIZE):
             chunk = link_ids[i : i + SQLITE_BULK_CHUNK_SIZE]
             placeholders = ",".join("?" * len(chunk))
             cur = conn.execute(
-                f"UPDATE align_links SET status = ? WHERE link_id IN ({placeholders})",
-                [new_status, *chunk],
+                f"UPDATE align_links SET status = ? "
+                f"WHERE align_run_id = ? AND episode_id = ? AND link_id IN ({placeholders})",
+                [new_status, align_run_id, episode_id, *chunk],
             )
             total_updated += cur.rowcount
         return total_updated
