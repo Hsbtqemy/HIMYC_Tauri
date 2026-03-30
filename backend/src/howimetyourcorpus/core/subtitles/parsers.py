@@ -189,7 +189,7 @@ def parse_subtitle_content(content: str, source_path: str = "") -> tuple[list[Cu
     de chercher "WEBVTT", et étend la fenêtre de recherche à 50 caractères pour les fichiers
     avec des espaces ou lignes vides avant l'en-tête.
     """
-    stripped = content.lstrip("\ufeff\ufffe\xef\xbb\xbf \t\r\n")
+    stripped = content.lstrip("\ufeff\ufffe\xef\xbb\xbf \t\r\n")  # BOM + espaces + sauts de ligne
     if stripped[:6] == "WEBVTT":
         return parse_vtt(content, source_path), "vtt"
     return parse_srt(content, source_path), "srt"

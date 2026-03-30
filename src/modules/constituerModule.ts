@@ -7156,6 +7156,7 @@ const _VS_BUFFER = 6;  // extra rows rendered above and below viewport
 let _vsLinks: AuditLink[] = [];
 let _vsFocusIdx = -1;
 let _auditLoadToken = 0; // incremented on each load — stale fetches are discarded
+let _vsAbortController: AbortController | null = null; // annule les listeners du _vsSetup précédent
 
 const _MINIMAP_STATUS_COLORS: Record<string, string> = {
   accepted: "#22c55e",
@@ -7708,6 +7709,11 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
 }
 
 function _vsSetup(wrap: HTMLElement, panel: HTMLElement, epId: string, runId: string) {
+  // Annuler les listeners du _vsSetup précédent pour éviter l'accumulation sur le même nœud
+  if (_vsAbortController) _vsAbortController.abort();
+  _vsAbortController = new AbortController();
+  const { signal } = _vsAbortController;
+
   wrap.innerHTML = `
     <table class="audit-table" style="table-layout:fixed">
       <colgroup>
@@ -7728,7 +7734,7 @@ function _vsSetup(wrap: HTMLElement, panel: HTMLElement, epId: string, runId: st
   wrap.addEventListener("scroll", () => {
     _vsRender(wrap);
     updateMinimapViewport(panel);
-  }, { passive: true });
+  }, { passive: true, signal });
 
   // Event delegation — action buttons
   wrap.addEventListener("click", async (e) => {
@@ -7753,7 +7759,7 @@ function _vsSetup(wrap: HTMLElement, panel: HTMLElement, epId: string, runId: st
       }
       loadAuditStats(panel, epId, runId);
     } catch { btn.disabled = false; }
-  });
+  }, { signal });
 
   // Event delegation — note inputs
   wrap.addEventListener("focusout", async (e) => {
@@ -7769,7 +7775,7 @@ function _vsSetup(wrap: HTMLElement, panel: HTMLElement, epId: string, runId: st
       if (idx >= 0) _vsLinks[idx] = { ..._vsLinks[idx], note: newNote };
     } catch { inp.value = inp.dataset.noteOrig!; }
     finally { inp.disabled = false; }
-  });
+  }, { signal });
 }
 
 function _vsRender(wrap: HTMLElement) {
@@ -10319,6 +10325,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
 export function disposeConstituer() {
   _constituerMountId++; // invalide tous les refreshJobs en vol
+  if (_vsAbortController) { _vsAbortController.abort(); _vsAbortController = null; }
   // Désabonner d'abord pour éviter qu'un callback de statut ne redémarre le poll
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   if (_unsub2)      { _unsub2();      _unsub2      = null; }

@@ -485,8 +485,8 @@ def list_episodes(
     prep_status: dict[str, dict[str, str]] = {}
     try:
         prep_status = store.load_episode_prep_status()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("list_episodes: impossible de charger prep_status: %s", exc)
 
     # Tracks SRT par episode (batch si DB disponible)
     tracks_by_episode: dict[str, list[dict[str, Any]]] = {}
@@ -494,8 +494,8 @@ def list_episodes(
         episode_ids = [ep.episode_id for ep in index.episodes]
         try:
             tracks_by_episode = db.get_tracks_for_episodes(episode_ids)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("list_episodes: impossible de charger les pistes SRT: %s", exc)
 
     episodes = []
     for ep in index.episodes:
@@ -2511,7 +2511,7 @@ def export_alignments(
     import io as _io
 
 
-    rows = db.get_parallel_concordance(episode_id, run_id)
+    rows, _has_more = db.get_parallel_concordance(episode_id, run_id)
     if not rows:
         raise HTTPException(422, detail={"error": "NO_DATA", "message": "Aucun lien d'alignement pour ce run."})
 

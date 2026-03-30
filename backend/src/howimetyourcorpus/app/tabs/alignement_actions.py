@@ -481,7 +481,7 @@ class AlignmentActionsController:
         output_path = normalize_parallel_export_path(path, selected_filter)
         try:
             status_filter = "accepted" if tab.align_accepted_only_cb.isChecked() else None
-            rows = db.get_parallel_concordance(eid, run_id, status_filter=status_filter)
+            rows, _has_more = db.get_parallel_concordance(eid, run_id, status_filter=status_filter)
             export_parallel_rows(rows, output_path, title=f"Comparaison {eid} — {run_id}")
             message_box.information(tab, "Export", f"Concordancier parallèle exporté : {len(rows)} ligne(s).")
         except Exception as exc:
@@ -512,7 +512,7 @@ class AlignmentActionsController:
         try:
             status_filter = "accepted" if tab.align_accepted_only_cb.isChecked() else None
             stats = db.get_align_stats_for_run(eid, run_id, status_filter=status_filter)
-            sample = db.get_parallel_concordance(eid, run_id, status_filter=status_filter)
+            sample, _has_more = db.get_parallel_concordance(eid, run_id, status_filter=status_filter)
             export_align_report_html(stats, sample, eid, run_id, output_path)
             message_box.information(tab, "Rapport", f"Rapport enregistré : {output_path.name}")
         except Exception as exc:

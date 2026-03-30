@@ -190,7 +190,8 @@ def test_align_stats_and_parallel_concordance(db):
     assert stats["nb_target"] == 1
     assert stats["avg_confidence"] is not None
 
-    rows = db.get_parallel_concordance("S01E07", run_id)
+    rows, has_more = db.get_parallel_concordance("S01E07", run_id)
+    assert has_more is False
     assert len(rows) == 1
     assert rows[0]["segment_id"] == "S01E07:sentence:0"
     assert rows[0]["text_segment"] == "Hello world"

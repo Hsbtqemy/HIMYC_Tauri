@@ -523,6 +523,8 @@ export interface AlignRunStats {
   nb_pivot: number;
   nb_target: number;
   by_status: { auto?: number; accepted?: number; rejected?: number; ignored?: number };
+  /** Statuts filtrés sur les liens pivot uniquement — source correcte pour coverage_pct. */
+  by_status_pivot?: { auto?: number; accepted?: number; rejected?: number; ignored?: number };
   avg_confidence: number | null;
   n_collisions: number;
   coverage_pct: number | null;
@@ -736,6 +738,8 @@ export interface ConcordanceResponse {
   run_id: string;
   pivot_lang: string;
   total: number;
+  /** true si des lignes supplémentaires ont été tronquées (limite MAX_KWIC_HITS atteinte). */
+  has_more?: boolean;
   rows: ConcordanceRow[];
 }
 
