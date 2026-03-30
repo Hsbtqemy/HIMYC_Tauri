@@ -96,13 +96,18 @@ async function _loopbackFetch(
   });
 }
 
+function _parseBody<T>(body: string): T {
+  if (!body || !body.trim()) return undefined as unknown as T;
+  return JSON.parse(body) as T;
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await _loopbackFetch(path);
   if (!res.ok) {
     const { errorCode, message } = parseApiErrorBody(res.body);
     throw new ApiError(res.status, errorCode, message);
   }
-  return JSON.parse(res.body) as T;
+  return _parseBody<T>(res.body);
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
@@ -115,7 +120,7 @@ export async function apiPost<T>(path: string, body: unknown, method = "POST"): 
     const { errorCode, message } = parseApiErrorBody(res.body);
     throw new ApiError(res.status, errorCode, message);
   }
-  return JSON.parse(res.body) as T;
+  return _parseBody<T>(res.body);
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
@@ -124,7 +129,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
     const { errorCode, message } = parseApiErrorBody(res.body);
     throw new ApiError(res.status, errorCode, message);
   }
-  return JSON.parse(res.body) as T;
+  return _parseBody<T>(res.body);
 }
 
 export async function apiDelete<T>(path: string): Promise<T> {
@@ -133,7 +138,7 @@ export async function apiDelete<T>(path: string): Promise<T> {
     const { errorCode, message } = parseApiErrorBody(res.body);
     throw new ApiError(res.status, errorCode, message);
   }
-  return JSON.parse(res.body) as T;
+  return _parseBody<T>(res.body);
 }
 
 // ── Endpoints typés (MX-003) ──────────────────────────────────────────────────
@@ -320,6 +325,21 @@ export async function importTranscript(
   });
 }
 
+/**
+ * Import d'un transcript depuis des octets bruts (fichier .txt, .docx, .odt).
+ * Le backend détecte l'encodage (.txt) ou extrait le texte (.docx / .odt).
+ */
+export async function importTranscriptFile(
+  episodeId: string,
+  rawB64: string,
+  filename: string,
+): Promise<ImportResult> {
+  return apiPost<ImportResult>(`/episodes/${epSeg(episodeId)}/sources/transcript`, {
+    raw_b64: rawB64,
+    filename,
+  });
+}
+
 export async function deleteTranscript(
   episodeId: string,
 ): Promise<{ episode_id: string; source_key: string; removed: string[] }> {
@@ -425,7 +445,8 @@ export type JobType =
   | "normalize_transcript"
   | "normalize_srt"
   | "segment_transcript"
-  | "align";
+  | "align"
+  | "derive_utterances";
 
 export interface JobRecord {
   job_id: string;

@@ -1128,9 +1128,15 @@ const CSS = `
 
 // ── Constants & State ────────────────────────────────────────────────────────
 
-const HIST_KEY  = "himyc_kwic_history";
-const SORT_LS_KEY = "himyc_kwic_sort";
+const HIST_KEY       = "himyc_kwic_history";
+const SORT_LS_KEY    = "himyc_kwic_sort";
 const COMPACT_LS_KEY = "himyc_kwic_compact";
+
+let _projectPrefix = "";
+/** Préfixe toutes les clés localStorage avec l'identifiant du projet courant. */
+function lsKey(k: string): string {
+  return _projectPrefix ? `${_projectPrefix}:${k}` : k;
+}
 const PAGE_SIZE = 50;
 const QUERY_LIMIT_INITIAL = 500;
 const QUERY_LIMIT_MAX = 2000;
@@ -1140,7 +1146,7 @@ const QUERY_CHUNK = 500;
 type SortMode = "relevance" | "ep_asc" | "ep_desc" | "position";
 
 function readSortMode(): SortMode {
-  const v = localStorage.getItem(SORT_LS_KEY);
+  const v = localStorage.getItem(lsKey(SORT_LS_KEY));
   if (v === "ep_asc" || v === "ep_desc" || v === "position" || v === "relevance") return v;
   return "relevance";
 }
@@ -1197,14 +1203,14 @@ let _statsCompareResults: StatsCompareResult | null = null;
 // ── History ──────────────────────────────────────────────────────────────────
 
 function loadHistory(): HistoryEntry[] {
-  try { return JSON.parse(localStorage.getItem(HIST_KEY) ?? "[]") as HistoryEntry[]; }
+  try { return JSON.parse(localStorage.getItem(lsKey(HIST_KEY)) ?? "[]") as HistoryEntry[]; }
   catch { return []; }
 }
 
 function saveHistory(entry: HistoryEntry) {
   const hist = loadHistory().filter((h) => h.term !== entry.term);
   hist.unshift(entry);
-  localStorage.setItem(HIST_KEY, JSON.stringify(hist.slice(0, 10)));
+  localStorage.setItem(lsKey(HIST_KEY), JSON.stringify(hist.slice(0, 10)));
 }
 
 // ── FTS query builder ─────────────────────────────────────────────────────────
@@ -1841,6 +1847,7 @@ function wireKwicMetaButtons(container: HTMLElement) {
 
 export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   _shellCtx = ctx;
+  _projectPrefix = ctx.getProjectId();
   injectGlobalCss();
 
   if (!_styleInjected) {
@@ -2165,7 +2172,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   }
 
   _sortMode = readSortMode();
-  _compactView = localStorage.getItem(COMPACT_LS_KEY) === "1";
+  _compactView = localStorage.getItem(lsKey(COMPACT_LS_KEY)) === "1";
   sortSel.value = _sortMode;
   compactBtn.classList.toggle("active", _compactView);
   rootKwic.classList.toggle("kwic-compact", _compactView);
@@ -2368,7 +2375,7 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       });
     });
     histMenu.querySelector<HTMLButtonElement>("#kwic-hist-clear")?.addEventListener("click", () => {
-      localStorage.removeItem(HIST_KEY);
+      localStorage.removeItem(lsKey(HIST_KEY));
       closeAllPanels();
     });
   }
@@ -2405,14 +2412,14 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
 
   sortSel.addEventListener("change", () => {
     _sortMode = sortSel.value as SortMode;
-    localStorage.setItem(SORT_LS_KEY, _sortMode);
+    localStorage.setItem(lsKey(SORT_LS_KEY), _sortMode);
     _page = 0;
     if (_hits.length) renderResults(container);
   });
 
   compactBtn.addEventListener("click", () => {
     _compactView = !_compactView;
-    localStorage.setItem(COMPACT_LS_KEY, _compactView ? "1" : "0");
+    localStorage.setItem(lsKey(COMPACT_LS_KEY), _compactView ? "1" : "0");
     compactBtn.classList.toggle("active", _compactView);
     rootKwic.classList.toggle("kwic-compact", _compactView);
   });
@@ -2437,10 +2444,10 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     _page        = 0;
     _hasMore     = false;
     _sortMode = "relevance";
-    localStorage.removeItem(SORT_LS_KEY);
+    localStorage.removeItem(lsKey(SORT_LS_KEY));
     sortSel.value = "relevance";
     _compactView = false;
-    localStorage.removeItem(COMPACT_LS_KEY);
+    localStorage.removeItem(lsKey(COMPACT_LS_KEY));
     compactBtn.classList.remove("active");
     rootKwic.classList.remove("kwic-compact");
     _facets      = null;
@@ -2596,7 +2603,9 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       errEl.textContent = msg;
       errEl.style.display = "block";
     } finally {
-      searchBtn.disabled = false;
+      // Ne pas réactiver le bouton si le backend est hors ligne
+      // (evite la race avec le handler onStatusChange qui vient de le désactiver)
+      if (!_offlineErrShown) searchBtn.disabled = false;
       searchBtn.textContent = "Rechercher";
     }
   }
@@ -2682,24 +2691,56 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
   };
   document.addEventListener("keydown", _kbdHandler);
 
-  _unsubscribe = ctx.onStatusChange(() => {});
+  // État initial : désactiver la recherche si le backend est déjà hors ligne au montage
+  let _offlineErrShown = false;
+  if (!ctx.getBackendStatus().online) {
+    searchBtn.disabled = true;
+    errEl.textContent = "Backend HIMYC hors ligne — les recherches sont indisponibles.";
+    errEl.style.display = "block";
+    _offlineErrShown = true;
+  }
+
+  _unsubscribe = ctx.onStatusChange((s) => {
+    if (!s.online) {
+      searchBtn.disabled = true;
+      errEl.textContent = "Backend HIMYC hors ligne — les recherches sont indisponibles.";
+      errEl.style.display = "block";
+      _offlineErrShown = true;
+    } else if (_offlineErrShown) {
+      searchBtn.disabled = false;
+      errEl.style.display = "none";
+      _offlineErrShown = false;
+    }
+    // Si online et pas de bannière offline : ne pas toucher searchBtn
+    // (il peut être désactivé le temps d'une recherche en cours)
+  });
 }
 
 // ── Dispose ───────────────────────────────────────────────────────────────────
 
 export function disposeConcordancier() {
   _shellCtx = null;
+  _projectPrefix       = "";
   if (_unsubscribe)       { _unsubscribe(); _unsubscribe = null; }
   if (_closeDropdownsRef) { document.removeEventListener("click", _closeDropdownsRef); _closeDropdownsRef = null; }
   if (_kbdHandler)       { document.removeEventListener("keydown", _kbdHandler); _kbdHandler = null; }
   _searchToken++;
   _hits                = [];
+  _page                = 0;
+  _hasMore             = false;
   _facets              = null;
+  _filterOpen          = false;
+  _histOpen            = false;
+  _expOpen             = false;
+  _builderOpen         = false;
+  _helpOpen            = false;
   _showAligned         = false;
   _showParallel        = false;
   _builderMode         = "simple";
   _nearN               = 5;
   _caseSensitive       = false;
+  _sortMode            = "relevance";
+  _compactView         = false;
   _statsMode           = false;
   _statsResults        = null;
   _statsCompareMode    = false;

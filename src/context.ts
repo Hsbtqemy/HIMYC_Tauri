@@ -72,4 +72,11 @@ export interface ShellContext {
    * No-op en mode non-Tauri (dev Vite / E2E).
    */
   changeProject(): void;
+
+  /**
+   * Identifiant stable du projet courant (chemin absolu sur disque).
+   * Utilisé comme préfixe pour les clés localStorage afin d'isoler
+   * les préférences par projet. Retourne "" si aucun projet n'est ouvert.
+   */
+  getProjectId(): string;
 }

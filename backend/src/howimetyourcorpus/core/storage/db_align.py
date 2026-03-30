@@ -15,6 +15,11 @@ from howimetyourcorpus.core.storage import db_subtitles
 logger = logging.getLogger(__name__)
 
 
+def _escape_like(s: str) -> str:
+    """Échappe les métacaractères SQLite LIKE (%, _, \\) pour une recherche littérale."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def create_align_run(
     conn: sqlite3.Connection,
     align_run_id: str,
@@ -428,8 +433,8 @@ def get_audit_links(
         where += " AND al.status = ?"
         params.append(status_filter)
     if q:
-        like = f"%{q}%"
-        where += " AND (s.text LIKE ? OR pc.text_clean LIKE ? OR tc.text_clean LIKE ?)"
+        like = f"%{_escape_like(q)}%"
+        where += " AND (s.text LIKE ? ESCAPE '\\' OR pc.text_clean LIKE ? ESCAPE '\\' OR tc.text_clean LIKE ? ESCAPE '\\')"
         params.extend([like, like, like])
 
     base_sql = f"""

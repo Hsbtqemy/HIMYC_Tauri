@@ -14,7 +14,7 @@ import {
   fetchEpisodes,
   fetchConfig,
   fetchEpisodeSource,
-  importTranscript,
+  importTranscriptFile,
   importSrt,
   deleteTranscript,
   deleteSrt,
@@ -23,6 +23,7 @@ import {
   setAlignLinkNote,
   fetchJobs,
   createJob,
+  fetchJob,
   cancelJob,
   fetchCharacters,
   saveCharacters,
@@ -97,7 +98,7 @@ import {
 } from "../guards";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readFile, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { measureAsync } from "../perf";
 
 // ── CSS module ─────────────────────────────────────────────────────────────
@@ -2519,21 +2520,31 @@ let _segSegPreviewTimer: ReturnType<typeof setTimeout> | null = null;
 let _alignEpisodesAll: Episode[] = [];
 let _alignRunsLangMap: Map<string, Set<string>> = new Map();
 
-const DIST_EP_LS_KEY = "himyc_dist_ep";
-const DIST_SOURCE_LS_KEY = "himyc_dist_source";
-const DIST_CUE_LANG_LS_KEY = "himyc_dist_cue_lang";
+const DIST_EP_LS_KEY        = "himyc_dist_ep";
+const DIST_SOURCE_LS_KEY    = "himyc_dist_source";
+const DIST_CUE_LANG_LS_KEY  = "himyc_dist_cue_lang";
+const ACTIVE_SECTION_LS_KEY = "cons-active-section";
+const ACTIVE_SUBVIEW_LS_KEY = "cons-active-subview";
+const NAV_COLLAPSED_LS_KEY  = "cons-nav-collapsed";
+const ACTIVE_PRESET_LS_KEY  = "himyc.active-preset";
+
+let _projectPrefix = "";
+/** Préfixe toutes les clés localStorage avec l'identifiant du projet courant. */
+function lsKey(k: string): string {
+  return _projectPrefix ? `${_projectPrefix}:${k}` : k;
+}
 
 type DistSourceKind = "utterance" | "sentence" | "cue";
 
 function readDistSourceKind(): DistSourceKind {
-  const v = localStorage.getItem(DIST_SOURCE_LS_KEY);
+  const v = localStorage.getItem(lsKey(DIST_SOURCE_LS_KEY));
   if (v === "sentence" || v === "cue" || v === "utterance") return v;
   return "utterance";
 }
 
 /** Source affichée (segments tours / phrases / cues SRT) — aligné PyQt */
-let _distSourceKind: DistSourceKind = readDistSourceKind();
-let _distCueLang = localStorage.getItem(DIST_CUE_LANG_LS_KEY) ?? "en";
+let _distSourceKind: DistSourceKind = "utterance";
+let _distCueLang = "en";
 
 /** Segments chargés pour l’épisode courant (Distribution) — utterance ou sentence */
 let _distLoadedSegments: SegmentRow[] = [];
@@ -2548,6 +2559,7 @@ let _distCharPick = new Map<string, string>();
 let _distFilterTimer: ReturnType<typeof setTimeout> | null = null;
 /** Listener `himyc:open-distribution` — retiré au dispose */
 let _openDistributionNavListener: (() => void) | null = null;
+let _unsub2: (() => void) | null = null;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -2783,7 +2795,7 @@ function syncDistributionSourceControls(cnt: HTMLElement): void {
   else if (langs.length) {
     _distCueLang = langs[0];
     langSel.value = _distCueLang;
-    localStorage.setItem(DIST_CUE_LANG_LS_KEY, _distCueLang);
+    localStorage.setItem(lsKey(DIST_CUE_LANG_LS_KEY), _distCueLang);
   }
 }
 
@@ -2877,7 +2889,7 @@ function wireDistributionPanel(cnt: HTMLElement): void {
   root.dataset.wired = "1";
   cnt.querySelector<HTMLSelectElement>("#dist-ep-select")?.addEventListener("change", () => {
     const v = cnt.querySelector<HTMLSelectElement>("#dist-ep-select")?.value ?? "";
-    if (v) localStorage.setItem(DIST_EP_LS_KEY, v);
+    if (v) localStorage.setItem(lsKey(DIST_EP_LS_KEY), v);
     _distLoadedEpId = null;
     _distLoadedSegments = [];
     _distLoadedCues = [];
@@ -2888,7 +2900,7 @@ function wireDistributionPanel(cnt: HTMLElement): void {
   cnt.querySelector<HTMLSelectElement>("#dist-source-kind")?.addEventListener("change", () => {
     const v = cnt.querySelector<HTMLSelectElement>("#dist-source-kind")?.value ?? "utterance";
     _distSourceKind = v === "sentence" || v === "cue" || v === "utterance" ? v : "utterance";
-    localStorage.setItem(DIST_SOURCE_LS_KEY, _distSourceKind);
+    localStorage.setItem(lsKey(DIST_SOURCE_LS_KEY), _distSourceKind);
     _distLoadedEpId = null;
     _distLoadedSegments = [];
     _distLoadedCues = [];
@@ -2900,7 +2912,7 @@ function wireDistributionPanel(cnt: HTMLElement): void {
     const v = cnt.querySelector<HTMLSelectElement>("#dist-cue-lang")?.value?.trim() ?? "";
     if (v) {
       _distCueLang = v;
-      localStorage.setItem(DIST_CUE_LANG_LS_KEY, v);
+      localStorage.setItem(lsKey(DIST_CUE_LANG_LS_KEY), v);
     }
     _distLoadedEpId = null;
     _distLoadedCues = [];
@@ -3362,7 +3374,7 @@ async function loadDistributionPanel(cnt: HTMLElement, opts?: { force?: boolean 
     }
 
     const sorted = [...eps].sort((a, b) => (a.season !== b.season ? a.season - b.season : a.episode - b.episode));
-    const stored = localStorage.getItem(DIST_EP_LS_KEY) ?? "";
+    const stored = localStorage.getItem(lsKey(DIST_EP_LS_KEY)) ?? "";
     let htmlOpts = "";
     for (const e of sorted) {
       if (!episodeHasTranscript(e)) continue;
@@ -3387,7 +3399,7 @@ async function loadDistributionPanel(cnt: HTMLElement, opts?: { force?: boolean 
       const pick = firstSeg ?? firstTr;
       if (pick) {
         epSel.value = pick.episode_id;
-        localStorage.setItem(DIST_EP_LS_KEY, pick.episode_id);
+        localStorage.setItem(lsKey(DIST_EP_LS_KEY), pick.episode_id);
       } else {
         epSel.value = "";
       }
@@ -3418,6 +3430,7 @@ async function refreshJobs(container: HTMLElement) {
     const hasActive = jobs.some((j) => j.status === "pending" || j.status === "running");
     if (!hasActive) {
       stopJobPoll();
+      document.dispatchEvent(new CustomEvent("himyc:corpus-changed"));
       // Refresh the active sub-view episode list so badges reflect actual job results
       if (_activeSection === "actions") {
         if (_activeActionsSubView === "curation") {
@@ -3533,6 +3546,24 @@ async function queueBatchNormalize(
 
 // ── Import handlers ─────────────────────────────────────────────────────────
 
+/**
+ * Convertit un Uint8Array en chaîne base64.
+ *
+ * Encode par blocs de 6144 octets (multiple de 3) afin que chaque appel
+ * à btoa produise un fragment base64 sans padding intermédiaire.
+ * Les fragments sont concaténés : le résultat est un base64 valide et
+ * complet. Évite de construire une unique grande chaîne binaire en mémoire.
+ */
+function uint8ToBase64(bytes: Uint8Array): string {
+  const chunkSize = 3 * 2048; // 6144 — multiple de 3 : pas de padding intermédiaire
+  const parts: string[] = [];
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    parts.push(btoa(String.fromCharCode(...chunk)));
+  }
+  return parts.join("");
+}
+
 async function handleImportTranscript(
   episodeId: string,
   onDone: () => void,
@@ -3543,14 +3574,20 @@ async function handleImportTranscript(
       title: `Import transcript — ${episodeId}`,
       multiple: false,
       filters: [
-        { name: "Texte", extensions: ["txt"] },
+        { name: "Texte brut",   extensions: ["txt"] },
+        { name: "Word",         extensions: ["docx", "docm"] },
+        { name: "OpenDocument", extensions: ["odt"] },
         { name: "Tous fichiers", extensions: ["*"] },
       ],
     });
-    if (!selected) return; // annulé
-    const path = typeof selected === "string" ? selected : selected;
-    const content = await readTextFile(path as string);
-    await importTranscript(episodeId, content);
+    if (!selected) return;
+    const filePath = selected as string;
+    const filename = filePath.replace(/\\/g, "/").split("/").pop() ?? "";
+
+    // Lecture binaire → base64 pour que le backend gère l'encodage / l'extraction
+    const bytes  = await readFile(filePath as string);
+    const rawB64 = uint8ToBase64(bytes);
+    await importTranscriptFile(episodeId, rawB64, filename);
     onDone();
   } catch (e) {
     const msg =
@@ -5832,8 +5869,8 @@ function wireEpListCollapse(container: HTMLElement, listId: string) {
   const btn = list.querySelector<HTMLButtonElement>(".acts-ep-collapse-btn");
   if (!btn) return;
 
-  const lsKey = `acts-ep-collapse-${listId}`;
-  let collapsed = localStorage.getItem(lsKey) === "1";
+  const collapseKey = lsKey(`acts-ep-collapse-${listId}`);
+  let collapsed = localStorage.getItem(collapseKey) === "1";
 
   const apply = () => {
     list.classList.toggle("acts-ep-list--collapsed", collapsed);
@@ -5845,7 +5882,7 @@ function wireEpListCollapse(container: HTMLElement, listId: string) {
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     collapsed = !collapsed;
-    localStorage.setItem(lsKey, collapsed ? "1" : "0");
+    localStorage.setItem(collapseKey, collapsed ? "1" : "0");
     apply();
   });
 
@@ -6954,9 +6991,11 @@ async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle
           <div style="display:flex;gap:6px;align-items:center;margin-top:4px">
             <span class="align-run-kind">${escapeHtml(r.segment_kind ?? "utterance")}</span>
             <button class="btn btn-ghost btn-sm align-propagate-btn" data-run-id="${escapeHtml(r.run_id)}" style="font-size:0.68rem;margin-left:2px" title="Propager les noms de personnages dans les segments et les SRTs">🔁 Propager</button>
+            <button class="btn btn-ghost btn-sm align-derive-btn" data-ep-id="${escapeHtml(epId)}" style="font-size:0.68rem;margin-left:2px" title="Dériver les tours de parole depuis les phrases groupées par locuteur (après propagation)">↻ Dériver tours</button>
             <span style="margin-left:auto;font-size:0.68rem;color:var(--accent)">Auditer →</span>
           </div>
           <div class="align-propagate-status" data-prop-run="${escapeHtml(r.run_id)}" style="display:none;font-size:0.72rem;margin-top:3px"></div>
+          <div class="align-derive-status" data-derive-ep="${escapeHtml(epId)}" style="display:none;font-size:0.72rem;margin-top:3px"></div>
         </div>`;
     }).join("");
     panel.innerHTML = `
@@ -6997,6 +7036,49 @@ async function loadAlignmentRunHistory(panel: HTMLElement, epId: string, epTitle
           if (statusEl) { statusEl.style.color = "var(--danger, #dc2626)"; statusEl.textContent = msg; }
           btn.disabled = false;
           btn.textContent = "🔁 Propager";
+        }
+      });
+    });
+
+    // A-5 : Wire boutons "Dériver tours de parole"
+    panel.querySelectorAll<HTMLButtonElement>(".align-derive-btn").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const targetEpId = btn.dataset.epId!;
+        const statusEl = panel.querySelector<HTMLElement>(`.align-derive-status[data-derive-ep="${targetEpId}"]`);
+        btn.disabled = true;
+        btn.textContent = "…";
+        if (statusEl) { statusEl.style.display = ""; statusEl.style.color = "var(--text-muted)"; statusEl.textContent = "Dérivation en cours…"; }
+        try {
+          const job = await createJob("derive_utterances", targetEpId);
+          // Attendre la fin du job (polling léger)
+          let jobResult = job;
+          const POLL_MS = 1200;
+          const MAX_POLLS = 120;
+          for (let i = 0; i < MAX_POLLS; i++) {
+            await new Promise((r) => setTimeout(r, POLL_MS));
+            jobResult = await fetchJob(jobResult.job_id);
+            if (jobResult.status === "done" || jobResult.status === "error") break;
+          }
+          if (jobResult.status === "done") {
+            const { utterances = "?", sentences = "?" } = jobResult.result as Record<string, unknown>;
+            if (statusEl) {
+              statusEl.style.color = "var(--success, #16a34a)";
+              statusEl.textContent = `✓ ${utterances} tours dérivés depuis ${sentences} phrases`;
+            }
+            btn.textContent = "✓";
+            setTimeout(() => { btn.disabled = false; btn.textContent = "↻ Dériver tours"; }, 3000);
+          } else {
+            const msg = (jobResult.error_msg) || "Erreur inconnue";
+            if (statusEl) { statusEl.style.color = "var(--danger, #dc2626)"; statusEl.textContent = msg; }
+            btn.disabled = false;
+            btn.textContent = "↻ Dériver tours";
+          }
+        } catch (err) {
+          const msg = err instanceof ApiError ? `${err.errorCode} — ${err.message}` : String(err);
+          if (statusEl) { statusEl.style.color = "var(--danger, #dc2626)"; statusEl.textContent = msg; }
+          btn.disabled = false;
+          btn.textContent = "↻ Dériver tours";
         }
       });
     });
@@ -8569,8 +8651,8 @@ function renderPersonnagesSection(pane: HTMLElement) {
   });
 
   pane.querySelector<HTMLButtonElement>("#pers-goto-dist")?.addEventListener("click", () => {
-    localStorage.setItem("cons-active-section", "actions");
-    localStorage.setItem("cons-active-subview", "distribution");
+    localStorage.setItem(lsKey(ACTIVE_SECTION_LS_KEY), "actions");
+    localStorage.setItem(lsKey(ACTIVE_SUBVIEW_LS_KEY), "distribution");
     _ctx?.navigateTo("constituer");
     document.dispatchEvent(new CustomEvent("himyc:open-distribution"));
   });
@@ -8873,14 +8955,14 @@ const SEED_PRESETS: ProjectPreset[] = [
 
 function loadPresets(): ProjectPreset[] {
   try {
-    const raw = localStorage.getItem(PRESETS_KEY);
+    const raw = localStorage.getItem(lsKey(PRESETS_KEY));
     if (raw) return JSON.parse(raw) as ProjectPreset[];
   } catch { /* */ }
   return [...SEED_PRESETS];
 }
 
 function savePresets(list: ProjectPreset[]) {
-  localStorage.setItem(PRESETS_KEY, JSON.stringify(list));
+  localStorage.setItem(lsKey(PRESETS_KEY), JSON.stringify(list));
 }
 
 function renderPresets(body: HTMLElement) {
@@ -8915,7 +8997,7 @@ function renderPresets(body: HTMLElement) {
       const id = btn.dataset.id!;
       const p = loadPresets().find((x) => x.id === id);
       if (!p) return;
-      localStorage.setItem("himyc.active-preset", JSON.stringify(p));
+      localStorage.setItem(lsKey(ACTIVE_PRESET_LS_KEY), JSON.stringify(p));
       btn.textContent = "✅";
       setTimeout(() => { btn.textContent = "✓"; }, 1500);
     });
@@ -8993,8 +9075,11 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   _ctx = ctx;
 
   // Restore persisted nav state
-  _navCollapsed = localStorage.getItem("cons-nav-collapsed") === "1";
-  const _savedSubView = localStorage.getItem("cons-active-subview");
+  _projectPrefix = ctx.getProjectId();
+  _distSourceKind = readDistSourceKind();
+  _distCueLang = localStorage.getItem(lsKey(DIST_CUE_LANG_LS_KEY)) ?? "en";
+  _navCollapsed = localStorage.getItem(lsKey(NAV_COLLAPSED_LS_KEY)) === "1";
+  const _savedSubView = localStorage.getItem(lsKey(ACTIVE_SUBVIEW_LS_KEY));
   if (
     _savedSubView === "hub"
     || _savedSubView === "curation"
@@ -9004,7 +9089,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   ) {
     _activeActionsSubView = _savedSubView;
   }
-  const _savedSection = localStorage.getItem("cons-active-section");
+  const _savedSection = localStorage.getItem(lsKey(ACTIVE_SECTION_LS_KEY));
   if (_savedSection) _activeSection = _savedSection;
 
   container.innerHTML = `
@@ -9185,6 +9270,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                     <div class="acts-params-sep"></div>
                     <button class="btn btn-secondary btn-sm" id="cons-batch-align">⚡ Aligner tout</button>
                   </div>
+                  <div id="cons-batch-align-fb" style="font-size:0.75rem;margin-top:3px"></div>
                   <div class="acts-hub-status" id="hub-align-status"></div>
                 </div>
               </div>
@@ -9524,7 +9610,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   // ── Helper: switch section ────────────────────────────────────────────────
   function activateSection(sec: string) {
     _activeSection = sec;
-    localStorage.setItem("cons-active-section", sec);
+    localStorage.setItem(lsKey(ACTIVE_SECTION_LS_KEY), sec);
     container.querySelectorAll<HTMLButtonElement>(".cons-nav-tab")
       .forEach((b) => b.classList.toggle("active", b.dataset.section === sec));
     container.querySelectorAll<HTMLElement>(".cons-section-pane")
@@ -9542,7 +9628,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   // ── Helper: switch Actions sub-view ──────────────────────────────────────
   function activateSubView(subview: "hub" | "curation" | "distribution" | "segmentation" | "alignement") {
     _activeActionsSubView = subview;
-    localStorage.setItem("cons-active-subview", subview);
+    localStorage.setItem(lsKey(ACTIVE_SUBVIEW_LS_KEY), subview);
     container.querySelectorAll<HTMLElement>(".cons-actions-pane")
       .forEach((p) => p.classList.toggle("active", p.dataset.subview === subview));
     container.querySelectorAll<HTMLButtonElement>(".cons-nav-tree-link")
@@ -9932,7 +10018,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       // quand l'utilisateur clique l'onglet "Actions", mais pas depuis un lien d'arborescence)
       if (_activeSection !== "actions") {
         _activeSection = "actions";
-        localStorage.setItem("cons-active-section", "actions");
+        localStorage.setItem(lsKey(ACTIVE_SECTION_LS_KEY), "actions");
         container.querySelectorAll<HTMLButtonElement>(".cons-nav-tab")
           .forEach((b) => b.classList.toggle("active", b.dataset.section === "actions"));
         container.querySelectorAll<HTMLElement>(".cons-section-pane")
@@ -10055,6 +10141,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       if (toAlign.length === 0) return;
       const btn = container.querySelector<HTMLButtonElement>("#cons-batch-align")!;
       btn.disabled = true; btn.textContent = "…";
+      const batchErrors: string[] = [];
       for (const ep of toAlign) {
         const targetLangs = ep.sources
           .filter((s) => s.source_key.startsWith("srt_") && s.available)
@@ -10067,9 +10154,19 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             min_confidence:          isNaN(minConf) ? 0.3 : minConf,
             use_similarity_for_cues: useSim,
           });
-        } catch { /* skip */ }
+        } catch (err) {
+          const msg = err instanceof ApiError ? `${ep.episode_id}: ${err.errorCode}` : `${ep.episode_id}: ${String(err)}`;
+          batchErrors.push(msg);
+        }
       }
       btn.disabled = false; btn.textContent = "⚡ Aligner tout";
+      if (batchErrors.length > 0) {
+        const fbEl = container.querySelector<HTMLElement>("#cons-batch-align-fb");
+        if (fbEl) {
+          fbEl.style.color = "var(--danger, #dc2626)";
+          fbEl.textContent = `${batchErrors.length} job(s) en erreur : ${batchErrors.join(" · ")}`;
+        }
+      }
       startJobPoll(container);
       await loadAndRenderAlignement(container);
     });
@@ -10077,7 +10174,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   // ── Collapse / expand ─────────────────────────────────────────────────────
   function setNavCollapsed(collapsed: boolean) {
     _navCollapsed = collapsed;
-    localStorage.setItem("cons-nav-collapsed", collapsed ? "1" : "0");
+    localStorage.setItem(lsKey(NAV_COLLAPSED_LS_KEY), collapsed ? "1" : "0");
     const shell = container.querySelector<HTMLElement>("#cons-shell")!;
     shell.classList.toggle("nav-hidden", collapsed);
   }
@@ -10146,27 +10243,88 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
   } else {
     const epListEl = container.querySelector<HTMLElement>("#cur-ep-list");
     if (epListEl) epListEl.innerHTML = `<div style="color:var(--danger);font-size:0.78rem">Backend HIMYC hors ligne.<br>Lancez : <code>uvicorn howimetyourcorpus.api.server:app --port 8765</code></div>`;
-    const unsub2 = ctx.onStatusChange((s) => {
+    _unsub2 = ctx.onStatusChange((s) => {
       if (s.online) {
+        const u = _unsub2;
+        _unsub2 = null;
+        if (u) u();
         loadAndRender(container);
         refreshJobs(container).then(() => startJobPoll(container));
-        unsub2();
       }
     });
   }
 }
 
 export function disposeConstituer() {
-  stopJobPoll();
+  // Désabonner d'abord pour éviter qu'un callback de statut ne redémarre le poll
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+  if (_unsub2)      { _unsub2();      _unsub2      = null; }
+  stopJobPoll();
   if (_openDistributionNavListener) {
     document.removeEventListener("himyc:open-distribution", _openDistributionNavListener);
     _openDistributionNavListener = null;
   }
-  _container           = null;
-  _ctx                 = null;
-  _cachedEpisodes      = null;
-  _cachedConfig        = null;
-  _tradViewMounted     = false;
-  _constituerSharedEpId = null;
+  if (_auditKeydownHandler) {
+    document.removeEventListener("keydown", _auditKeydownHandler);
+    _auditKeydownHandler = null;
+  }
+  if (_segSegPreviewTimer)  { clearTimeout(_segSegPreviewTimer);  _segSegPreviewTimer = null; }
+  if (_distFilterTimer)     { clearTimeout(_distFilterTimer);     _distFilterTimer    = null; }
+  if (_clientPreviewTimer)  { clearTimeout(_clientPreviewTimer);  _clientPreviewTimer = null; }
+
+  _container              = null;
+  _ctx                    = null;
+  _projectPrefix          = "";
+  _cachedEpisodes         = null;
+  _cachedConfig           = null;
+  _tradViewMounted        = false;
+  _constituerSharedEpId   = null;
+
+  // Navigation / sections
+  _jobsExpanded           = true;
+  _activeSection          = "actions";
+  _activeActionsSubView   = "hub";
+  _navCollapsed           = false;
+  _page                   = 0;
+
+  // Docs / curation
+  _docsPanelEpId          = null;
+  _docsSeasonFilter       = null;
+  _pendingCurationEpisodeId = null;
+  _curPreviewEpId         = null;
+  _curPreviewData         = null;
+  _curPreviewSourceKey    = "transcript";
+  _curPreviewEpSources    = [];
+  _curEditMode            = false;
+  _curSearchRegex         = null;
+  _clientPreviewClean     = null;
+  _curSrtCuesOffset       = 0;
+
+  // Segmentation / alignement
+  _segEpisodesAll         = [];
+  _alignEpisodesAll       = [];
+  _alignRunsLangMap       = new Map();
+
+  // Distribution
+  _distSourceKind         = "utterance";
+  _distCueLang            = "en";
+  _distLoadedSegments     = [];
+  _distLoadedCues         = [];
+  _distLoadedEpId         = null;
+  _distLoadedSourceKind   = null;
+  _distLoadedCueLangSnap  = null;
+  _distCharPick           = new Map();
+
+  // Audit / concordance
+  _concordanceLoaded      = false;
+  _auditLoadToken++;
+  _minimapPositions       = [];
+  _minimapMaxN            = 1;
+  _vsLinks                = [];
+  _vsFocusIdx             = -1;
+
+  // Personnages
+  _characters             = [];
+  _assignments            = [];
+  _selectedCharIdx        = null;
 }

@@ -8,7 +8,7 @@
 
 import type { ShellContext } from "../context";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
-import { fetchConfig, fetchQaReport, fetchCharacters } from "../api";
+import { fetchConfig, fetchQaReport, fetchCharacters, ApiError } from "../api";
 
 const CSS = `
 /* ── Racine : image plein cadre + contenu au-dessus ───────────────────── */
@@ -403,8 +403,11 @@ const CSS = `
 
 let _styleInjected = false;
 let _unsubscribe: (() => void) | null = null;
+let _corpusChangedListener: (() => void) | null = null;
+let _mounted = false;
 
 export function mountHub(container: HTMLElement, ctx: ShellContext) {
+  _mounted = true;
   injectGlobalCss();
 
   if (!_styleInjected) {
@@ -499,6 +502,7 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
   // ── Chargement des infos projet + KPIs ────────────────────────────────────
   function loadProjectInfo() {
     fetchConfig().then((cfg) => {
+      if (!_mounted) return;
       const nameEl = container.querySelector<HTMLElement>("#hub-project-name");
       if (nameEl) {
         nameEl.textContent = escapeHtml(cfg.project_name);
@@ -523,7 +527,14 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
       } else {
         onboardZone.innerHTML = "";
       }
-    }).catch(() => {});
+    }).catch((err) => {
+      if (!_mounted) return;
+      const nameEl = container.querySelector<HTMLElement>("#hub-project-name");
+      if (nameEl) {
+        nameEl.textContent = err instanceof ApiError ? err.errorCode : "Erreur chargement config";
+        nameEl.classList.add("none");
+      }
+    });
 
     loadKpis(container);
   }
@@ -537,6 +548,7 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
     };
     Promise.all([fetchQaReport("lenient"), fetchCharacters()])
       .then(([qa, chars]) => {
+        if (!_mounted) return;
         set("hkpi-ep",  qa.total_episodes);
         set("hkpi-seg", qa.n_segmented);
         set("hkpi-srt", qa.n_with_srts);
@@ -550,7 +562,11 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
         }
         strip.style.display = "flex";
       })
-      .catch(() => {});
+      .catch((err) => {
+        if (!_mounted) return;
+        const gateEl = root.querySelector<HTMLElement>("#hkpi-gate");
+        if (gateEl) gateEl.textContent = err instanceof ApiError ? err.errorCode : "Erreur KPIs";
+      });
   }
 
   if (status.online) loadProjectInfo();
@@ -560,8 +576,18 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
     label.textContent = s.online ? `Backend v${s.version ?? "?"}` : "Backend hors ligne";
     if (s.online) loadProjectInfo();
   });
+
+  _corpusChangedListener = () => {
+    if (ctx.getBackendStatus().online) loadProjectInfo();
+  };
+  document.addEventListener("himyc:corpus-changed", _corpusChangedListener);
 }
 
 export function disposeHub() {
+  _mounted = false;
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+  if (_corpusChangedListener) {
+    document.removeEventListener("himyc:corpus-changed", _corpusChangedListener);
+    _corpusChangedListener = null;
+  }
 }

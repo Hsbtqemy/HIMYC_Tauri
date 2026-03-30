@@ -38,6 +38,7 @@ JOB_TYPES = frozenset([
     "normalize_srt",
     "segment_transcript",
     "align",
+    "derive_utterances",
 ])
 
 
@@ -117,6 +118,8 @@ class JobStore:
         self._path = project_path / "jobs.json"
         self._lock = threading.Lock()
         self._jobs: dict[str, JobRecord] = {}
+        self._last_mtime: float = 0.0
+        self._last_progress_flush: float = 0.0
         self._load()
         self._recover_interrupted()
 
@@ -130,6 +133,7 @@ class JobStore:
             for d in data.get("jobs", []):
                 rec = JobRecord.from_dict(d)
                 self._jobs[rec.job_id] = rec
+            self._last_mtime = self._path.stat().st_mtime
         except Exception:
             logger.exception("JobStore : erreur lecture jobs.json — démarrage avec file vide")
 
@@ -138,6 +142,7 @@ class JobStore:
         try:
             payload = {"jobs": [j.to_dict() for j in self._jobs.values()]}
             self._path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._last_mtime = self._path.stat().st_mtime
         except Exception:
             logger.exception("JobStore : erreur écriture jobs.json")
 
@@ -220,16 +225,64 @@ class JobStore:
 
     def mark_progress(self, job_id: str, progress: dict[str, Any]) -> None:
         """Met à jour _progress dans result pendant l'exécution (G-007 / MX-048).
-        Mise à jour en mémoire uniquement — pas de flush disque pour éviter la contention."""
+        Flush disque throttlé toutes les 5 s pour limiter la contention tout en
+        survivant aux crashs avec une progression approximative."""
+        now = time.monotonic()
         with self._lock:
             job = self._jobs.get(job_id)
             if job and job.status == RUNNING:
                 job.result = {**job.result, "_progress": progress}
+                if now - self._last_progress_flush >= 5.0:
+                    self._last_progress_flush = now
+                    self._save()
 
     def has_active(self) -> bool:
         """True si au moins un job est pending ou running."""
         with self._lock:
             return any(j.status in (PENDING, RUNNING) for j in self._jobs.values())
+
+    def reload_if_stale(self) -> None:
+        """Recharge jobs.json si le fichier a été modifié hors du processus courant.
+
+        Sécurités :
+        - Si un job est en cours d'exécution (RUNNING en mémoire), on reporte le
+          rechargement pour éviter d'effacer l'état que le worker va encore écrire
+          via mark_done / mark_error.
+        - Les jobs RUNNING trouvés dans le fichier rechargé sont remis en PENDING
+          (même logique que _recover_interrupted au démarrage).
+        """
+        if not self._path.exists():
+            return
+        try:
+            current_mtime = self._path.stat().st_mtime
+            with self._lock:
+                if current_mtime <= self._last_mtime:
+                    return
+                # Reporter si un job tourne encore en mémoire
+                if any(j.status == RUNNING for j in self._jobs.values()):
+                    return
+                logger.info("JobStore : rechargement jobs.json (modification externe détectée)")
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                self._jobs.clear()
+                for d in data.get("jobs", []):
+                    rec = JobRecord.from_dict(d)
+                    self._jobs[rec.job_id] = rec
+                self._last_mtime = current_mtime
+                # Remettre en pending les jobs bloqués en running dans le fichier externe
+                recovered = 0
+                for job in self._jobs.values():
+                    if job.status == RUNNING:
+                        job.status     = PENDING
+                        job.updated_at = _now()
+                        recovered += 1
+                if recovered:
+                    self._save()
+                    logger.info(
+                        "JobStore : %d job(s) remis en pending après rechargement externe",
+                        recovered,
+                    )
+        except Exception:
+            logger.exception("JobStore : erreur lors du rechargement jobs.json")
 
 
 # ── Worker ─────────────────────────────────────────────────────────────────
@@ -405,14 +458,19 @@ def _execute_job(
         if results and not results[0].success:
             raise RuntimeError(results[0].message)
 
-        # Sauvegarder un rapport minimal pour GET /alignment_runs
+        # Le run_id réel est généré par AlignEpisodeStep (horodaté, utilisé dans SQLite).
+        # On l'utilise pour le rapport disque afin d'éviter la désynchronisation
+        # entre GET /alignment_runs (basé sur SQLite) et les répertoires disque.
+        actual_run_id = (results[0].data or {}).get("run_id") if results else None
+        report_run_id = actual_run_id or run_id  # fallback si step n'a pas renvoyé de data
+
         import json as _json
         from datetime import datetime, timezone
         align_dir = store.align_dir(job.episode_id)
-        run_dir = align_dir / run_id
+        run_dir = align_dir / report_run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         report = {
-            "run_id":                 run_id,
+            "run_id":                 report_run_id,
             "pivot_lang":             pivot_lang,
             "target_langs":           target_langs,
             "segment_kind":           segment_kind,
@@ -423,7 +481,21 @@ def _execute_job(
         (run_dir / "report.json").write_text(
             _json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        return {"run_id": run_id, "pivot_lang": pivot_lang, "target_langs": target_langs}
+        return {"run_id": report_run_id, "pivot_lang": pivot_lang, "target_langs": target_langs}
+
+    if job.job_type == "derive_utterances":
+        # Prérequis : segment_transcript déjà lancé + propagate_characters pour avoir
+        # des speaker_explicit sur les phrases (vérification interne au step).
+        db = _ensure_corpus_db(store)
+        from howimetyourcorpus.core.pipeline.tasks import DeriveUtterancesStep
+        runner = PipelineRunner()
+        step = DeriveUtterancesStep(job.episode_id)
+        ctx: dict[str, Any] = {"store": store, "db": db}
+        results = runner.run([step], ctx, force=True, on_progress=on_progress)
+        if results and not results[0].success:
+            raise RuntimeError(results[0].message)
+        result = results[0].data if results else {}
+        return result or {}
 
     raise ValueError(f"Type de job inconnu : {job.job_type!r}")
 
@@ -436,7 +508,8 @@ _stores_lock = threading.Lock()
 
 
 def get_job_store(project_path: Path) -> JobStore:
-    """Retourne (et initialise si besoin) le JobStore pour ce projet."""
+    """Retourne (et initialise si besoin) le JobStore pour ce projet.
+    Si jobs.json a été modifié hors processus, le store est rechargé."""
     key = str(project_path)
     with _stores_lock:
         if key not in _stores:
@@ -445,6 +518,8 @@ def get_job_store(project_path: Path) -> JobStore:
             worker.start()
             _stores[key]  = store
             _workers[key] = worker
+        else:
+            _stores[key].reload_if_stale()
         return _stores[key]
 
 

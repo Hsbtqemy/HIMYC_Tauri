@@ -363,6 +363,7 @@ const shellContext: ShellContext = {
   setHandoff(data)  { _handoff = data; },
   getHandoff()      { const h = _handoff; _handoff = null; return h; },
   changeProject()   { void _changeProject(); },
+  getProjectId()    { return _currentProjectPath ?? ""; },
 };
 
 function _setBackendStatus(status: BackendStatus) {
@@ -661,4 +662,12 @@ export async function initShell() {
 
   await _checkHealth();
   _pollInterval = setInterval(_checkHealth, 30_000);
+}
+
+/** Arrête le polling de santé backend. Utile en test ou avant un HMR complet. */
+export function disposeShell(): void {
+  if (_pollInterval !== null) {
+    clearInterval(_pollInterval);
+    _pollInterval = null;
+  }
 }

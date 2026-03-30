@@ -17,7 +17,7 @@ import {
   fetchEpisodes,
   fetchAlignmentRuns,
   createJob,
-  fetchJobs,
+  fetchJob,
   type Episode,
   type AlignmentRun,
   ApiError,
@@ -225,9 +225,10 @@ const CSS = `
 let _styleInjected = false;
 let _unsubscribe: (() => void) | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
-let _pendingJobId: string | null = null;
 let _loaded = false;       // guard : évite de recharger si déjà peuplé
 let _runsToken = 0;        // token anti-race pour loadRuns
+let _epSelChangeHandler: (() => void) | null = null; // handler unique pour le <select> épisode
+
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -278,13 +279,10 @@ async function loadRuns(container: HTMLElement, episodeId: string) {
 // ── Poll job ────────────────────────────────────────────────────────────────
 
 function startPoll(container: HTMLElement, jobId: string, episodeId: string) {
-  _pendingJobId = jobId;
   if (_pollTimer) clearInterval(_pollTimer);
   _pollTimer = setInterval(async () => {
     try {
-      const { jobs } = await fetchJobs();
-      const job = jobs.find((j) => j.job_id === jobId);
-      if (!job) { stopPoll(); return; }
+      const job = await fetchJob(jobId);
 
       const fb = container.querySelector<HTMLElement>("#align-feedback");
       if (fb) {
@@ -304,13 +302,21 @@ function startPoll(container: HTMLElement, jobId: string, episodeId: string) {
           if (launchBtn) launchBtn.disabled = false;
         }
       }
-    } catch { stopPoll(); }
+    } catch {
+      stopPoll();
+      const fb = container.querySelector<HTMLElement>("#align-feedback");
+      if (fb) {
+        fb.textContent = "Erreur de connexion — suivi du job interrompu.";
+        fb.style.color = "var(--danger)";
+      }
+      const launchBtn = container.querySelector<HTMLButtonElement>("#align-btn-launch");
+      if (launchBtn) launchBtn.disabled = false;
+    }
   }, 2000);
 }
 
 function stopPoll() {
   if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
-  _pendingJobId = null;
 }
 
 // ── Rendu formulaire ────────────────────────────────────────────────────────
@@ -516,11 +522,18 @@ async function loadModule(
       loadRuns(container, episode.episode_id);
     }
 
-    epSel.addEventListener("change", () => {
+    // Garantir un seul listener actif sur le <select> : retirer l'éventuel précédent
+    // avant d'en enregistrer un nouveau (loadModule peut être appelé plusieurs fois
+    // sur le même container : rechargement, retour en ligne après offline, etc.).
+    if (_epSelChangeHandler) {
+      epSel.removeEventListener("change", _epSelChangeHandler);
+    }
+    _epSelChangeHandler = () => {
       stopPoll();
       const ep = episodes.find((e) => e.episode_id === epSel.value);
       if (ep) { renderForm(container, ep, null); loadRuns(container, ep.episode_id); }
-    });
+    };
+    epSel.addEventListener("change", _epSelChangeHandler);
   } catch (e) {
     const errEl = container.querySelector<HTMLElement>(".align-error")!;
     errEl.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
@@ -590,6 +603,7 @@ export function mountAligner(container: HTMLElement, ctx: ShellContext) {
 export function disposeAligner() {
   stopPoll();
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+  _epSelChangeHandler = null;
   _loaded = false;
   _runsToken++;
 }

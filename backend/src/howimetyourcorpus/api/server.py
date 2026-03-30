@@ -1,4 +1,4 @@
-"""API serveur HIMYC — backend HTTP pour le frontend Tauri (MX-003).
+"""API serveur HIMYC â€” backend HTTP pour le frontend Tauri (MX-003).
 
 Usage :
     HIMYC_PROJECT_PATH=/path/to/project \\
@@ -10,6 +10,8 @@ Le token HIMYC_API_TOKEN est optionnel (pilote : non requis).
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
 from pathlib import Path
@@ -17,7 +19,7 @@ from typing import Any
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from howimetyourcorpus.core.constants import (
     API_PORT,
@@ -66,7 +68,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Dépendances ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ DÃ©pendances â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _require_project_path() -> Path:
@@ -108,14 +110,14 @@ def _get_db_optional(path: Path = Depends(_require_project_path)) -> CorpusDB | 
 
 
 def _get_db(path: Path = Depends(_require_project_path)) -> CorpusDB:
-    """Retourne CorpusDB — lève 503 si corpus.db absent (endpoints qui exigent la DB)."""
+    """Retourne CorpusDB â€” lÃ¨ve 503 si corpus.db absent (endpoints qui exigent la DB)."""
     db_path = path / CORPUS_DB_FILENAME
     if not db_path.exists():
         raise HTTPException(
             status_code=503,
             detail={
                 "error": "NO_DB",
-                "message": "corpus.db introuvable — indexez d'abord le projet.",
+                "message": "corpus.db introuvable â€” indexez d'abord le projet.",
             },
         )
     return CorpusDB(db_path)
@@ -145,15 +147,15 @@ def _distinct_speakers_from_segments_jsonl(store: ProjectStore, episode_ids: lis
     return sorted(labels)
 
 
-# ─── /project/init_corpus_db — création paresseuse de corpus.db ───────────────
+# â”€â”€â”€ /project/init_corpus_db â€” crÃ©ation paresseuse de corpus.db â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-@app.post("/project/init_corpus_db", summary="Crée corpus.db si absent (schéma + migrations)")
+@app.post("/project/init_corpus_db", summary="CrÃ©e corpus.db si absent (schÃ©ma + migrations)")
 def init_corpus_db(
     store: ProjectStore = Depends(_get_store),
 ) -> dict[str, Any]:
     """
-    Les projets créés hors flux PyQt peuvent n'avoir que config.toml / fichiers épisodes
+    Les projets crÃ©Ã©s hors flux PyQt peuvent n'avoir que config.toml / fichiers Ã©pisodes
     sans base SQLite. Les endpoints qui exigent _get_db() renvoient NO_DB tant que ce
     fichier n'existe pas. Cette route applique CorpusDB.init() une fois.
     """
@@ -165,15 +167,15 @@ def init_corpus_db(
     return {"created": True, "path": str(db_path)}
 
 
-# ─── /health ──────────────────────────────────────────────────────────────────
+# â”€â”€â”€ /health â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-@app.get("/health", summary="Healthcheck — verifie que le backend est en ligne")
+@app.get("/health", summary="Healthcheck â€” verifie que le backend est en ligne")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": VERSION}
 
 
-# ─── /config ──────────────────────────────────────────────────────────────────
+# â”€â”€â”€ /config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get("/config", summary="Configuration du projet courant")
@@ -198,7 +200,7 @@ class _ConfigBody(BaseModel):
     languages:         list[str] | None = None
 
 
-@app.put("/config", summary="Mettre à jour la configuration du projet")
+@app.put("/config", summary="Mettre Ã  jour la configuration du projet")
 def update_config(
     body: _ConfigBody,
     store: ProjectStore = Depends(_get_store),
@@ -209,7 +211,7 @@ def update_config(
     if body.project_name is not None:
         n = body.project_name.strip()
         if not n:
-            raise HTTPException(422, detail={"error": "EMPTY_NAME", "message": "Le nom du projet ne peut pas être vide."})
+            raise HTTPException(422, detail={"error": "EMPTY_NAME", "message": "Le nom du projet ne peut pas Ãªtre vide."})
         updates["project_name"] = n
     if body.source_id is not None:
         updates["source_id"] = body.source_id.strip()
@@ -237,7 +239,7 @@ def update_config(
     }
 
 
-# ─── /normalize/preview ───────────────────────────────────────────────────────
+# â”€â”€â”€ /normalize/preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class _NormalizePreviewBody(BaseModel):
@@ -246,9 +248,9 @@ class _NormalizePreviewBody(BaseModel):
     options: dict = {}
 
 
-@app.post("/normalize/preview", summary="Aperçu normalisation sans sauvegarder")
+@app.post("/normalize/preview", summary="AperÃ§u normalisation sans sauvegarder")
 def normalize_preview(body: _NormalizePreviewBody) -> dict[str, Any]:
-    """Applique la normalisation sur un texte fourni et retourne le résultat sans sauvegarder."""
+    """Applique la normalisation sur un texte fourni et retourne le rÃ©sultat sans sauvegarder."""
     from howimetyourcorpus.core.normalize.profiles import get_profile, NormalizationProfile
 
     profile = get_profile(body.profile) or NormalizationProfile(id=body.profile)
@@ -267,7 +269,7 @@ def normalize_preview(body: _NormalizePreviewBody) -> dict[str, Any]:
     return {"clean": clean, "merges": stats.merges}
 
 
-# ─── /segment/preview ─────────────────────────────────────────────────────────
+# â”€â”€â”€ /segment/preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class _SegmentPreviewBody(BaseModel):
@@ -276,12 +278,12 @@ class _SegmentPreviewBody(BaseModel):
     utterance_options: dict[str, Any] | None = None
 
 
-@app.post("/segment/preview", summary="Aperçu segmentation (phrases + tours) sans sauvegarder")
+@app.post("/segment/preview", summary="AperÃ§u segmentation (phrases + tours) sans sauvegarder")
 def segment_preview(body: _SegmentPreviewBody) -> dict[str, Any]:
     """
-    Segmente le texte fourni en phrases et en tours (utterances) en mémoire,
-    sans aucune écriture en base. Même moteur que le job segment_transcript.
-    Les tours utilisent les options Préparer (regex locuteur, tirets, marqueurs) si fournies.
+    Segmente le texte fourni en phrases et en tours (utterances) en mÃ©moire,
+    sans aucune Ã©criture en base. MÃªme moteur que le job segment_transcript.
+    Les tours utilisent les options PrÃ©parer (regex locuteur, tirets, marqueurs) si fournies.
     """
     from howimetyourcorpus.core.preparer.segmentation import normalize_segmentation_options
     from howimetyourcorpus.core.segment.segmenters import (
@@ -317,7 +319,7 @@ class _EpisodeSegmentationOptionsBody(BaseModel):
 
 @app.get(
     "/episodes/{episode_id}/segmentation_options",
-    summary="Options segmentation utterances (épisode + source)",
+    summary="Options segmentation utterances (Ã©pisode + source)",
 )
 def get_episode_segmentation_options(
     episode_id: str,
@@ -350,10 +352,10 @@ def put_episode_segmentation_options(
     return {"episode_id": episode_id, "source_key": body.source_key, "options": normalized}
 
 
-# ─── /series_index ────────────────────────────────────────────────────────────
+# â”€â”€â”€ /series_index â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-@app.get("/series_index", summary="Lire l'index série complet (avec URLs par épisode)")
+@app.get("/series_index", summary="Lire l'index sÃ©rie complet (avec URLs par Ã©pisode)")
 def get_series_index(store: ProjectStore = Depends(_get_store)) -> dict[str, Any]:
     from howimetyourcorpus.core.models import SeriesIndex
     index: SeriesIndex = store.load_series_index()
@@ -389,7 +391,7 @@ class _SeriesIndexBody(BaseModel):
     episodes:     list[_EpisodeRefBody]
 
 
-@app.put("/series_index", summary="Sauvegarder l'index série et créer les répertoires épisodes")
+@app.put("/series_index", summary="Sauvegarder l'index sÃ©rie et crÃ©er les rÃ©pertoires Ã©pisodes")
 def put_series_index(
     body: _SeriesIndexBody,
     store: ProjectStore = Depends(_get_store),
@@ -397,16 +399,16 @@ def put_series_index(
     from howimetyourcorpus.core.models import EpisodeRef, SeriesIndex
 
     if not body.episodes:
-        raise HTTPException(422, detail={"error": "EMPTY_EPISODES", "message": "La liste d'épisodes ne peut pas être vide."})
+        raise HTTPException(422, detail={"error": "EMPTY_EPISODES", "message": "La liste d'Ã©pisodes ne peut pas Ãªtre vide."})
 
     # Valider les episode_id
     seen: set[str] = set()
     for ep in body.episodes:
         eid = ep.episode_id.strip()
         if not eid:
-            raise HTTPException(422, detail={"error": "INVALID_EPISODE_ID", "message": "episode_id ne peut pas être vide."})
+            raise HTTPException(422, detail={"error": "INVALID_EPISODE_ID", "message": "episode_id ne peut pas Ãªtre vide."})
         if eid in seen:
-            raise HTTPException(422, detail={"error": "DUPLICATE_EPISODE_ID", "message": f"episode_id dupliqué : {eid}"})
+            raise HTTPException(422, detail={"error": "DUPLICATE_EPISODE_ID", "message": f"episode_id dupliquÃ© : {eid}"})
         seen.add(eid)
 
     episodes = [
@@ -427,7 +429,7 @@ def put_series_index(
     )
     store.save_series_index(index)
 
-    # Créer les répertoires épisodes manquants
+    # CrÃ©er les rÃ©pertoires Ã©pisodes manquants
     episodes_dir = Path(store.root_dir) / EPISODES_DIR_NAME
     episodes_dir.mkdir(exist_ok=True)
     created: list[str] = []
@@ -444,7 +446,7 @@ def put_series_index(
     }
 
 
-# ─── /episodes ────────────────────────────────────────────────────────────────
+# â”€â”€â”€ /episodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get("/episodes", summary="Liste des episodes avec sources et etats")
@@ -476,8 +478,8 @@ def list_episodes(
         eid = ep.episode_id
         ep_status = prep_status.get(eid, {})
 
-        # Source transcript — état dérivé des fichiers sur disque
-        # (le store natif ne supporte pas "segmented", on le détecte via segments.jsonl)
+        # Source transcript â€” Ã©tat dÃ©rivÃ© des fichiers sur disque
+        # (le store natif ne supporte pas "segmented", on le dÃ©tecte via segments.jsonl)
         from pathlib import Path as _Path
         _seg_file = _Path(store.root_dir) / EPISODES_DIR_NAME / eid / SEGMENTS_JSONL_FILENAME
         if _seg_file.exists():
@@ -531,7 +533,7 @@ def list_episodes(
     }
 
 
-# ─── /episodes/{id}/sources/{source_key} ─────────────────────────────────────
+# â”€â”€â”€ /episodes/{id}/sources/{source_key} â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get(
@@ -552,7 +554,7 @@ def get_episode_source(
                 detail={
                     "error": "SOURCE_NOT_FOUND",
                     "message": (
-                        f"Aucun fichier transcript (raw.txt / clean.txt) pour l'épisode {episode_id!r}."
+                        f"Aucun fichier transcript (raw.txt / clean.txt) pour l'Ã©pisode {episode_id!r}."
                     ),
                 },
             )
@@ -571,7 +573,7 @@ def get_episode_source(
                 status_code=404,
                 detail={
                     "error": "SOURCE_NOT_FOUND",
-                    "message": f"Piste SRT « {lang} » introuvable pour l episode {episode_id}.",
+                    "message": f"Piste SRT Â« {lang} Â» introuvable pour l episode {episode_id}.",
                 },
             )
         content, fmt = result
@@ -588,18 +590,26 @@ def get_episode_source(
         detail={
             "error": "INVALID_SOURCE_KEY",
             "message": (
-                f"Cle source invalide : « {source_key} ». "
+                f"Cle source invalide : Â« {source_key} Â». "
                 "Valeurs valides : transcript, srt_<lang> (ex: srt_en, srt_fr)."
             ),
         },
     )
 
 
-# ─── /episodes/{id}/sources/{source_key} POST (import — MX-005) ──────────────
+# â”€â”€â”€ /episodes/{id}/sources/{source_key} POST (import â€” MX-005) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class _TranscriptImport(BaseModel):
-    content: str
+    content: str | None = None    # texte dÃ©jÃ  dÃ©codÃ© (legacy / coller du texte)
+    raw_b64: str | None = None    # fichier encodÃ© base64 : .txt, .docx, .odt
+    filename: str = ""            # nom du fichier pour la dÃ©tection du format
+
+    @model_validator(mode="after")
+    def _require_one(self) -> "_TranscriptImport":
+        if self.content is None and self.raw_b64 is None:
+            raise ValueError("'content' ou 'raw_b64' est requis")
+        return self
 
 
 class _SrtImport(BaseModel):
@@ -607,18 +617,152 @@ class _SrtImport(BaseModel):
     fmt: str = "srt"  # "srt" | "vtt"
 
 
+# â”€â”€ Extracteurs de fichiers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def _decode_text_bytes(data: bytes) -> str:
+    """DÃ©code des octets texte en dÃ©tectant automatiquement l'encodage.
+
+    StratÃ©gie :
+    1. Essai UTF-8 strict â€” si Ã§a passe, c'est UTF-8 (cas le plus frÃ©quent).
+    2. Sinon le texte n'est PAS UTF-8 ; chardet est utilisÃ© sans seuil de confiance
+       (on sait dÃ©jÃ  que l'UTF-8 a Ã©chouÃ©, l'alternative dÃ©tectÃ©e est forcÃ©ment meilleure).
+    3. Repli final sur Windows-1252 si chardet ne trouve rien (meilleur choix pour
+       les fichiers occidentaux exportÃ©s depuis Word / Notepad).
+    4. Le BOM UTF-8 (U+FEFF) est retirÃ© s'il est prÃ©sent en dÃ©but de texte.
+    """
+    # 1. UTF-8 strict (inclut l'ASCII pur)
+    try:
+        text = data.decode("utf-8")
+        return text.lstrip("\ufeff")
+    except UnicodeDecodeError:
+        pass
+
+    # 2. DÃ©tection chardet â€” pas de seuil de confiance car UTF-8 est dÃ©jÃ  exclu
+    import chardet
+    detected = chardet.detect(data)
+    encoding = detected.get("encoding") or "windows-1252"
+    text = data.decode(encoding, errors="replace")
+    return text.lstrip("\ufeff")
+
+
+def _extract_docx(data: bytes) -> str:
+    """Extrait le texte brut d'un fichier .docx / .docm (python-docx).
+
+    Parcoure rÃ©cursivement tous les Ã©lÃ©ments w:p du corps du document
+    (paragraphes normaux, cellules de tableau, zones de texte w:txbx).
+    Les sauts de ligne doux (w:br type textWrapping) sont prÃ©servÃ©s en \\n.
+
+    Limite restante : en-tÃªtes, pieds de page et notes de bas de page
+    ne sont pas extraits.
+    """
+    from docx import Document as DocxDocument
+    from docx.oxml.ns import qn
+
+    _W_P  = qn("w:p")
+    _W_T  = qn("w:t")
+    _W_BR = qn("w:br")
+
+    def _iter_paragraphs(element):
+        """Parcours en profondeur : yield chaque w:p sans rÃ©curser dans w:p."""
+        for child in element:
+            if child.tag == _W_P:
+                yield child
+            else:
+                yield from _iter_paragraphs(child)
+
+    def _para_text(para_elem) -> str:
+        """Texte d'un w:p : concatÃ¨ne w:t et convertit w:br textWrapping en \\n."""
+        parts: list[str] = []
+        for el in para_elem.iter():
+            if el.tag == _W_T:
+                parts.append(el.text or "")
+            elif el.tag == _W_BR:
+                # Sans attribut w:type ou type="textWrapping" â†’ saut de ligne doux
+                if el.get(qn("w:type"), "textWrapping") == "textWrapping":
+                    parts.append("\n")
+        return "".join(parts)
+
+    doc = DocxDocument(io.BytesIO(data))
+    lines = [_para_text(p) for p in _iter_paragraphs(doc.element.body)]
+    # On conserve les lignes non vides, mais on laisse les vides entre blocs
+    # pour prÃ©server la structure du texte (ex. rÃ©pliques sÃ©parÃ©es par des blancs).
+    non_empty = [ln for ln in lines if ln.strip()]
+    return "\n".join(non_empty)
+
+
+def _extract_odt(data: bytes) -> str:
+    """Extrait le texte brut d'un fichier .odt (odfpy / teletype).
+
+    Utilise teletype.extractText() sur chaque paragraphe pour capturer
+    correctement les <text:span>, listes et Ã©lÃ©ments imbriquÃ©s.
+    """
+    from odf import teletype as odf_teletype
+    from odf.opendocument import load as odf_load
+    from odf.text import P
+    doc = odf_load(io.BytesIO(data))
+    texts: list[str] = []
+    for para in doc.getElementsByType(P):
+        text = odf_teletype.extractText(para).strip()
+        if text:
+            texts.append(text)
+    return "\n".join(texts)
+
+
+# Extensions ODF texte non supportÃ©es (Flat ODT non compressÃ©, template ODT)
+# .fodt = Flat OpenDocument Text (XML brut, non ZIP) â€” odfpy.load() nÃ©cessite un ZIP
+# .ott  = OpenDocument Text Template
+# .otp  = OpenDocument Presentation Template (cas exotique)
+_UNSUPPORTED_ODT_EXTS = frozenset({".fodt", ".ott", ".otp"})
+
+# Formats Word non supportÃ©s :
+# .doc  = Word 97â€“2003 binaire (format BIFF/OLE2, non ZIP)
+# .docm  est intentionnellement ABSENT : sa structure ZIP est identique Ã  .docx,
+# python-docx peut l'ouvrir et en extraire le texte normalement.
+_UNSUPPORTED_DOC_EXTS = frozenset({".doc"})
+
+
+def _extract_text_from_bytes(data: bytes, filename: str) -> str:
+    """Dispatch selon l'extension du fichier.
+
+    Formats supportÃ©s : .txt (tout encodage), .docx, .docm, .odt.
+    LÃ¨ve ValueError pour les formats reconnus mais non supportÃ©s
+    afin d'afficher un message clair Ã  l'utilisateur.
+
+    PrioritÃ© si raw_b64 et content sont tous les deux fournis : raw_b64 est utilisÃ©.
+    """
+    ext = Path(filename).suffix.lower() if filename else ""
+
+    if ext in _UNSUPPORTED_ODT_EXTS:
+        raise ValueError(
+            f"Le format Â« {ext} Â» n'est pas pris en charge. "
+            "Enregistrez le document en .odt depuis LibreOffice Writer."
+        )
+    if ext in _UNSUPPORTED_DOC_EXTS:
+        raise ValueError(
+            "Le format .doc (Word 97â€“2003) n'est pas pris en charge. "
+            "Enregistrez le document en .docx depuis Word ou LibreOffice."
+        )
+
+    if ext in (".docx", ".docm"):
+        return _extract_docx(data)
+    if ext == ".odt":
+        return _extract_odt(data)
+    # .txt ou extension inconnue : dÃ©tection d'encodage automatique
+    return _decode_text_bytes(data)
+
+
 @app.delete(
     "/episodes/{episode_id}/sources/transcript",
     status_code=200,
-    summary="Supprimer le transcript d'un épisode (G-002)",
+    summary="Supprimer le transcript d'un Ã©pisode (G-002)",
 )
 def delete_transcript(
     episode_id: str,
     store: ProjectStore = Depends(_get_store),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Supprime raw.txt, clean.txt et segments.jsonl pour cet épisode.
-    Remet le prep_status à 'absent'. N'efface pas les runs d'alignement existants.
+    """Supprime raw.txt, clean.txt et segments.jsonl pour cet Ã©pisode.
+    Remet le prep_status Ã  'absent'. N'efface pas les runs d'alignement existants.
     """
     ep_dir = store._episode_dir(episode_id)
     removed: list[str] = []
@@ -627,7 +771,7 @@ def delete_transcript(
         if path.exists():
             path.unlink()
             removed.append(name)
-    # Réinitialiser le prep_status pour transcript
+    # RÃ©initialiser le prep_status pour transcript
     store.set_episode_prep_status(episode_id, "transcript", "absent")
     # Supprimer les segments en DB si elle existe
     if db is not None:
@@ -641,29 +785,29 @@ def delete_transcript(
 @app.delete(
     "/episodes/{episode_id}/sources/{source_key}",
     status_code=200,
-    summary="Supprimer une piste SRT d'un épisode (G-002)",
+    summary="Supprimer une piste SRT d'un Ã©pisode (G-002)",
 )
 def delete_source(
     episode_id: str,
     source_key: str,
     store: ProjectStore = Depends(_get_store),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
     """Supprime les fichiers .srt/.vtt et les cues_jsonl pour ce lang.
-    Réinitialise le prep_status. Supprime aussi les cues en DB et les runs d'alignement liés.
+    RÃ©initialise le prep_status. Supprime aussi les cues en DB et les runs d'alignement liÃ©s.
     """
     if not source_key.startswith("srt_") or len(source_key) < 5:
         raise HTTPException(
             400,
             detail={
                 "error": "INVALID_SOURCE_KEY",
-                "message": f"Clé source invalide : « {source_key} ». Format attendu : srt_<lang>.",
+                "message": f"ClÃ© source invalide : Â« {source_key} Â». Format attendu : srt_<lang>.",
             },
         )
     lang = source_key[4:]
     store.remove_episode_subtitle(episode_id, lang)
     store.set_episode_prep_status(episode_id, source_key, "absent")
-    # Supprimer les cues et les runs d'alignement liés en DB
+    # Supprimer les cues et les runs d'alignement liÃ©s en DB
     if db is not None:
         try:
             db.delete_subtitle_track(episode_id, lang)
@@ -683,36 +827,36 @@ class _TranscriptPatch(BaseModel):
 @app.patch(
     "/episodes/{episode_id}/sources/transcript",
     status_code=200,
-    summary="Éditer le texte normalisé (clean) d'un transcript (G-001 / MX-041)",
+    summary="Ã‰diter le texte normalisÃ© (clean) d'un transcript (G-001 / MX-041)",
 )
 def patch_transcript(
     episode_id: str,
     body: _TranscriptPatch,
     store: ProjectStore = Depends(_get_store),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Écrase clean.txt avec le texte fourni.
-    Invalide les segments (supprime segments.jsonl + DB segments) car ils seraient périmés.
-    Remet le prep_status à 'normalized'.
-    Le frontend doit relancer le job 'segment' après coup si besoin.
+    """Ã‰crase clean.txt avec le texte fourni.
+    Invalide les segments (supprime segments.jsonl + DB segments) car ils seraient pÃ©rimÃ©s.
+    Remet le prep_status Ã  'normalized'.
+    Le frontend doit relancer le job 'segment' aprÃ¨s coup si besoin.
     """
     if not body.clean.strip():
         raise HTTPException(
             status_code=422,
             detail={
                 "error": "EMPTY_CONTENT",
-                "message": "Le texte clean ne peut pas être vide.",
+                "message": "Le texte clean ne peut pas Ãªtre vide.",
             },
         )
     ep_dir = store._episode_dir(episode_id)
     if not ep_dir.exists():
         raise HTTPException(
             status_code=404,
-            detail={"error": "EPISODE_NOT_FOUND", "message": f"Épisode inconnu : {episode_id}"},
+            detail={"error": "EPISODE_NOT_FOUND", "message": f"Ã‰pisode inconnu : {episode_id}"},
         )
-    # Écrire clean.txt
+    # Ã‰crire clean.txt
     (ep_dir / CLEAN_TEXT_FILENAME).write_text(body.clean, encoding="utf-8")
-    # Invalider segments.jsonl (devenu périmé)
+    # Invalider segments.jsonl (devenu pÃ©rimÃ©)
     seg_file = ep_dir / SEGMENTS_JSONL_FILENAME
     if seg_file.exists():
         seg_file.unlink()
@@ -741,7 +885,29 @@ def import_transcript(
     body: _TranscriptImport,
     store: ProjectStore = Depends(_get_store),
 ) -> dict[str, Any]:
-    if not body.content.strip():
+    # RÃ©solution du contenu textuel
+    if body.raw_b64 is not None:
+        try:
+            raw_bytes = base64.b64decode(body.raw_b64)
+        except Exception:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": "INVALID_BASE64", "message": "Encodage base64 invalide."},
+            )
+        try:
+            content = _extract_text_from_bytes(raw_bytes, body.filename)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "EXTRACTION_ERROR",
+                    "message": f"Impossible d'extraire le texte du fichier Â« {body.filename} Â» : {exc}",
+                },
+            )
+    else:
+        content = body.content or ""
+
+    if not content.strip():
         raise HTTPException(
             status_code=422,
             detail={
@@ -751,7 +917,7 @@ def import_transcript(
         )
     ep_dir = store._episode_dir(episode_id)
     ep_dir.mkdir(parents=True, exist_ok=True)
-    (ep_dir / RAW_TEXT_FILENAME).write_text(body.content, encoding="utf-8")
+    (ep_dir / RAW_TEXT_FILENAME).write_text(content, encoding="utf-8")
     store.set_episode_prep_status(episode_id, "transcript", "raw")
     return {"episode_id": episode_id, "source_key": "transcript", "state": "raw"}
 
@@ -766,7 +932,7 @@ def import_source(
     source_key: str,
     body: _SrtImport,
     store: ProjectStore = Depends(_get_store),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB | None = Depends(_get_db_optional),
 ) -> dict[str, Any]:
     if not source_key.startswith("srt_") or len(source_key) < 5:
         raise HTTPException(
@@ -774,7 +940,7 @@ def import_source(
             detail={
                 "error": "INVALID_SOURCE_KEY",
                 "message": (
-                    f"Cle source invalide : « {source_key} ». "
+                    f"Cle source invalide : Â« {source_key} Â». "
                     "Format attendu : srt_<lang> (ex: srt_en, srt_fr)."
                 ),
             },
@@ -792,8 +958,8 @@ def import_source(
     store.save_episode_subtitle_content(episode_id, lang, body.content, fmt)
     store.set_episode_prep_status(episode_id, source_key, "raw")
 
-    # Indexer immédiatement dans la DB (si disponible) pour que GET /episodes
-    # retourne la nouvelle piste dès le prochain refresh du panneau.
+    # Indexer immÃ©diatement dans la DB (si disponible) pour que GET /episodes
+    # retourne la nouvelle piste dÃ¨s le prochain refresh du panneau.
     nb_cues = 0
     if db is not None:
         from howimetyourcorpus.core.subtitles.parsers import parse_subtitle_content
@@ -806,7 +972,7 @@ def import_source(
             db.upsert_cues(track_id, episode_id, lang, cues)
             nb_cues = len(cues)
         except Exception:
-            pass  # DB facultative — l'import fichier reste valide même sans indexation
+            pass  # DB facultative â€” l'import fichier reste valide mÃªme sans indexation
 
     return {
         "episode_id": episode_id,
@@ -818,7 +984,7 @@ def import_source(
     }
 
 
-# ─── /episodes/{id}/alignment_runs (MX-009) ──────────────────────────────────
+# â”€â”€â”€ /episodes/{id}/alignment_runs (MX-009) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get(
@@ -837,7 +1003,7 @@ def list_alignment_runs(
             if not sub.is_dir():
                 continue
             run_id = sub.name
-            # Lire le rapport si présent
+            # Lire le rapport si prÃ©sent
             report_path = sub / "report.json"
             if report_path.exists():
                 try:
@@ -855,7 +1021,7 @@ def list_alignment_runs(
     return {"episode_id": episode_id, "runs": runs}
 
 
-# ─── Alignment Audit (MX-028) ─────────────────────────────────────────────────
+# â”€â”€â”€ Alignment Audit (MX-028) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get(
@@ -865,12 +1031,12 @@ def list_alignment_runs(
 def get_alignment_run_stats(
     episode_id: str,
     run_id: str,
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
     """Retourne nb_links, by_status (auto/accepted/rejected), avg_confidence, n_collisions."""
     stats = db.get_align_stats_for_run(episode_id, run_id)
     collisions = db.get_collisions_for_run(episode_id, run_id)
-    # Calcul couverture : % de liens non-rejetés et non-ignorés / total pivot
+    # Calcul couverture : % de liens non-rejetÃ©s et non-ignorÃ©s / total pivot
     nb_pivot    = stats.get("nb_pivot", 0)
     by_status   = stats.get("by_status", {})
     nb_rejected = by_status.get("rejected", 0)
@@ -886,7 +1052,7 @@ def get_alignment_run_stats(
 
 @app.get(
     "/episodes/{episode_id}/alignment_runs/{run_id}/links",
-    summary="Liens d'alignement paginés + enrichis (MX-028)",
+    summary="Liens d'alignement paginÃ©s + enrichis (MX-028)",
 )
 def get_alignment_run_links(
     episode_id: str,
@@ -895,9 +1061,9 @@ def get_alignment_run_links(
     q: str | None = Query(None, max_length=200),
     offset: int = Query(0, ge=0),
     limit: int = Query(DEFAULT_AUDIT_LIMIT, ge=1, le=MAX_AUDIT_LIMIT),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Liens enrichis avec texte (segment transcript + cue pivot + cue cible). Paginés."""
+    """Liens enrichis avec texte (segment transcript + cue pivot + cue cible). PaginÃ©s."""
     rows, total = db.get_audit_links(
         episode_id, run_id,
         status_filter=status,
@@ -922,9 +1088,9 @@ def get_alignment_run_links(
 def get_alignment_run_collisions(
     episode_id: str,
     run_id: str,
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Retourne les cues pivot avec plusieurs liens target dans le même lang (collisions)."""
+    """Retourne les cues pivot avec plusieurs liens target dans le mÃªme lang (collisions)."""
     collisions = db.get_collisions_for_run(episode_id, run_id)
     return {"episode_id": episode_id, "run_id": run_id, "collisions": collisions}
 
@@ -936,9 +1102,9 @@ def get_alignment_run_collisions(
 def get_link_positions(
     episode_id: str,
     run_id: str,
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Retourne (n, status) pour chaque lien pivot — usage minimap, sans texte."""
+    """Retourne (n, status) pour chaque lien pivot â€” usage minimap, sans texte."""
     positions = db.get_link_positions(episode_id, run_id)
     return {"episode_id": episode_id, "run_id": run_id, "positions": positions}
 
@@ -953,22 +1119,22 @@ class _AlignLinkPatchBody(BaseModel):
 
 @app.patch(
     "/alignment_links/{link_id}",
-    summary="Mettre à jour statut et/ou note d'un lien (MX-028 + G-008)",
+    summary="Mettre Ã  jour statut et/ou note d'un lien (MX-028 + G-008)",
 )
 def patch_alignment_link(
     link_id: str,
     body: _AlignLinkPatchBody,
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Met à jour le statut et/ou la note d'un lien d'alignement.
-    Au moins un des champs (status, note) doit être fourni.
+    """Met Ã  jour le statut et/ou la note d'un lien d'alignement.
+    Au moins un des champs (status, note) doit Ãªtre fourni.
     """
     if body.status is None and body.note is None:
         raise HTTPException(422, detail={"error": "NOTHING_TO_UPDATE", "message": "Fournissez au moins status ou note."})
     result: dict[str, Any] = {"link_id": link_id}
     if body.status is not None:
         if body.status not in _VALID_LINK_STATUSES:
-            raise HTTPException(422, detail={"error": "INVALID_STATUS", "message": "status doit être accepted, rejected, auto ou ignored."})
+            raise HTTPException(422, detail={"error": "INVALID_STATUS", "message": "status doit Ãªtre accepted, rejected, auto ou ignored."})
         db.set_align_status(link_id, body.status)
         result["status"] = body.status
     if body.note is not None:
@@ -978,12 +1144,12 @@ def patch_alignment_link(
 
 
 class _BulkAlignStatusBody(BaseModel):
-    """Corps pour la mise à jour groupée des statuts (MX-039).
+    """Corps pour la mise Ã  jour groupÃ©e des statuts (MX-039).
 
     Deux modes exclusifs :
-    - ``link_ids`` fourni  → met à jour la liste explicite d'IDs.
-    - ``link_ids`` absent  → met à jour tous les liens du run filtré par ``filter_status``
-      et/ou ``conf_lt`` (confidence strictement inférieure, 0–1).
+    - ``link_ids`` fourni  â†’ met Ã  jour la liste explicite d'IDs.
+    - ``link_ids`` absent  â†’ met Ã  jour tous les liens du run filtrÃ© par ``filter_status``
+      et/ou ``conf_lt`` (confidence strictement infÃ©rieure, 0â€“1).
     """
 
     new_status: str
@@ -994,27 +1160,27 @@ class _BulkAlignStatusBody(BaseModel):
 
 @app.patch(
     "/episodes/{episode_id}/alignment_runs/{run_id}/links/bulk",
-    summary="Mise à jour groupée des statuts de liens (MX-039)",
+    summary="Mise Ã  jour groupÃ©e des statuts de liens (MX-039)",
 )
 def bulk_patch_alignment_links(
     episode_id: str,
     run_id: str,
     body: _BulkAlignStatusBody,
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Modifie le statut de plusieurs liens en une seule opération atomique.
+    """Modifie le statut de plusieurs liens en une seule opÃ©ration atomique.
 
-    - ``new_status``    : statut à appliquer (accepted / rejected / auto / ignored).
-    - ``link_ids``      : liste explicite d'IDs à mettre à jour (mode liste).
+    - ``new_status``    : statut Ã  appliquer (accepted / rejected / auto / ignored).
+    - ``link_ids``      : liste explicite d'IDs Ã  mettre Ã  jour (mode liste).
     - ``filter_status`` : filtre sur le statut courant (mode filtre).
     - ``conf_lt``       : filtre sur la confidence < valeur (mode filtre).
 
-    En mode filtre, si aucun critère n'est fourni, tous les liens du run sont mis à jour.
+    En mode filtre, si aucun critÃ¨re n'est fourni, tous les liens du run sont mis Ã  jour.
     """
     if body.new_status not in _VALID_LINK_STATUSES:
-        raise HTTPException(422, detail={"error": "INVALID_STATUS", "message": f"new_status doit être parmi {sorted(_VALID_LINK_STATUSES)}."})
+        raise HTTPException(422, detail={"error": "INVALID_STATUS", "message": f"new_status doit Ãªtre parmi {sorted(_VALID_LINK_STATUSES)}."})
     if body.filter_status is not None and body.filter_status not in _VALID_LINK_STATUSES:
-        raise HTTPException(422, detail={"error": "INVALID_STATUS", "message": f"filter_status doit être parmi {sorted(_VALID_LINK_STATUSES)}."})
+        raise HTTPException(422, detail={"error": "INVALID_STATUS", "message": f"filter_status doit Ãªtre parmi {sorted(_VALID_LINK_STATUSES)}."})
     if body.link_ids is not None and len(body.link_ids) == 0:
         return {"updated": 0, "new_status": body.new_status}
 
@@ -1029,12 +1195,12 @@ def bulk_patch_alignment_links(
     return {"updated": n, "new_status": body.new_status}
 
 
-# ─── Retarget (MX-040) ────────────────────────────────────────────────────────
+# â”€â”€â”€ Retarget (MX-040) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get(
     "/episodes/{episode_id}/subtitle_cues",
-    summary="Recherche de cues SRT pour un épisode/lang (MX-040)",
+    summary="Recherche de cues SRT pour un Ã©pisode/lang (MX-040)",
 )
 def get_subtitle_cues(
     episode_id: str,
@@ -1044,14 +1210,14 @@ def get_subtitle_cues(
     around_window: int = Query(DEFAULT_CUES_WINDOW, ge=1, le=50),
     limit: int = Query(DEFAULT_CUES_LIMIT, ge=1, le=MAX_CUES_LIMIT),
     offset: int = Query(0, ge=0),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
     """Retourne des cues SRT pour le retarget d'un lien d'alignement.
 
     Modes :
     - ``q`` : recherche FTS5 sur le texte des cues (prioritaire).
-    - ``around_cue_id`` : ±``around_window`` cues voisins par numéro de séquence.
-    - Sans filtre : liste paginée triée par n.
+    - ``around_cue_id`` : Â±``around_window`` cues voisins par numÃ©ro de sÃ©quence.
+    - Sans filtre : liste paginÃ©e triÃ©e par n.
     """
     rows, total = db.search_subtitle_cues(
         episode_id,
@@ -1078,14 +1244,14 @@ class _CuePatch(BaseModel):
 
 @app.patch(
     "/subtitle_cues/{cue_id}",
-    summary="Édite le text_clean d'une cue SRT (MX-042)",
+    summary="Ã‰dite le text_clean d'une cue SRT (MX-042)",
 )
 def patch_subtitle_cue(
     cue_id: str,
     body: _CuePatch,
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Met à jour manuellement le champ text_clean d'une cue SRT."""
+    """Met Ã  jour manuellement le champ text_clean d'une cue SRT."""
     if not db:
         raise HTTPException(status_code=503, detail={"error": "DB_NOT_READY", "message": "corpus.db non disponible."})
     text = body.text_clean.strip()
@@ -1099,43 +1265,43 @@ class _RetargetBody(BaseModel):
 
 @app.patch(
     "/alignment_links/{link_id}/retarget",
-    summary="Réassigner la cue cible d'un lien d'alignement (MX-040)",
+    summary="RÃ©assigner la cue cible d'un lien d'alignement (MX-040)",
 )
 def retarget_alignment_link(
     link_id: str,
     body: _RetargetBody,
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Met à jour le cue_id_target d'un lien et passe son statut à 'accepted'."""
+    """Met Ã  jour le cue_id_target d'un lien et passe son statut Ã  'accepted'."""
     if not body.cue_id_target.strip():
         raise HTTPException(422, detail={"error": "INVALID_CUE_ID", "message": "cue_id_target est requis."})
     db.update_align_link_cues(link_id, cue_id_target=body.cue_id_target)
     return {"link_id": link_id, "cue_id_target": body.cue_id_target, "status": "accepted"}
 
 
-# ─── Concordancier parallèle (MX-029) ────────────────────────────────────────
+# â”€â”€â”€ Concordancier parallÃ¨le (MX-029) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get(
     "/episodes/{episode_id}/alignment_runs/{run_id}/concordance",
-    summary="Concordancier parallèle segment+pivot+cibles (MX-029)",
+    summary="Concordancier parallÃ¨le segment+pivot+cibles (MX-029)",
 )
 def get_alignment_concordance(
     episode_id: str,
     run_id: str,
     status: str | None = Query(None, pattern="^(auto|accepted|rejected|ignored)$"),
     q: str | None = Query(None, max_length=200),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
     """
-    Retourne les lignes du concordancier parallèle :
-    segment transcript + cue pivot + cue(s) cible(s) alignées.
+    Retourne les lignes du concordancier parallÃ¨le :
+    segment transcript + cue pivot + cue(s) cible(s) alignÃ©es.
     Optionnel : filtre status (auto/accepted/rejected) + recherche texte q.
     """
     run = db.get_align_run(run_id)
     pivot_lang = (run.get("pivot_lang") or DEFAULT_PIVOT_LANG).strip().lower() if run else DEFAULT_PIVOT_LANG
     rows = db.get_parallel_concordance(episode_id, run_id, status_filter=status or None)
-    # Filtre texte côté backend si fourni
+    # Filtre texte cÃ´tÃ© backend si fourni
     if q:
         ql = q.lower()
         rows = [
@@ -1146,12 +1312,12 @@ def get_alignment_concordance(
     return {"episode_id": episode_id, "run_id": run_id, "pivot_lang": pivot_lang, "total": len(rows), "rows": rows}
 
 
-# ─── Segments longtext (MX-029) ──────────────────────────────────────────────
+# â”€â”€â”€ Segments longtext (MX-029) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get(
     "/episodes/{episode_id}/segments",
-    summary="Liste des segments d'un épisode (MX-029)",
+    summary="Liste des segments d'un Ã©pisode (MX-029)",
 )
 def get_episode_segments(
     episode_id: str,
@@ -1160,7 +1326,7 @@ def get_episode_segments(
     db: CorpusDB | None = Depends(_get_db_optional),
 ) -> dict[str, Any]:
     """
-    Retourne les segments d'un épisode (kind=sentence|utterance).
+    Retourne les segments d'un Ã©pisode (kind=sentence|utterance).
     Filtre optionnel full-text q (FTS si DB dispo, sinon LIKE).
     """
     if db is None:
@@ -1209,31 +1375,31 @@ class _SegmentPatch(BaseModel):
 
 @app.patch(
     "/episodes/{episode_id}/segments/{segment_id}",
-    summary="Éditer le texte ou le locuteur d'un segment (P2-4)",
+    summary="Ã‰diter le texte ou le locuteur d'un segment (P2-4)",
 )
 def patch_segment(
     episode_id: str,
     segment_id: str,
     body: _SegmentPatch,
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
     """
-    Met à jour text et/ou speaker_explicit d'un segment.
-    Retourne le segment mis à jour.
+    Met Ã  jour text et/ou speaker_explicit d'un segment.
+    Retourne le segment mis Ã  jour.
     """
     from howimetyourcorpus.core.storage import db_segments as _db_seg
     if body.text is None and body.speaker_explicit is None:
         raise HTTPException(status_code=422, detail="Au moins text ou speaker_explicit requis.")
     conn = db._conn()
     try:
-        # Vérifier que le segment appartient bien à l'épisode
+        # VÃ©rifier que le segment appartient bien Ã  l'Ã©pisode
         conn.row_factory = __import__("sqlite3").Row
         row = conn.execute(
             "SELECT segment_id FROM segments WHERE segment_id = ? AND episode_id = ?",
             [segment_id, episode_id],
         ).fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail=f"Segment {segment_id!r} non trouvé pour l'épisode {episode_id!r}.")
+            raise HTTPException(status_code=404, detail=f"Segment {segment_id!r} non trouvÃ© pour l'Ã©pisode {episode_id!r}.")
         if body.text is not None:
             _db_seg.update_segment_text(conn, segment_id, body.text.strip())
         if body.speaker_explicit is not None:
@@ -1249,7 +1415,7 @@ def patch_segment(
         conn.close()
 
 
-# ─── /jobs (MX-006) ───────────────────────────────────────────────────────────
+# â”€â”€â”€ /jobs (MX-006) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class _JobCreate(BaseModel):
@@ -1325,13 +1491,13 @@ def cancel_job(
             status_code=409,
             detail={
                 "error": "JOB_NOT_CANCELLABLE",
-                "message": "Seuls les jobs en 'pending' peuvent être annulés.",
+                "message": "Seuls les jobs en 'pending' peuvent Ãªtre annulÃ©s.",
             },
         )
     return {"job_id": job_id, "status": "cancelled"}
 
 
-# ─── /query (MX-022) ──────────────────────────────────────────────────────────
+# â”€â”€â”€ /query (MX-022) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 QUERY_SCOPES = frozenset(["episodes", "segments", "cues"])
 QUERY_KINDS  = frozenset(SEGMENT_KIND_VALUES)
@@ -1388,14 +1554,18 @@ def query_corpus(
     else:
         hits = db.query_kwic(term, window=window, limit=limit, case_sensitive=cs)
 
-    has_more = len(hits) >= limit  # avant post-filtres
+    raw_count = len(hits)  # avant post-filtres (pour déterminer si la DB avait plus)
 
-    # Filtres post-query
+    # Filtres post-query (non délégués à la DB pour éviter la complexité FTS)
     if body.episode_id:
         hits = [h for h in hits if h.episode_id == body.episode_id]
     if body.speaker:
         needle = body.speaker.lower()
         hits = [h for h in hits if h.speaker and needle in h.speaker.lower()]
+
+    # has_more est vrai si la DB a retourné exactement `limit` résultats bruts
+    # (il pourrait y en avoir d'autres), indépendamment des filtres post-requête.
+    has_more = raw_count >= limit
 
     from dataclasses import asdict
     return {
@@ -1407,14 +1577,14 @@ def query_corpus(
     }
 
 
-# ─── /query/facets (MX-025) ────────────────────────────────────────────────────
+# â”€â”€â”€ /query/facets (MX-025) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @app.post("/query/facets", summary="Facettes concordancier (MX-025)")
 def query_facets(
     body: _QueryRequest,
     db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Agrège total_hits, épisodes distincts, langues distinctes et top-épisodes."""
+    """AgrÃ¨ge total_hits, Ã©pisodes distincts, langues distinctes et top-Ã©pisodes."""
     term = body.term.strip()
     if not term:
         raise HTTPException(
@@ -1456,7 +1626,7 @@ def query_facets(
     }
 
 
-# ─── /stats (statistiques lexicales) ─────────────────────────────────────────
+# â”€â”€â”€ /stats (statistiques lexicales) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import re as _re_stats
 from collections import Counter as _Counter
@@ -1523,7 +1693,7 @@ def _stats_tokenize(text: str, min_length: int) -> list[str]:
 def _stats_compute(
     texts: list[str], slot: _StatsSlot, n_episodes: int, label: str = ""
 ) -> tuple[dict, "_Counter[str]", int]:
-    """Retourne (résultat_dict, counter, total_tokens) pour éviter une re-tokenisation."""
+    """Retourne (rÃ©sultat_dict, counter, total_tokens) pour Ã©viter une re-tokenisation."""
     tokens: list[str] = []
     for t in texts:
         tokens.extend(_stats_tokenize(t, slot.min_length))
@@ -1553,7 +1723,7 @@ def _stats_compute(
     return result, counter, total
 
 
-@app.post("/stats/lexical", summary="Statistiques lexicales d'un corpus ou d'une sélection")
+@app.post("/stats/lexical", summary="Statistiques lexicales d'un corpus ou d'une sÃ©lection")
 def stats_lexical(
     body: _StatsRequest,
     db:   CorpusDB = Depends(_get_db),
@@ -1580,7 +1750,7 @@ def stats_compare(
         n_ep_a  = _stats_count_episodes(conn, body.a)
         n_ep_b  = _stats_count_episodes(conn, body.b)
 
-    # _stats_compute retourne aussi le Counter → pas de re-tokenisation
+    # _stats_compute retourne aussi le Counter â†’ pas de re-tokenisation
     stats_a, ca, ta = _stats_compute(texts_a, body.a, n_ep_a, body.label_a)
     stats_b, cb, tb = _stats_compute(texts_b, body.b, n_ep_b, body.label_b)
 
@@ -1602,14 +1772,14 @@ def stats_compare(
             "a": stats_a, "b": stats_b, "comparison": comparison}
 
 
-# ─── /characters (MX-021c) ────────────────────────────────────────────────────
+# â”€â”€â”€ /characters (MX-021c) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _CharacterCatalogBody(BaseModel):
     characters: list[dict[str, Any]]
 
 
 class _ImportSpeakersBody(BaseModel):
-    """Si episode_ids est vide ou absent, tous les épisodes de l'index sont pris (comportement PyQt)."""
+    """Si episode_ids est vide ou absent, tous les Ã©pisodes de l'index sont pris (comportement PyQt)."""
 
     episode_ids: list[str] | None = None
 
@@ -1641,21 +1811,21 @@ def save_characters(
 @app.post(
     "/characters/import_from_segments",
     status_code=200,
-    summary="Ajoute au catalogue les locuteurs distincts (speaker_explicit) des segments (parité PyQt)",
+    summary="Ajoute au catalogue les locuteurs distincts (speaker_explicit) des segments (paritÃ© PyQt)",
 )
 def import_characters_from_segments(
     body: _ImportSpeakersBody | None = Body(default=None),
     store: ProjectStore = Depends(_get_store),
     db: CorpusDB | None = Depends(_get_db_optional),
 ) -> dict[str, Any]:
-    """Même logique que PersonnagesTabWidget._import_speakers_from_segments."""
+    """MÃªme logique que PersonnagesTabWidget._import_speakers_from_segments."""
     index = store.load_series_index()
     if not index or not index.episodes:
         raise HTTPException(
             status_code=422,
             detail={
                 "error": "NO_EPISODES",
-                "message": "Aucun épisode dans l'index. Ajoutez des épisodes au corpus.",
+                "message": "Aucun Ã©pisode dans l'index. Ajoutez des Ã©pisodes au corpus.",
             },
         )
     b = body or _ImportSpeakersBody()
@@ -1663,7 +1833,7 @@ def import_characters_from_segments(
     if not episode_ids:
         raise HTTPException(
             status_code=422,
-            detail={"error": "NO_EPISODE_IDS", "message": "Liste d'épisodes vide."},
+            detail={"error": "NO_EPISODE_IDS", "message": "Liste d'Ã©pisodes vide."},
         )
     speakers: list[str] = []
     if db is not None:
@@ -1677,7 +1847,7 @@ def import_characters_from_segments(
             "distinct_speakers_found": 0,
             "message": (
                 "Aucun locuteur (speaker_explicit) dans les segments. "
-                "Segmentez d'abord les épisodes."
+                "Segmentez d'abord les Ã©pisodes."
             ),
         }
     characters = list(store.load_character_names())
@@ -1716,7 +1886,7 @@ def import_characters_from_segments(
         "distinct_speakers_found": len(speakers),
     }
     if added == 0:
-        out["message"] = "Tous les locuteurs trouvés sont déjà dans le catalogue."
+        out["message"] = "Tous les locuteurs trouvÃ©s sont dÃ©jÃ  dans le catalogue."
     return out
 
 
@@ -1740,7 +1910,7 @@ def save_assignments(
     return {"saved": len(body.assignments)}
 
 
-# ─── /web — Sources web (MX-021b) ─────────────────────────────────────────────
+# â”€â”€â”€ /web â€” Sources web (MX-021b) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class _TvmazeDiscoverBody(BaseModel):
@@ -1766,14 +1936,14 @@ def _episode_ref_to_dict(ep) -> dict[str, Any]:
     }
 
 
-@app.post("/web/tvmaze/discover", summary="Découvrir une série via TVMaze (MX-021b)")
+@app.post("/web/tvmaze/discover", summary="DÃ©couvrir une sÃ©rie via TVMaze (MX-021b)")
 def web_tvmaze_discover(body: _TvmazeDiscoverBody) -> dict[str, Any]:
-    """Recherche une série par nom sur TVMaze et retourne la liste des épisodes."""
+    """Recherche une sÃ©rie par nom sur TVMaze et retourne la liste des Ã©pisodes."""
     name = body.series_name.strip()
     if not name:
         raise HTTPException(
             status_code=422,
-            detail={"error": "EMPTY_NAME", "message": "Le nom de la série est requis."},
+            detail={"error": "EMPTY_NAME", "message": "Le nom de la sÃ©rie est requis."},
         )
     try:
         adapter = TvmazeAdapter()
@@ -1791,14 +1961,14 @@ def web_tvmaze_discover(body: _TvmazeDiscoverBody) -> dict[str, Any]:
     }
 
 
-@app.post("/web/subslikescript/discover", summary="Découvrir une série via Subslikescript (MX-021b)")
+@app.post("/web/subslikescript/discover", summary="DÃ©couvrir une sÃ©rie via Subslikescript (MX-021b)")
 def web_subslikescript_discover(body: _SubslikeDiscoverBody) -> dict[str, Any]:
-    """Parse la page série Subslikescript et retourne la liste des épisodes."""
+    """Parse la page sÃ©rie Subslikescript et retourne la liste des Ã©pisodes."""
     url = body.series_url.strip()
     if not url:
         raise HTTPException(
             status_code=422,
-            detail={"error": "EMPTY_URL", "message": "L'URL de la série est requise."},
+            detail={"error": "EMPTY_URL", "message": "L'URL de la sÃ©rie est requise."},
         )
     try:
         adapter = SubslikescriptAdapter()
@@ -1819,13 +1989,13 @@ def web_subslikescript_discover(body: _SubslikeDiscoverBody) -> dict[str, Any]:
 @app.post(
     "/web/subslikescript/fetch_transcript",
     status_code=201,
-    summary="Télécharger et importer un transcript depuis Subslikescript (MX-021b)",
+    summary="TÃ©lÃ©charger et importer un transcript depuis Subslikescript (MX-021b)",
 )
 def web_subslikescript_fetch_transcript(
     body: _SubslikeFetchBody,
     store: ProjectStore = Depends(_get_store),
 ) -> dict[str, Any]:
-    """Récupère le transcript d'un épisode depuis Subslikescript et le sauvegarde dans le projet."""
+    """RÃ©cupÃ¨re le transcript d'un Ã©pisode depuis Subslikescript et le sauvegarde dans le projet."""
     episode_id = body.episode_id.strip()
     episode_url = body.episode_url.strip()
     if not episode_id or not episode_url:
@@ -1854,7 +2024,7 @@ def web_subslikescript_fetch_transcript(
     }
 
 
-# ─── /export (MX-021b Exporter) ───────────────────────────────────────────────
+# â”€â”€â”€ /export (MX-021b Exporter) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class _ExportBody(BaseModel):
@@ -1870,7 +2040,7 @@ def run_export(
     path: Path = Depends(_require_project_path),
     store: ProjectStore = Depends(_get_store),
 ) -> dict[str, Any]:
-    """Génère un fichier d'export dans {project_path}/exports/ et retourne son chemin."""
+    """GÃ©nÃ¨re un fichier d'export dans {project_path}/exports/ et retourne son chemin."""
     import json as _json
     from howimetyourcorpus.core.export_utils import (
         export_corpus_txt, export_corpus_csv, export_corpus_json, export_corpus_docx,
@@ -1890,10 +2060,10 @@ def run_export(
     export_dir.mkdir(exist_ok=True)
     out_path = export_dir / f"{scope}.{fmt}"
 
-    # ── characters ────────────────────────────────────────────────────────────
+    # â”€â”€ characters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if scope == "characters":
         if fmt not in ("json", "csv"):
-            raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": "Personnages: formats supportés: json, csv."})
+            raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": "Personnages: formats supportÃ©s: json, csv."})
         characters = store.load_character_names()
         if fmt == "json":
             out_path.write_text(_json.dumps({"characters": characters}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1915,10 +2085,10 @@ def run_export(
                     w.writerow([c.get("id", ""), c.get("canonical", "")] + [names.get(lg, "") for lg in all_langs] + [aliases])
         return {"scope": scope, "fmt": fmt, "characters": len(characters), "path": str(out_path)}
 
-    # ── assignments ───────────────────────────────────────────────────────────
+    # â”€â”€ assignments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if scope == "assignments":
         if fmt not in ("json", "csv"):
-            raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": "Assignations: formats supportés: json, csv."})
+            raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": "Assignations: formats supportÃ©s: json, csv."})
         assignments = store.load_character_assignments()
         if fmt == "json":
             out_path.write_text(_json.dumps({"assignments": assignments}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1942,7 +2112,7 @@ def run_export(
 
     index = store.load_series_index()
     if index is None or not index.episodes:
-        raise HTTPException(422, detail={"error": "NO_EPISODES", "message": "Aucun épisode dans le projet."})
+        raise HTTPException(422, detail={"error": "NO_EPISODES", "message": "Aucun Ã©pisode dans le projet."})
 
     index_ids = {ep.episode_id for ep in index.episodes}
     ep_filter: set[str] | None = None
@@ -1950,7 +2120,7 @@ def run_export(
         if len(body.episode_ids) == 0:
             raise HTTPException(
                 422,
-                detail={"error": "EMPTY_EPISODE_FILTER", "message": "episode_ids vide : sélectionnez au moins un épisode."},
+                detail={"error": "EMPTY_EPISODE_FILTER", "message": "episode_ids vide : sÃ©lectionnez au moins un Ã©pisode."},
             )
         unknown = [eid for eid in body.episode_ids if eid not in index_ids]
         if unknown:
@@ -1958,7 +2128,7 @@ def run_export(
                 422,
                 detail={
                     "error": "INVALID_EPISODE_FILTER",
-                    "message": f"Épisode(s) inconnus dans l'index : {unknown[:5]}",
+                    "message": f"Ã‰pisode(s) inconnus dans l'index : {unknown[:5]}",
                 },
             )
         ep_filter = set(body.episode_ids)
@@ -1980,14 +2150,14 @@ def run_export(
         elif fmt == "docx":  export_corpus_docx(pairs, out_path)
         elif fmt == "jsonl": export_corpus_utterances_jsonl(pairs, out_path)
         else:
-            raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": f"Format {fmt} non supporté pour corpus."})
+            raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": f"Format {fmt} non supportÃ© pour corpus."})
         return {"scope": scope, "fmt": fmt, "episodes": len(pairs), "path": str(out_path)}
 
     if scope == "jobs":
         job_store_inst = get_job_store(path)
         all_jobs = [j.to_dict() for j in job_store_inst.list_all()]
         if fmt not in ("jsonl", "json"):
-            raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": "Jobs: formats supportés: jsonl, json."})
+            raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": "Jobs: formats supportÃ©s: jsonl, json."})
         out_path = export_dir / f"jobs.{fmt}"
         if fmt == "jsonl":
             lines = "\n".join(_json.dumps(j, ensure_ascii=False) for j in all_jobs)
@@ -2017,11 +2187,11 @@ def run_export(
     elif fmt == "tsv":   export_segments_tsv(all_segments, out_path)
     elif fmt == "docx":  export_segments_docx(all_segments, out_path)
     else:
-        raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": f"Format {fmt} non supporté pour segments."})
+        raise HTTPException(422, detail={"error": "UNSUPPORTED_FORMAT", "message": f"Format {fmt} non supportÃ© pour segments."})
     return {"scope": scope, "fmt": fmt, "segments": len(all_segments), "path": str(out_path)}
 
 
-# ─── /export/qa (MX-027) ─────────────────────────────────────────────────────
+# â”€â”€â”€ /export/qa (MX-027) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get("/export/qa", summary="Rapport QA corpus (MX-027)")
@@ -2030,12 +2200,12 @@ def export_qa_report(
     store: ProjectStore = Depends(_get_store),
     db: CorpusDB | None = Depends(_get_db_optional),
 ) -> dict[str, Any]:
-    """Diagnostics corpus : état normalisation, segmentation, alignement."""
+    """Diagnostics corpus : Ã©tat normalisation, segmentation, alignement."""
     import json as _json
 
     index = store.load_series_index()
     if index is None or not index.episodes:
-        # En lenient, pas de bandeau « bloquant » : projet vide = avertissement seulement.
+        # En lenient, pas de bandeau Â« bloquant Â» : projet vide = avertissement seulement.
         empty_gate = "warnings" if policy == "lenient" else "blocking"
         empty_level = "warning" if policy == "lenient" else "blocking"
         return {
@@ -2047,7 +2217,7 @@ def export_qa_report(
             "n_segmented": 0,
             "n_with_srts": 0,
             "n_alignment_runs": 0,
-            "issues": [{"level": empty_level, "code": "NO_EPISODES", "message": "Aucun épisode dans le projet."}],
+            "issues": [{"level": empty_level, "code": "NO_EPISODES", "message": "Aucun Ã©pisode dans le projet."}],
         }
 
     episodes = index.episodes
@@ -2081,10 +2251,10 @@ def export_qa_report(
                 if sub.is_dir() and (sub / "report.json").exists():
                     n_alignment_runs += 1
 
-        # Ne pas exiger raw.txt si clean ou segments existent (workflow sans fichier raw conservé).
+        # Ne pas exiger raw.txt si clean ou segments existent (workflow sans fichier raw conservÃ©).
         has_any_transcript = bool(has_raw or has_clean or has_segments)
         if not has_any_transcript:
-            # Épisode listé dans l’index TV sans aucun contenu sur disque (catalogue seul).
+            # Ã‰pisode listÃ© dans lâ€™index TV sans aucun contenu sur disque (catalogue seul).
             level = "blocking" if policy == "strict" else "warning"
             issues.append({
                 "level": level,
@@ -2103,7 +2273,7 @@ def export_qa_report(
                 "level": level,
                 "code": "NOT_SEGMENTED",
                 "episode": eid,
-                "message": f"Non segmenté : {eid}",
+                "message": f"Non segmentÃ© : {eid}",
             })
         else:
             n_raw += 1
@@ -2112,12 +2282,12 @@ def export_qa_report(
                 "level": level,
                 "code": "NOT_NORMALIZED",
                 "episode": eid,
-                "message": f"Non normalisé : {eid}",
+                "message": f"Non normalisÃ© : {eid}",
             })
 
     has_blocking = any(i["level"] == "blocking" for i in issues)
     has_warnings = any(i["level"] == "warning" for i in issues)
-    # Politique lenient : jamais de gate « blocking » (export reste possible ; détails dans issues).
+    # Politique lenient : jamais de gate Â« blocking Â» (export reste possible ; dÃ©tails dans issues).
     if policy == "lenient":
         has_blocking = False
     gate = "blocking" if has_blocking else ("warnings" if has_warnings else "ok")
@@ -2135,27 +2305,27 @@ def export_qa_report(
     }
 
 
-# ─── /assignments/auto (MX-032) ──────────────────────────────────────────────
+# â”€â”€â”€ /assignments/auto (MX-032) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-@app.post("/assignments/auto", status_code=200, summary="Auto-assignation speaker_explicit → personnages (MX-032)")
+@app.post("/assignments/auto", status_code=200, summary="Auto-assignation speaker_explicit â†’ personnages (MX-032)")
 def auto_assign_characters(
     dry_run: bool = Query(False, description="Simuler sans sauvegarder"),
     store: ProjectStore = Depends(_get_store),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
     """
     Parcourt tous les segments du projet, compare speaker_explicit avec le catalogue
-    personnages (id / canonical / names_by_lang / aliases, insensible à la casse),
-    et crée les assignations manquantes de type source_type=segment.
-    Les assignations existantes ne sont pas modifiées.
+    personnages (id / canonical / names_by_lang / aliases, insensible Ã  la casse),
+    et crÃ©e les assignations manquantes de type source_type=segment.
+    Les assignations existantes ne sont pas modifiÃ©es.
     Si dry_run=true, retourne uniquement les statistiques sans sauvegarder.
     """
     characters = store.load_character_names()
     if not characters:
-        raise HTTPException(422, detail={"error": "NO_CHARACTERS", "message": "Aucun personnage défini."})
+        raise HTTPException(422, detail={"error": "NO_CHARACTERS", "message": "Aucun personnage dÃ©fini."})
 
-    # Build lowercase label → character_id lookup
+    # Build lowercase label â†’ character_id lookup
     label_to_char: dict[str, str] = {}
     for char in characters:
         char_id = (char.get("id") or char.get("canonical") or "").strip()
@@ -2174,7 +2344,7 @@ def auto_assign_characters(
         return {"created": 0, "unmatched_labels": [], "dry_run": dry_run}
 
     # Load existing assignments to skip duplicates.
-    # Rétrocompat : les anciens enregistrements peuvent utiliser source_type/source_id
+    # RÃ©trocompat : les anciens enregistrements peuvent utiliser source_type/source_id
     # ou le nouveau format segment_id/cue_id.
     existing = store.load_character_assignments()
     existing_seg_ids: set[str] = set()
@@ -2220,7 +2390,7 @@ def auto_assign_characters(
     }
 
 
-# ─── /episodes/{id}/propagate_characters (MX-031) ────────────────────────────
+# â”€â”€â”€ /episodes/{id}/propagate_characters (MX-031) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 class _PropagateBody(BaseModel):
@@ -2230,25 +2400,25 @@ class _PropagateBody(BaseModel):
 @app.post(
     "/episodes/{episode_id}/propagate_characters",
     status_code=200,
-    summary="Propage les personnages vers segments/cues et réécrit les SRT (MX-031 + G-003)",
+    summary="Propage les personnages vers segments/cues et rÃ©Ã©crit les SRT (MX-031 + G-003)",
 )
 def propagate_characters(
     episode_id: str,
     body: _PropagateBody,
     store: ProjectStore = Depends(_get_store),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
     """
-    À partir des assignations et des liens d'alignement du run :
-    - Met à jour segments.speaker_explicit avec le nom canonique du personnage
-    - Préfixe les text_clean des cues alignées avec le nom par langue
-    - Réécrit les fichiers SRT dans le projet
-    Retourne le nombre de segments et de cues mis à jour.
+    Ã€ partir des assignations et des liens d'alignement du run :
+    - Met Ã  jour segments.speaker_explicit avec le nom canonique du personnage
+    - PrÃ©fixe les text_clean des cues alignÃ©es avec le nom par langue
+    - RÃ©Ã©crit les fichiers SRT dans le projet
+    Retourne le nombre de segments et de cues mis Ã  jour.
     """
 
     run = db.get_align_run(body.run_id)
     if run is None or run.get("episode_id") != episode_id:
-        raise HTTPException(404, detail={"error": "RUN_NOT_FOUND", "message": f"Run {body.run_id!r} introuvable pour l'épisode {episode_id!r}."})
+        raise HTTPException(404, detail={"error": "RUN_NOT_FOUND", "message": f"Run {body.run_id!r} introuvable pour l'Ã©pisode {episode_id!r}."})
 
     nb_seg, nb_cue = store.propagate_character_names(db, episode_id, body.run_id)
     return {
@@ -2259,15 +2429,15 @@ def propagate_characters(
     }
 
 
-# ─── /alignment_runs (MX-030) ────────────────────────────────────────────────
+# â”€â”€â”€ /alignment_runs (MX-030) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @app.get("/alignment_runs", summary="Toutes les runs d'alignement du projet (MX-030)")
 def list_all_alignment_runs(
     store: ProjectStore = Depends(_get_store),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
-    """Retourne toutes les runs d'alignement pour tous les épisodes du projet."""
+    """Retourne toutes les runs d'alignement pour tous les Ã©pisodes du projet."""
     index = store.load_series_index()
     if index is None or not index.episodes:
         return {"runs": []}
@@ -2280,18 +2450,18 @@ def list_all_alignment_runs(
     return {"runs": all_runs}
 
 
-# ─── /export/alignments (MX-030) ─────────────────────────────────────────────
+# â”€â”€â”€ /export/alignments (MX-030) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-@app.get("/export/alignments", summary="Export CSV/TSV du concordancier parallèle d'un run (MX-030)")
+@app.get("/export/alignments", summary="Export CSV/TSV du concordancier parallÃ¨le d'un run (MX-030)")
 def export_alignments(
-    episode_id: str = Query(..., description="ID de l'épisode"),
+    episode_id: str = Query(..., description="ID de l'Ã©pisode"),
     run_id: str = Query(..., description="ID du run d'alignement"),
     fmt: str = Query("csv", pattern="^(csv|tsv)$"),
-    db: CorpusDB | None = Depends(_get_db),
+    db: CorpusDB = Depends(_get_db),
     store: ProjectStore = Depends(_get_store),
 ) -> dict[str, Any]:
-    """Génère un fichier CSV ou TSV du concordancier parallèle pour un run d'alignement."""
+    """GÃ©nÃ¨re un fichier CSV ou TSV du concordancier parallÃ¨le pour un run d'alignement."""
     import csv as _csv
     import io as _io
 

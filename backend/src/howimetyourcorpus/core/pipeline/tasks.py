@@ -392,6 +392,43 @@ class BuildDbIndexStep(Step):
         return StepResult(True, f"Indexed {len(to_index)} episodes")
 
 
+def _propagate_speaker_to_sentences(
+    sentences: list["Segment"],
+    utterances: list["Segment"],
+) -> None:
+    """Copie speaker_explicit des utterances vers les sentences qui se chevauchent.
+
+    Utilise le meilleur chevauchement en nombre de caractères entre les plages
+    [start_char, end_char] de chaque paire (sentence, utterance).  Lorsque aucun
+    chevauchement direct n'existe (ex. préfixe "SPEAKER:" inclus dans la sentence),
+    la dernière utterance se terminant avant la sentence est utilisée en repli.
+
+    Cette propagation est nécessaire car le segmenteur de phrases ne détecte jamais
+    de speaker (SENTENCE_BOUNDARY est purement syntaxique).
+    """
+    spk_utts = sorted(
+        (u for u in utterances if u.speaker_explicit),
+        key=lambda u: u.start_char,
+    )
+    if not spk_utts:
+        return
+
+    for sent in sentences:
+        best_utt = None
+        best_overlap = 0
+        last_before: "Segment | None" = None
+        for utt in spk_utts:
+            overlap = max(0, min(sent.end_char, utt.end_char) - max(sent.start_char, utt.start_char))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_utt = utt
+            if utt.end_char <= sent.start_char:
+                last_before = utt
+        candidate = best_utt if best_overlap > 0 else last_before
+        if candidate:
+            sent.speaker_explicit = candidate.speaker_explicit
+
+
 class SegmentEpisodeStep(Step):
     """Phase 2 : segmente un épisode (phrases + tours), écrit segments.jsonl, upsert DB."""
 
@@ -439,6 +476,10 @@ class SegmentEpisodeStep(Step):
             s.episode_id = self.episode_id
         for u in utterances:
             u.episode_id = self.episode_id
+        # Propager speaker_explicit des utterances vers les sentences qui se chevauchent.
+        # Ceci permet à assignments/auto et DeriveUtterancesStep de fonctionner sur les
+        # sentences même quand le transcript a des marqueurs de locuteur.
+        _propagate_speaker_to_sentences(sentences, utterances)
         ep_dir.mkdir(parents=True, exist_ok=True)
         with segments_path.open("w", encoding="utf-8") as f:
             for seg in sentences + utterances:
@@ -495,16 +536,170 @@ class RebuildSegmentsIndexStep(Step):
         n = len(to_segment)
         lang_hint = getattr(context.get("config"), "normalize_profile", DEFAULT_NORMALIZE_PROFILE).split("_")[0].replace("default", "en") or "en"
         is_cancelled = context.get("is_cancelled")
+        failed: list[str] = []
         for i, eid in enumerate(to_segment):
             if is_cancelled and is_cancelled():
                 return StepResult(False, "Cancelled")
             step = SegmentEpisodeStep(eid, lang_hint=lang_hint)
-            step.run(context, force=force, on_progress=on_progress, on_log=on_log)
+            result = step.run(context, force=force, on_progress=on_progress, on_log=on_log)
+            if not result.success:
+                failed.append(eid)
+                logger.warning("RebuildSegmentsIndexStep: échec sur %s — %s", eid, result.message)
             if on_progress and n:
                 on_progress(self.name, (i + 1) / n, f"Segmented {eid}")
         if on_progress:
-            on_progress(self.name, 1.0, f"Rebuilt segments for {n} episodes")
-        return StepResult(True, f"Rebuilt segments for {n} episodes")
+            on_progress(self.name, 1.0, f"Rebuilt segments for {n} episodes ({len(failed)} failed)")
+        if failed:
+            return StepResult(
+                False,
+                f"{len(failed)}/{n} épisode(s) en échec : {', '.join(failed)}",
+                {"failed": failed, "total": n},
+            )
+        return StepResult(True, f"Rebuilt segments for {n} episodes", {"total": n})
+
+
+class DeriveUtterancesStep(Step):
+    """Dérive les utterances depuis les sentences groupées par speaker_explicit.
+
+    Prérequis :
+    - ``segment_transcript`` doit avoir été exécuté (sentences en DB).
+    - ``propagate_characters`` doit avoir été exécuté pour que les sentences
+      aient un ``speaker_explicit`` canonique (nom du catalogue).
+
+    Si aucune sentence n'a de ``speaker_explicit``, le step échoue avec un
+    message explicite orientant vers ``propagate_characters``.
+
+    Les nouvelles utterances remplacent les précédentes en DB et dans
+    ``segments.jsonl``.  Les sentences et les ``align_runs`` sont invalidés.
+    """
+
+    name = "derive_utterances"
+
+    def __init__(self, episode_id: str) -> None:
+        self.episode_id = episode_id
+
+    def run(
+        self,
+        context: PipelineContext,
+        *,
+        force: bool = False,
+        on_progress: Callable[[str, float, str], None] | None = None,
+        on_log: Callable[[str, str], None] | None = None,
+    ) -> StepResult:
+        import itertools
+
+        from howimetyourcorpus.core.segment import Segment
+
+        store: ProjectStore = context["store"]
+        db: CorpusDB | None = context.get("db")
+        if not db:
+            return StepResult(False, "No DB in context")
+
+        if on_progress:
+            on_progress(self.name, 0.0, f"Chargement des phrases de {self.episode_id}…")
+
+        sentences = db.get_segments_for_episode(self.episode_id, kind="sentence")
+        if not sentences:
+            return StepResult(
+                False,
+                f"Aucune phrase trouvée pour {self.episode_id!r}. "
+                "Lancez d'abord le job segment_transcript.",
+            )
+
+        # Garde : vérifier qu'au moins une phrase a un speaker_explicit
+        speakers_found = [s["speaker_explicit"] for s in sentences if s.get("speaker_explicit")]
+        if not speakers_found:
+            return StepResult(
+                False,
+                f"Aucun locuteur défini sur les phrases de {self.episode_id!r}. "
+                "Lancez d'abord propagate_characters (depuis un run d'alignement) "
+                "pour propager les noms canoniques vers les phrases.",
+            )
+
+        if on_progress:
+            on_progress(self.name, 0.3, "Groupement par locuteur…")
+
+        # Trier par n pour garantir l'ordre du transcript
+        sentences_sorted = sorted(sentences, key=lambda s: s["n"])
+
+        # Grouper les phrases consécutives par même speaker_explicit
+        new_utterances: list[Segment] = []
+        utt_n = 0
+        for speaker, group in itertools.groupby(
+            sentences_sorted, key=lambda s: (s.get("speaker_explicit") or "")
+        ):
+            group_list = list(group)
+            text = " ".join(s["text"] for s in group_list)
+            start_char = group_list[0]["start_char"]
+            end_char = group_list[-1]["end_char"]
+            sentence_ids = [s["segment_id"] for s in group_list]
+            new_utterances.append(
+                Segment(
+                    episode_id=self.episode_id,
+                    kind="utterance",
+                    n=utt_n,
+                    start_char=start_char,
+                    end_char=end_char,
+                    text=text,
+                    speaker_explicit=speaker or None,
+                    meta={"derived_from": "sentences", "sentence_ids": sentence_ids},
+                )
+            )
+            utt_n += 1
+
+        if on_progress:
+            on_progress(self.name, 0.6, f"{len(new_utterances)} tours dérivés, écriture…")
+
+        # Mettre à jour segments.jsonl : conserver les sentences (depuis DB, avec speaker
+        # mis à jour par propagate), remplacer les utterances par les nouvelles.
+        ep_dir = store._episode_dir(self.episode_id)  # noqa: SLF001
+        segments_path = ep_dir / SEGMENTS_JSONL_FILENAME
+        ep_dir.mkdir(parents=True, exist_ok=True)
+
+        with segments_path.open("w", encoding="utf-8") as f:
+            # Sentences relues depuis DB (speaker_explicit canonique après propagation)
+            for s in sentences_sorted:
+                meta = json.loads(s.get("meta_json") or "{}") if isinstance(s.get("meta_json"), str) else {}
+                obj = {
+                    "segment_id": s["segment_id"],
+                    "episode_id": s["episode_id"],
+                    "kind": s["kind"],
+                    "n": s["n"],
+                    "start_char": s["start_char"],
+                    "end_char": s["end_char"],
+                    "text": s["text"],
+                    "speaker_explicit": s.get("speaker_explicit"),
+                    "meta": meta,
+                }
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            for seg in new_utterances:
+                obj = {
+                    "segment_id": seg.segment_id,
+                    "episode_id": seg.episode_id,
+                    "kind": seg.kind,
+                    "n": seg.n,
+                    "start_char": seg.start_char,
+                    "end_char": seg.end_char,
+                    "text": seg.text,
+                    "speaker_explicit": seg.speaker_explicit,
+                    "meta": seg.meta,
+                }
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+        db.upsert_segments(self.episode_id, "utterance", new_utterances)
+        db.delete_align_runs_for_episode(self.episode_id)
+
+        if on_progress:
+            on_progress(
+                self.name,
+                1.0,
+                f"Dérivé : {len(new_utterances)} tours depuis {len(sentences)} phrases",
+            )
+        return StepResult(
+            True,
+            f"Derive utterances: {self.episode_id}",
+            {"utterances": len(new_utterances), "sentences": len(sentences)},
+        )
 
 
 class ImportSubtitlesStep(Step):
