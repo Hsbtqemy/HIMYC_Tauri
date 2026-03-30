@@ -347,6 +347,12 @@ async fn sidecar_fetch_loopback(
     if host != "127.0.0.1" && host != "localhost" && host != "::1" && host != "[::1]" {
         return Err(format!("seules les adresses loopback sont autorisees, recu '{}'", host));
     }
+    // Restreindre au port du backend HIMYC (8765) pour réduire la surface d'attaque
+    // en cas de compromission de la WebView (SSRF sur autres services locaux)
+    let port = parsed.port().unwrap_or(80);
+    if port != 8765 {
+        return Err(format!("seul le port 8765 (backend HIMYC) est autorise, recu '{}'", port));
+    }
     let client = reqwest::Client::builder()
         .no_proxy()
         .connect_timeout(std::time::Duration::from_secs(5))

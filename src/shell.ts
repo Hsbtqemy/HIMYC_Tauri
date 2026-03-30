@@ -17,6 +17,15 @@ import type { ShellContext, BackendStatus, AlignerHandoff } from "./context.ts";
 import { fetchHealth, API_BASE } from "./api.ts";
 
 const IS_TAURI = import.meta.env.VITE_E2E !== "true" && "__TAURI_INTERNALS__" in window;
+
+// ─── Constantes de timing ─────────────────────────────────────────────────────
+/** Intervalle du polling de santé backend (ms). */
+const HEALTH_POLL_INTERVAL_MS = 30_000;
+/** Timeout maximal d'une requête healthcheck avant de considérer le backend hors ligne (ms). */
+const HEALTH_TIMEOUT_MS = 8_000;
+/** Nombre de tentatives × délai pour attendre le démarrage du backend (ms). */
+const PROJECT_INIT_POLL_DELAY_MS = 500;
+const PROJECT_INIT_POLL_MAX = 60;
 import { mountHub,           disposeHub }           from "./modules/hubModule.ts";
 import { mountConcordancier, disposeConcordancier } from "./modules/concordancierModule.ts";
 import { mountConstituer,    disposeConstituer }    from "./modules/constituerModule.ts";
@@ -420,8 +429,8 @@ async function _changeProject() {
     await invoke("set_project_path", { path });
     // Attendre que le backend réponde
     let ready = false;
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < PROJECT_INIT_POLL_MAX; i++) {
+      await new Promise((r) => setTimeout(r, PROJECT_INIT_POLL_DELAY_MS));
       try {
         await fetchHealth();
         ready = true;
@@ -629,7 +638,7 @@ async function _checkHealth() {
   // On utilise Promise.race car invoke() Tauri ne supporte pas AbortSignal.
   let _timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    _timeoutId = setTimeout(() => reject(new Error("health check timeout")), 8_000);
+    _timeoutId = setTimeout(() => reject(new Error("health check timeout")), HEALTH_TIMEOUT_MS);
   });
   try {
     const h = await Promise.race([fetchHealth(), timeoutPromise]);
@@ -669,7 +678,7 @@ export async function initShell() {
   }
 
   await _checkHealth();
-  _pollInterval = setInterval(_checkHealth, 30_000);
+  _pollInterval = setInterval(_checkHealth, HEALTH_POLL_INTERVAL_MS);
 }
 
 /** Arrête le polling de santé backend. Utile en test ou avant un HMR complet. */

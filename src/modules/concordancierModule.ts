@@ -23,110 +23,26 @@
 
 import type { ShellContext } from "../context";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
-import { apiPost, apiGet, ApiError, formatApiError, withNoDbRecovery, fetchQaReport, rebuildSegmentsFts } from "../api";
+import {
+  apiPost, apiGet, ApiError, formatApiError, withNoDbRecovery, fetchQaReport, rebuildSegmentsFts,
+  type KwicHit, type QueryRequest, type QueryResponse,
+  type FacetsTopEpisode, type FacetsResponse, type KwicHistoryEntry,
+  type StatsWord, type StatsResult, type StatsCompareWord, type StatsCompareResult,
+} from "../api";
 import { openMetaPanel, type EpisodeSourceInfo } from "../features/metaPanel.ts";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────
+// Les types KwicHit, QueryRequest, QueryResponse, FacetsTopEpisode, FacetsResponse,
+// KwicHistoryEntry, StatsWord, StatsResult, StatsCompareWord, StatsCompareResult
+// sont centralisés dans api.ts et importés ci-dessus.
 
 type BuilderMode = "simple" | "phrase" | "and" | "or" | "near";
-
-interface KwicHit {
-  episode_id: string;
-  title: string;
-  left: string;
-  match: string;
-  right: string;
-  position: number;
-  score: number;
-  segment_id: string | null;
-  kind: string | null;
-  cue_id: string | null;
-  lang: string | null;
-  speaker: string | null;
-}
 
 /** Toujours `segments` — le concordancier ne cible que l’index FTS des segments. */
 const KWIC_SCOPE = "segments" as const;
 
-interface QueryRequest {
-  term: string;
-  scope: typeof KWIC_SCOPE;
-  kind?: string | null;
-  lang?: string | null;
-  episode_id?: string | null;
-  speaker?: string | null;
-  window?: number;
-  limit?: number;
-  offset?: number;
-  case_sensitive?: boolean;
-}
-
-interface QueryResponse {
-  term: string;
-  scope: string;
-  total: number;
-  has_more?: boolean;
-  hits: KwicHit[];
-}
-
-interface FacetsTopEpisode {
-  episode_id: string;
-  title: string;
-  count: number;
-}
-
-interface FacetsResponse {
-  term: string;
-  scope: string;
-  total_hits: number;
-  distinct_episodes: number;
-  distinct_langs: number;
-  top_episodes: FacetsTopEpisode[];
-}
-
-interface HistoryEntry {
-  term: string;
-  scope: string;
-  kind: string;
-  lang: string;
-  episode_id: string;
-  speaker: string;
-  ts: number;
-}
-
-interface StatsWord {
-  word: string;
-  count: number;
-  freq_pct: number;
-}
-
-interface StatsResult {
-  label: string;
-  total_tokens: number;
-  total_segments: number;
-  total_episodes: number;
-  vocabulary_size: number;
-  avg_tokens_per_segment: number;
-  top_words: StatsWord[];
-  rare_words: StatsWord[];
-}
-
-interface StatsCompareWord {
-  word: string;
-  count_a: number;
-  count_b: number;
-  freq_a: number;
-  freq_b: number;
-  ratio: number;
-}
-
-interface StatsCompareResult {
-  label_a: string;
-  label_b: string;
-  a: StatsResult;
-  b: StatsResult;
-  comparison: StatsCompareWord[];
-}
+// Alias local pour raccourcir les usages internes
+type HistoryEntry = KwicHistoryEntry;
 
 // ── CSS ──────────────────────────────────────────────────────────────────────
 

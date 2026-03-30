@@ -1058,3 +1058,66 @@ export interface StatsCompareResult {
 // appelle directement apiPost("/stats/lexical") et apiPost("/stats/compare").
 // Les interfaces ci-dessus (StatsSlot, StatsResult, etc.) sont conservées comme
 // source de vérité de typage si d'autres modules les importent à l'avenir.
+
+// ── Concordancier KWIC — types centralisés (MX-034) ──────────────────────────
+
+export interface KwicHit {
+  episode_id: string;
+  title: string;
+  left: string;
+  match: string;
+  right: string;
+  position: number;
+  score: number;
+  segment_id: string | null;
+  kind: string | null;
+  cue_id: string | null;
+  lang: string | null;
+  speaker: string | null;
+}
+
+export interface QueryRequest {
+  term: string;
+  scope: "segments";
+  kind?: string | null;
+  lang?: string | null;
+  episode_id?: string | null;
+  speaker?: string | null;
+  window?: number;
+  limit?: number;
+  offset?: number;
+  case_sensitive?: boolean;
+}
+
+export interface QueryResponse {
+  term: string;
+  scope: string;
+  total: number;
+  has_more?: boolean;
+  hits: KwicHit[];
+}
+
+export interface FacetsTopEpisode {
+  episode_id: string;
+  title: string;
+  count: number;
+}
+
+export interface FacetsResponse {
+  term: string;
+  scope: string;
+  total_hits: number;
+  distinct_episodes: number;
+  distinct_langs: number;
+  top_episodes: FacetsTopEpisode[];
+}
+
+export interface KwicHistoryEntry {
+  term: string;
+  scope: string;
+  kind: string;
+  lang: string;
+  episode_id: string;
+  speaker: string;
+  ts: number;
+}

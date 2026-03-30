@@ -65,6 +65,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:1421",
+        "http://127.0.0.1:1421",   # Vite dev (adresse IP explicite)
         "tauri://localhost",
         "https://tauri.localhost",
     ],
@@ -507,7 +508,8 @@ def list_episodes(
         from pathlib import Path as _Path
         _seg_file = _Path(store.root_dir) / EPISODES_DIR_NAME / eid / SEGMENTS_JSONL_FILENAME
         if _seg_file.exists():
-            _transcript_state = "segmented"
+            _has_srt_tracks = bool(tracks_by_episode.get(eid))
+            _transcript_state = "ready_for_alignment" if _has_srt_tracks else "segmented"
         elif store.has_episode_clean(eid):
             _transcript_state = "normalized"
         elif store.has_episode_raw(eid):
@@ -801,8 +803,8 @@ def delete_transcript(
     if db is not None:
         try:
             db.delete_segments_for_episode(episode_id)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("delete_transcript: impossible de supprimer les segments DB: %s", _exc)
     return {"episode_id": episode_id, "source_key": "transcript", "removed": removed}
 
 
@@ -835,12 +837,12 @@ def delete_source(
     if db is not None:
         try:
             db.delete_subtitle_track(episode_id, lang)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("delete_source: impossible de supprimer la piste SRT DB: %s", _exc)
         try:
             db.delete_align_runs_for_episode(episode_id)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("delete_source: impossible de supprimer les runs d'alignement DB: %s", _exc)
     return {"episode_id": episode_id, "source_key": source_key, "lang": lang}
 
 
@@ -888,8 +890,8 @@ def patch_transcript(
     if db is not None:
         try:
             db.delete_segments_for_episode(episode_id)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.warning("patch_transcript: impossible de supprimer les segments DB: %s", _exc)
     store.set_episode_prep_status(episode_id, "transcript", "normalized")
     return {
         "episode_id": episode_id,
