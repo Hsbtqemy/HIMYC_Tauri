@@ -557,7 +557,7 @@ async function loadQaData(container: HTMLElement, mountId: number) {
       blocking: `${qa.issues.filter(i => i.level === "blocking").length} problème(s) bloquant(s) — vérifier la curation`,
     };
     banner.className = `exp-gate-banner ${qa.gate}`;
-    gateText.innerHTML = `<span>${icons[qa.gate]}</span> ${escapeHtml(labels[qa.gate])} <span style="margin-left:8px;font-size:0.72rem;opacity:.7">[${qa.policy}]</span>`;
+    gateText.innerHTML = `<span>${icons[qa.gate]}</span> ${escapeHtml(labels[qa.gate])} <span style="margin-left:8px;font-size:0.72rem;opacity:.7">[${escapeHtml(qa.policy)}]</span>`;
 
     // Issues
     if (qa.issues.length > 0) {
@@ -594,7 +594,7 @@ async function loadAlignmentsTab(container: HTMLElement, mountId: number) {
     renderAlignmentsTab(body);
   } catch (e) {
     if (_mountId !== mountId) return;
-    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${formatApiError(e)}</div>`;
+    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${escapeHtml(formatApiError(e))}</div>`;
   }
 }
 
@@ -686,7 +686,7 @@ async function loadSrtTab(container: HTMLElement, mountId: number) {
     renderSrtTab(body, runs);
   } catch (e) {
     if (_mountId !== mountId) return;
-    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${formatApiError(e)}</div>`;
+    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${escapeHtml(formatApiError(e))}</div>`;
   }
 }
 

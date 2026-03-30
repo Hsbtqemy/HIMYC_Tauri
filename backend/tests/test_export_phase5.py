@@ -40,6 +40,8 @@ def sample_stats():
         "nb_pivot": 5,
         "nb_target": 5,
         "by_status": {"auto": 8, "accepted": 2},
+        "by_status_pivot": {"auto": 6, "accepted": 2},
+        "coverage_pct": 80.0,
         "avg_confidence": 0.85,
     }
 
@@ -106,6 +108,10 @@ def test_export_align_report_html(sample_stats, sample_rows):
         assert "Liens totaux" in text
         assert "10" in text
         assert "Échantillon" in text or "concordancier" in text.lower()
+        # Champs by_status_pivot et coverage_pct ajoutés au 9e audit
+        assert "pivot uniquement" in text, "by_status_pivot doit apparaître dans le rapport HTML"
+        assert "80.0%" in text, "coverage_pct doit apparaître dans le rapport HTML"
+        assert "auto=6" in text, "les valeurs by_status_pivot doivent être présentes"
     finally:
         path.unlink(missing_ok=True)
 

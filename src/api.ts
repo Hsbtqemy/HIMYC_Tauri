@@ -1054,17 +1054,7 @@ export interface StatsCompareResult {
   comparison: StatsCompareWord[];
 }
 
-export async function fetchLexicalStats(slot: StatsSlot, label?: string): Promise<StatsResult> {
-  return apiPost<StatsResult>("/stats/lexical", { slot, label: label ?? "" });
-}
-
-export async function fetchStatsCompare(
-  a: StatsSlot,
-  b: StatsSlot,
-  labelA?: string,
-  labelB?: string,
-): Promise<StatsCompareResult> {
-  return apiPost<StatsCompareResult>("/stats/compare", {
-    a, b, label_a: labelA ?? "A", label_b: labelB ?? "B",
-  });
-}
+// fetchLexicalStats et fetchStatsCompare ont été supprimées : le concordancierModule
+// appelle directement apiPost("/stats/lexical") et apiPost("/stats/compare").
+// Les interfaces ci-dessus (StatsSlot, StatsResult, etc.) sont conservées comme
+// source de vérité de typage si d'autres modules les importent à l'avenir.

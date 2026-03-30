@@ -625,12 +625,20 @@ function _toast(msg: string) {
 // ─── Healthcheck ──────────────────────────────────────────────────────────────
 
 async function _checkHealth() {
+  // Timeout de 8 s : évite de bloquer indéfiniment si le backend est très lent.
+  // On utilise Promise.race car invoke() Tauri ne supporte pas AbortSignal.
+  let _timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    _timeoutId = setTimeout(() => reject(new Error("health check timeout")), 8_000);
+  });
   try {
-    const h = await fetchHealth();
+    const h = await Promise.race([fetchHealth(), timeoutPromise]);
+    clearTimeout(_timeoutId);
     const wasOnline = _backendStatus.online;
     _setBackendStatus({ online: true, version: h.version });
     if (!wasOnline) _toast("Backend HIMYC connecté");
   } catch {
+    clearTimeout(_timeoutId);
     const wasOnline = _backendStatus.online;
     _setBackendStatus({ online: false });
     if (wasOnline) _toast("Backend HIMYC déconnecté");
