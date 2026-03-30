@@ -7586,7 +7586,8 @@ async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
   if (!kpiStrip) return;
   try {
     const s: AlignRunStats = await fetchAlignRunStats(epId, runId);
-    const byStatus = s.by_status ?? {};
+    // Utiliser by_status_pivot (liens pivot uniquement) pour cohérence avec coverage_pct
+    const byStatus = s.by_status_pivot ?? s.by_status ?? {};
     const nAuto     = byStatus.auto     ?? 0;
     const nAccepted = byStatus.accepted ?? 0;
     const nRejected = byStatus.rejected ?? 0;
@@ -8420,7 +8421,16 @@ async function renderConcordance(
   wrap.innerHTML = `<div class="conc-empty">Chargement…</div>`;
   try {
     const res = await fetchConcordance(epId, runId, { q: filters.q, status: filters.status });
-    if (countEl) countEl.textContent = `${res.total} ligne(s)`;
+    if (countEl) {
+      countEl.textContent = `${res.total} ligne(s)`;
+      if (res.has_more) {
+        const warn = document.createElement("span");
+        warn.style.cssText = "margin-left:6px;font-size:0.72rem;color:var(--warning,#b45309);font-weight:600";
+        warn.title = "Le nombre de résultats dépasse la limite d'affichage. Affinez la recherche ou le filtre de statut pour voir toutes les lignes.";
+        warn.textContent = "⚠ résultats tronqués";
+        countEl.appendChild(warn);
+      }
+    }
     if (res.rows.length === 0) {
       wrap.innerHTML = `<div class="conc-empty">Aucun résultat${filters.q ? ` pour « ${escapeHtml(filters.q)} »` : ""}.</div>`;
       return;

@@ -23,7 +23,7 @@
 
 import type { ShellContext } from "../context";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
-import { apiPost, apiGet, ApiError, withNoDbRecovery, fetchQaReport, rebuildSegmentsFts } from "../api";
+import { apiPost, apiGet, ApiError, formatApiError, withNoDbRecovery, fetchQaReport, rebuildSegmentsFts } from "../api";
 import { openMetaPanel, type EpisodeSourceInfo } from "../features/metaPanel.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -1497,7 +1497,7 @@ async function runStats(container: HTMLElement) {
     renderStatsResults(container);
   } catch (e) {
     if (_statsToken !== myToken) return;
-    resultsEl.innerHTML = `<div class="kwic-stats-loading" style="color:var(--danger,#e53e3e)">Erreur : ${escapeHtml(String(e))}</div>`;
+    resultsEl.innerHTML = `<div class="kwic-stats-loading" style="color:var(--danger,#e53e3e)">Erreur : ${escapeHtml(formatApiError(e))}</div>`;
   } finally {
     if (_statsToken !== myToken) return;
     runBtn.disabled    = false;

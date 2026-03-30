@@ -8,7 +8,7 @@
 
 import type { ShellContext } from "../context";
 import { injectGlobalCss, escapeHtml } from "../ui/dom";
-import { fetchConfig, fetchQaReport, fetchCharacters, ApiError } from "../api";
+import { fetchConfig, fetchQaReport, fetchCharacters, ApiError, formatApiError } from "../api";
 
 const CSS = `
 /* ── Racine : image plein cadre + contenu au-dessus ───────────────────── */
@@ -531,7 +531,7 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
       if (!_mounted) return;
       const nameEl = container.querySelector<HTMLElement>("#hub-project-name");
       if (nameEl) {
-        nameEl.textContent = err instanceof ApiError ? err.errorCode : "Erreur chargement config";
+        nameEl.textContent = formatApiError(err);
         nameEl.classList.add("none");
       }
     });
@@ -546,26 +546,44 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
       const el = root.querySelector<HTMLElement>(`#${id}`);
       if (el) el.textContent = String(val);
     };
-    Promise.all([fetchQaReport("lenient"), fetchCharacters()])
-      .then(([qa, chars]) => {
+    const setErr = (id: string) => {
+      const el = root.querySelector<HTMLElement>(`#${id}`);
+      if (el) { el.textContent = "—"; el.title = "Erreur de chargement"; }
+    };
+    // Promise.allSettled : chaque KPI s'affiche indépendamment même si l'autre échoue
+    void Promise.allSettled([fetchQaReport("lenient"), fetchCharacters()])
+      .then(([qaResult, charsResult]) => {
         if (!_mounted) return;
-        set("hkpi-ep",  qa.total_episodes);
-        set("hkpi-seg", qa.n_segmented);
-        set("hkpi-srt", qa.n_with_srts);
-        set("hkpi-run", qa.n_alignment_runs);
-        set("hkpi-chr", chars.characters.length);
-        const gateEl = root.querySelector<HTMLElement>("#hkpi-gate");
-        if (gateEl) {
-          const cls  = qa.gate === "ok" ? "ok" : qa.gate === "warnings" ? "warnings" : "blocking";
-          const lbl  = qa.gate === "ok" ? "OK"  : qa.gate === "warnings" ? "⚠"      : "🔴";
-          gateEl.innerHTML = `<span class="hub-gate-dot ${cls}"></span>${lbl}`;
+        strip.style.display = "flex"; // toujours visible même en cas d'erreur partielle
+
+        if (qaResult.status === "fulfilled") {
+          const qa = qaResult.value;
+          set("hkpi-ep",  qa.total_episodes);
+          set("hkpi-seg", qa.n_segmented);
+          set("hkpi-srt", qa.n_with_srts);
+          set("hkpi-run", qa.n_alignment_runs);
+          const gateEl = root.querySelector<HTMLElement>("#hkpi-gate");
+          if (gateEl) {
+            const cls = qa.gate === "ok" ? "ok" : qa.gate === "warnings" ? "warnings" : "blocking";
+            const lbl = qa.gate === "ok" ? "OK"  : qa.gate === "warnings" ? "⚠"      : "🔴";
+            gateEl.innerHTML = `<span class="hub-gate-dot ${cls}"></span>${lbl}`;
+          }
+        } else {
+          for (const id of ["hkpi-ep", "hkpi-seg", "hkpi-srt", "hkpi-run"]) setErr(id);
+          const gateEl = root.querySelector<HTMLElement>("#hkpi-gate");
+          if (gateEl) {
+            gateEl.textContent = "⚠";
+            gateEl.title = qaResult.reason instanceof ApiError
+              ? qaResult.reason.message
+              : "Impossible de charger le rapport QA";
+          }
         }
-        strip.style.display = "flex";
-      })
-      .catch((err) => {
-        if (!_mounted) return;
-        const gateEl = root.querySelector<HTMLElement>("#hkpi-gate");
-        if (gateEl) gateEl.textContent = err instanceof ApiError ? err.errorCode : "Erreur KPIs";
+
+        if (charsResult.status === "fulfilled") {
+          set("hkpi-chr", charsResult.value.characters.length);
+        } else {
+          setErr("hkpi-chr");
+        }
       });
   }
 

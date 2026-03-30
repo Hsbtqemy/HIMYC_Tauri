@@ -574,6 +574,9 @@ def export_align_report_html(
     """
     t = title or f"Rapport alignement — {episode_id}"
     by_status = stats.get("by_status") or {}
+    by_status_pivot = stats.get("by_status_pivot") or {}
+    coverage_pct = stats.get("coverage_pct")
+    coverage_str = f"{coverage_pct}%" if coverage_pct is not None else "—"
     lines = [
         "<!DOCTYPE html>",
         "<html><head><meta charset='utf-8'><title>" + _escape(t) + "</title></head><body>",
@@ -586,7 +589,9 @@ def export_align_report_html(
         "<li>Liens pivot (segment↔EN): " + str(stats.get("nb_pivot", 0)) + "</li>",
         "<li>Liens target (EN↔FR): " + str(stats.get("nb_target", 0)) + "</li>",
         "<li>Confiance moyenne: " + (str(stats.get("avg_confidence")) if stats.get("avg_confidence") is not None else "—") + "</li>",
-        "<li>Par statut: " + ", ".join(f"{k}={v}" for k, v in sorted(by_status.items())) + "</li>",
+        "<li>Couverture (pivot): " + coverage_str + "</li>",
+        "<li>Par statut (pivot uniquement): " + ", ".join(f"{k}={v}" for k, v in sorted(by_status_pivot.items())) + "</li>",
+        "<li>Par statut (tous rôles): " + ", ".join(f"{k}={v}" for k, v in sorted(by_status.items())) + "</li>",
         "</ul>",
         "<h2>Échantillon concordancier parallèle</h2>",
         "<table border='1' cellpadding='4' style='border-collapse: collapse;'>",
