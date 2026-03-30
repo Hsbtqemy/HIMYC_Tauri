@@ -1191,7 +1191,9 @@ let _showParallel                  = false;
 let _caseSensitive                 = false;
 let _unsubscribe: (() => void) | null = null;
 let _closeDropdownsRef: ((e: MouseEvent) => void) | null = null;
-let _searchToken                   = 0; // token anti-race pour les facettes
+let _searchToken                   = 0; // token anti-race pour les requêtes de recherche
+let _statsToken                    = 0; // token anti-race pour les requêtes de stats
+let _concordancierMountId          = 0; // incrémenté au dispose pour invalider les async en vol (reindex FTS…)
 let _sortMode: SortMode            = "relevance";
 let _compactView                   = false;
 let _kbdHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -1472,6 +1474,8 @@ async function runStats(container: HTMLElement) {
   const slotA     = { episode_ids: epA ? [epA] : null, kind: kindA || null, speaker: speakerA || null, top_n: topN, min_length: 2 };
   const labelA    = epA || kindA || speakerA || "Corpus complet";
 
+  const myToken = ++_statsToken;
+
   runBtn.disabled     = true;
   runBtn.textContent  = "Analyse…";
   resultsEl.innerHTML = `<div class="kwic-stats-loading">⏳ Analyse en cours…</div>`;
@@ -1489,10 +1493,13 @@ async function runStats(container: HTMLElement) {
     } else {
       _statsResults = await apiPost<StatsResult>("/stats/lexical", { slot: slotA, label: labelA });
     }
+    if (_statsToken !== myToken) return;
     renderStatsResults(container);
   } catch (e) {
+    if (_statsToken !== myToken) return;
     resultsEl.innerHTML = `<div class="kwic-stats-loading" style="color:var(--danger,#e53e3e)">Erreur : ${escapeHtml(String(e))}</div>`;
   } finally {
+    if (_statsToken !== myToken) return;
     runBtn.disabled    = false;
     runBtn.textContent = "Analyser";
   }
@@ -1662,7 +1669,7 @@ function renderTableResults(container: HTMLElement) {
         const prev = btn.textContent;
         btn.textContent = "✓";
         setTimeout(() => { btn.textContent = prev; }, 1200);
-      });
+      }).catch(() => { /* permission refusée ou API non disponible */ });
     });
   });
 
@@ -1773,7 +1780,7 @@ function renderAlignedCards(container: HTMLElement) {
         const prev = btn.textContent;
         btn.textContent = "✓";
         setTimeout(() => { btn.textContent = prev; }, 1200);
-      });
+      }).catch(() => { /* permission refusée ou API non disponible */ });
     });
   });
 
@@ -2221,18 +2228,22 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
     errEl.style.display = "none";
     reindexBtn.disabled = true;
     reindexBtn.textContent = "…";
+    const myMountId = _concordancierMountId;
     void withNoDbRecovery(() => rebuildSegmentsFts())
       .then((r) => {
+        if (_concordancierMountId !== myMountId) return;
         feedbackEl.textContent =
           `Index segments FTS reconstruit — ${r.segments_rows} segment(s) en base, ${r.segments_fts_rows} ligne(s) dans l’index. Vous pouvez relancer une recherche.`;
         feedbackEl.className = "kwic-feedback visible success";
       })
       .catch((e) => {
+        if (_concordancierMountId !== myMountId) return;
         const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
         feedbackEl.textContent = msg;
         feedbackEl.className = "kwic-feedback visible err";
       })
       .finally(() => {
+        if (_concordancierMountId !== myMountId) return;
         reindexBtn.disabled = false;
         reindexBtn.textContent = "Réindexer FTS";
       });
@@ -2599,10 +2610,12 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       }
 
     } catch (e) {
+      if (_searchToken !== myToken) return; // requête annulée ou nouvelle recherche lancée
       const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
       errEl.textContent = msg;
       errEl.style.display = "block";
     } finally {
+      if (_searchToken !== myToken) return; // une nouvelle recherche a pris le relais
       // Ne pas réactiver le bouton si le backend est hors ligne
       // (evite la race avec le handler onStatusChange qui vient de le désactiver)
       if (!_offlineErrShown) searchBtn.disabled = false;
@@ -2725,6 +2738,8 @@ export function disposeConcordancier() {
   if (_closeDropdownsRef) { document.removeEventListener("click", _closeDropdownsRef); _closeDropdownsRef = null; }
   if (_kbdHandler)       { document.removeEventListener("keydown", _kbdHandler); _kbdHandler = null; }
   _searchToken++;
+  _statsToken++;
+  _concordancierMountId++;
   _hits                = [];
   _page                = 0;
   _hasMore             = false;

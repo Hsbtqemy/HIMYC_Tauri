@@ -23,11 +23,10 @@ struct BackendState {
 }
 
 fn kill_backend(state: &BackendState) {
-    if let Ok(mut guard) = state.process.lock() {
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+    let mut guard = state.process.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 

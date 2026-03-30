@@ -30,7 +30,7 @@ def _validate_subslikescript_url(url: str) -> None:
     Raises ValueError si le schéma ou l'hôte est inacceptable.
     """
     parsed = urlparse(url)
-    if parsed.scheme not in ("https", "http"):
+    if parsed.scheme != "https":
         raise ValueError(
             f"Schéma URL non autorisé pour subslikescript : {parsed.scheme!r}. "
             "Seul https:// est accepté."

@@ -122,9 +122,17 @@ def validate_profiles_json(data: dict[str, Any]) -> None:
                     raise ProfileValidationError(
                         f"Profil '{pid}' : règle regex #{j+1} : 'replacement' manquant ou invalide."
                     )
-                # Valider que le pattern est une regex valide
+                # Limiter la longueur du pattern pour réduire les risques de ReDoS
+                _MAX_REGEX_LEN = 300
+                if len(rule["pattern"]) > _MAX_REGEX_LEN:
+                    raise ProfileValidationError(
+                        f"Profil '{pid}' : règle regex #{j+1} : pattern trop long "
+                        f"({len(rule['pattern'])} car., max {_MAX_REGEX_LEN})."
+                    )
+                # Valider que le pattern est une regex valide et peut s'appliquer sans lever d'exception
                 try:
-                    re.compile(rule["pattern"])
+                    compiled = re.compile(rule["pattern"])
+                    compiled.subn(rule.get("replacement", ""), "test_probe_string")
                 except re.error as e:
                     raise ProfileValidationError(
                         f"Profil '{pid}' : règle regex #{j+1} : pattern invalide : {e}"
@@ -174,6 +182,19 @@ class NormalizationProfile:
     # Règles regex custom (Phase 3)
     custom_regex_rules: list[tuple[str, str]] = field(default_factory=list)  # [(pattern, replacement), ...]
 
+    # Patterns précompilés — initialisés dans __post_init__, non sérialisés
+    _compiled_regex_rules: list[tuple[re.Pattern, str]] = field(default_factory=list, init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        """Précompile les patterns regex pour éviter de recompiler à chaque application."""
+        compiled = []
+        for pattern_str, replacement in self.custom_regex_rules:
+            try:
+                compiled.append((re.compile(pattern_str), replacement))
+            except re.error:
+                pass  # patterns invalides ignorés (déjà rejetés par validate_profiles_json)
+        self._compiled_regex_rules = compiled
+
     def _apply_case_transform(self, line: str) -> str:
         """Applique la transformation de casse sur une ligne."""
         if not line or self.case_transform == "none":
@@ -202,13 +223,12 @@ class NormalizationProfile:
         
         result = line
         replacements = 0
-        for pattern, replacement in self.custom_regex_rules:
+        for compiled_pattern, replacement in self._compiled_regex_rules:
             try:
-                new_result, count = re.subn(pattern, replacement, result)
+                new_result, count = compiled_pattern.subn(replacement, result)
                 result = new_result
                 replacements += count
             except re.error:
-                # Pattern regex invalide, ignorer silencieusement
                 continue
         
         return result, replacements

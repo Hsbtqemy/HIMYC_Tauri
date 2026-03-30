@@ -429,7 +429,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
       // Lazy-load SRT enrichi tab
       if (tab.dataset.stage === "srt" && !_srtTabLoaded) {
         _srtTabLoaded = true;
-        loadSrtTab(container);
+        loadSrtTab(container, _mountId);
       }
     });
   });
@@ -459,6 +459,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
       // Export QA as JSON via /export (scope=jobs is available; QA data is client-side)
       // We serialize the current QA data client-side if available, or re-fetch
       if (!_qaData) _qaData = await fetchQaReport(_qaPolicy);
+      if (_mountId !== myMountId) { btn.disabled = false; return; }
       const blob = new Blob([JSON.stringify(_qaData, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -469,6 +470,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
       result.textContent = "✓ Téléchargement lancé";
       result.className = "exp-result visible ok";
     } catch (e) {
+      if (_mountId !== myMountId) { btn.disabled = false; return; }
       result.textContent = formatApiError(e);
       result.className = "exp-result visible err";
     } finally {
@@ -491,6 +493,7 @@ async function handleExport(container: HTMLElement, btn: HTMLButtonElement) {
   const fmt    = btn.dataset.fmt!;
   const resultId = `exp-${scope}-result`;
   const result = container.querySelector<HTMLElement>(`#${resultId}`)!;
+  const myMountId = _mountId; // capturé au clic pour détecter une navigation
 
   btn.disabled = true;
   result.textContent = "Export en cours…";
@@ -498,6 +501,7 @@ async function handleExport(container: HTMLElement, btn: HTMLButtonElement) {
 
   try {
     const res: ExportResult = await runExport(scope, fmt);
+    if (_mountId !== myMountId) { btn.disabled = false; return; }
     const count = res.episodes != null
       ? `${res.episodes} épisodes`
       : res.segments != null
@@ -510,6 +514,7 @@ async function handleExport(container: HTMLElement, btn: HTMLButtonElement) {
     result.textContent = `✓ ${count} → ${res.path}`;
     result.className = "exp-result visible ok";
   } catch (e) {
+    if (_mountId !== myMountId) { btn.disabled = false; return; }
     result.textContent = formatApiError(e);
     result.className = "exp-result visible err";
   } finally {
@@ -665,7 +670,7 @@ function renderAlignmentsTab(body: HTMLElement) {
 
 // ── SRT Enrichi tab ──────────────────────────────────────────────────────────
 
-async function loadSrtTab(container: HTMLElement) {
+async function loadSrtTab(container: HTMLElement, mountId: number) {
   const body = container.querySelector<HTMLElement>("#exp-srt-body");
   if (!body) return;
   body.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Chargement des runs…</div>`;
@@ -673,9 +678,11 @@ async function loadSrtTab(container: HTMLElement) {
     const { runs } = _alignRuns !== null
       ? { runs: _alignRuns }
       : await fetchAllAlignmentRuns();
+    if (_mountId !== mountId) return;
     if (_alignRuns === null) _alignRuns = runs;
     renderSrtTab(body, runs);
   } catch (e) {
+    if (_mountId !== mountId) return;
     body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${formatApiError(e)}</div>`;
   }
 }

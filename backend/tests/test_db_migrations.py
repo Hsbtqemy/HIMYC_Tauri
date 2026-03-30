@@ -29,7 +29,7 @@ def test_migrate_v1_to_latest_creates_segments_subtitle_tracks_align_runs(db_pat
     db = CorpusDB(db_path_v1_only)
     db.ensure_migrated()
 
-    assert db.get_schema_version() == 5, "schema_version doit être 5 après toutes les migrations"
+    assert db.get_schema_version() == 8, "schema_version doit être 8 après toutes les migrations"
     # Tables segments, subtitle_tracks, align_runs sont requêtables (pas d'exception)
     assert db.get_segments_for_episode("S01E01") == []
     assert db.get_tracks_for_episode("S01E01") == []

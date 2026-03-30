@@ -408,12 +408,12 @@ def export_corpus_utterances_csv(
         for ref, text in episodes:
             for u in _iter_utterance_rows(text):
                 w.writerow([
-                    ref.episode_id,
+                    _csv_safe(ref.episode_id),
                     ref.season,
                     ref.episode,
-                    ref.title or "",
-                    u.get("speaker") or "",
-                    u.get("text", ""),
+                    _csv_safe(ref.title or ""),
+                    _csv_safe(u.get("speaker") or ""),
+                    _csv_safe(u.get("text", "")),
                     u.get("index", 0),
                 ])
     return None
@@ -449,12 +449,12 @@ def export_corpus_phrases_csv(
         for ref, text in episodes:
             for ph in _iter_phrase_rows(text):
                 w.writerow([
-                    ref.episode_id,
+                    _csv_safe(ref.episode_id),
                     ref.season,
                     ref.episode,
-                    ref.title or "",
-                    ph.get("speaker") or "",
-                    ph.get("text", ""),
+                    _csv_safe(ref.title or ""),
+                    _csv_safe(ph.get("speaker") or ""),
+                    _csv_safe(ph.get("text", "")),
                     ph.get("index", 0),
                 ])
     return None
@@ -469,9 +469,11 @@ PARALLEL_CONCORDANCE_COLUMNS = [
 
 
 def _parallel_cell(row: dict, key: str):
-    """Valeur d'une cellule pour l'export CSV/TSV : None → chaîne vide (évite "None" dans les fichiers)."""
+    """Valeur d'une cellule pour l'export CSV/TSV : None → chaîne vide, protection injection CSV."""
     v = row.get(key)
-    return "" if v is None else v
+    if v is None:
+        return ""
+    return _csv_safe(v)
 
 
 def export_parallel_concordance_csv(rows: list[dict], path: Path) -> None:
