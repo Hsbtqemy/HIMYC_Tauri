@@ -397,17 +397,19 @@ def get_align_stats_for_run(
     nb_links = 0
     nb_pivot = 0
     nb_target = 0
-    by_status: dict[str, int] = {}
+    by_status: dict[str, int] = {}          # tous rôles confondus (rétro-compat)
+    by_status_pivot: dict[str, int] = {}    # uniquement liens pivot (pour coverage_pct)
     conf_sum = 0.0
     conf_count = 0
     for r in rows:
         cnt = r["cnt"]
         nb_links += cnt
+        st = r["status"] or "auto"
         if r["role"] == "pivot":
             nb_pivot += cnt
+            by_status_pivot[st] = by_status_pivot.get(st, 0) + cnt
         else:
             nb_target += cnt
-        st = r["status"] or "auto"
         by_status[st] = by_status.get(st, 0) + cnt
         if r["confidence"] is not None:
             conf_sum += r["confidence"] * cnt
@@ -420,6 +422,7 @@ def get_align_stats_for_run(
         "nb_pivot": nb_pivot,
         "nb_target": nb_target,
         "by_status": by_status,
+        "by_status_pivot": by_status_pivot,
         "avg_confidence": round(avg_confidence, 4) if avg_confidence is not None else None,
     }
 
@@ -559,12 +562,17 @@ def get_parallel_concordance(
     episode_id: str,
     run_id: str,
     status_filter: str | None = None,
-) -> list[dict]:
+    limit: int = 2000,
+    q: str | None = None,
+) -> tuple[list[dict], bool]:
     """
     Construit les lignes du concordancier parallèle : segment (transcript) + cue pivot + cues cibles
     à partir des liens d'alignement. Si pivot_lang est FR (alignement segment↔FR direct),
     text_fr est rempli depuis les liens pivot ; text_en reste vide sauf si des liens cible existent.
     Utilise le segment_kind du run (params_json) pour charger les bons segments (sentence ou utterance).
+
+    Retourne ``(rows, has_more)`` où ``has_more`` indique que des lignes supplémentaires ont été
+    ignorées en raison du LIMIT. Le filtre textuel ``q`` est appliqué avant le LIMIT.
     """
     links = query_alignment_for_episode(conn, episode_id, run_id=run_id, status_filter=status_filter)
     run = get_align_run(conn, run_id)
@@ -627,8 +635,19 @@ def get_parallel_concordance(
         for _lg in SUPPORTED_LANGUAGES:
             row[f"text_{_lg}"] = text_by_lang[_lg]
             row[f"confidence_{_lg}"] = conf_by_lang[_lg]
+        # Filtre textuel optionnel (appliqué avant le LIMIT pour garantir la cohérence)
+        if q:
+            ql = q.lower()
+            if not (
+                ql in text_seg.lower()
+                or any(ql in text_by_lang.get(_lg, "").lower() for _lg in SUPPORTED_LANGUAGES)
+            ):
+                continue
         result.append(row)
-    return result
+        if len(result) >= limit:
+            # Il reste potentiellement des lignes — signaler has_more = True
+            return result, len(pivot_links) > (pivot_links.index(pl) + 1)
+    return result, False
 
 def get_link_positions(
     conn: "sqlite3.Connection",

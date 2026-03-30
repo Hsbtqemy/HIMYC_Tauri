@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# SRT: HH:MM:SS,MMM --> HH:MM:SS,MMM
+# SRT: HH:MM:SS,MMM --> HH:MM:SS,MMM  (certains fichiers utilisent . à la place de ,)
 SRT_TIMECODE = re.compile(
-    r"(\d{2}):(\d{2}):(\d{2})[,](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,](\d{3})"
+    r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})"
 )
 # VTT: HH:MM:SS.MMM --> HH:MM:SS.MMM (ou MM:SS.MMM)
 VTT_TIMECODE = re.compile(
@@ -184,8 +184,13 @@ def parse_subtitle_content(content: str, source_path: str = "") -> tuple[list[Cu
     """
     Parse le contenu déjà lu (SRT ou VTT). Détecte le format par extension ou en-tête WEBVTT.
     Retourne (cues, "srt"|"vtt"). À privilégier pour éviter de lire le fichier deux fois.
+
+    Détection VTT robuste : supprime les BOM UTF-8/UTF-16 et les espaces initiaux avant
+    de chercher "WEBVTT", et étend la fenêtre de recherche à 50 caractères pour les fichiers
+    avec des espaces ou lignes vides avant l'en-tête.
     """
-    if "WEBVTT" in content[:20]:
+    stripped = content.lstrip("\ufeff\ufffe\xef\xbb\xbf \t\r\n")
+    if stripped[:6] == "WEBVTT":
         return parse_vtt(content, source_path), "vtt"
     return parse_srt(content, source_path), "srt"
 

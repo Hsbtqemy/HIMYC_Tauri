@@ -6511,11 +6511,13 @@ async function renderSegmentsDbBlock(
           const segId = tr.dataset.segId!;
           if (newVal === currentVal) { cancelEdit(); return; }
           input.disabled = true;
+          const myMountId = _constituerMountId;
           try {
             const patch: { text?: string; speaker_explicit?: string | null } = {};
             if (field === "text") patch.text = newVal;
             else patch.speaker_explicit = newVal || null;
             const updated = await withNoDbRecovery(() => patchSegment(epId, segId, patch));
+            if (_constituerMountId !== myMountId) return; // navigation survenue pendant l'await
             // Mettre à jour le DOM
             tr.dataset.segText = updated.text;
             tr.dataset.segSpk = updated.speaker_explicit ?? "";
@@ -6536,6 +6538,7 @@ async function renderSegmentsDbBlock(
               }
             }
           } catch (err) {
+            if (_constituerMountId !== myMountId) return;
             cell.innerHTML = cell.dataset.orig ?? currentVal;
             const msg = err instanceof ApiError ? err.message : String(err);
             cell.title = `Erreur : ${msg}`;
@@ -7691,6 +7694,13 @@ async function loadAuditLinks(panel: HTMLElement, epId: string, runId: string) {
     _vsFocusIdx = -1;
     _vsSetup(wrap, panel, epId, runId);
     updateMinimapViewport(panel);
+    // Mettre à jour le pager — toutes les données sont chargées (défilement virtuel),
+    // on ajuste limit pour refléter "une seule page virtuelle".
+    if (pager) {
+      _auditState.offset = 0;
+      _auditState.limit  = Math.max(links.length, 1);
+      renderAuditPager(pager, panel, epId, runId);
+    }
   } catch (e) {
     if (_auditLoadToken !== myToken) return;
     wrap.innerHTML = `<div style="padding:12px;font-size:0.78rem;color:var(--danger)">${escapeHtml(e instanceof ApiError ? e.message : String(e))}</div>`;

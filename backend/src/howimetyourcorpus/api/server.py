@@ -1064,12 +1064,14 @@ def get_alignment_run_stats(
     stats = db.get_align_stats_for_run(episode_id, run_id)
     collisions = db.get_collisions_for_run(episode_id, run_id)
     # Calcul couverture : % de liens non-rejetÃ©s et non-ignorÃ©s / total pivot
-    nb_pivot    = stats.get("nb_pivot", 0)
-    by_status   = stats.get("by_status", {})
-    nb_rejected = by_status.get("rejected", 0)
-    nb_ignored  = by_status.get("ignored",  0)
-    nb_active   = max(0, nb_pivot - nb_rejected - nb_ignored)
-    coverage_pct = round(nb_active / nb_pivot * 100, 1) if nb_pivot else None
+    nb_pivot         = stats.get("nb_pivot", 0)
+    # Utiliser by_status_pivot (liens pivot uniquement) pour ne pas biaiser coverage_pct
+    # avec les statuts des liens cibles (rejected sur un lien cible ≠ pivot rejeté).
+    by_status_pivot  = stats.get("by_status_pivot", stats.get("by_status", {}))
+    nb_rejected      = by_status_pivot.get("rejected", 0)
+    nb_ignored       = by_status_pivot.get("ignored",  0)
+    nb_active        = max(0, nb_pivot - nb_rejected - nb_ignored)
+    coverage_pct     = round(nb_active / nb_pivot * 100, 1) if nb_pivot else None
     return {
         **stats,
         "n_collisions": len(collisions),
@@ -1332,16 +1334,21 @@ def get_alignment_concordance(
     """
     run = db.get_align_run(run_id)
     pivot_lang = (run.get("pivot_lang") or DEFAULT_PIVOT_LANG).strip().lower() if run else DEFAULT_PIVOT_LANG
-    rows = db.get_parallel_concordance(episode_id, run_id, status_filter=status or None)
-    # Filtre texte cÃ´tÃ© backend si fourni
-    if q:
-        ql = q.lower()
-        rows = [
-            r for r in rows
-            if ql in (r.get("text_segment") or "").lower()
-            or any(ql in (r.get(f"text_{lang}") or "").lower() for lang in SUPPORTED_LANGUAGES)
-        ]
-    return {"episode_id": episode_id, "run_id": run_id, "pivot_lang": pivot_lang, "total": len(rows), "rows": rows}
+    # Filtre q et LIMIT délégués à get_parallel_concordance pour limiter la charge mémoire
+    rows, has_more = db.get_parallel_concordance(
+        episode_id, run_id,
+        status_filter=status or None,
+        q=q or None,
+        limit=MAX_KWIC_HITS,
+    )
+    return {
+        "episode_id": episode_id,
+        "run_id": run_id,
+        "pivot_lang": pivot_lang,
+        "total": len(rows),
+        "has_more": has_more,
+        "rows": rows,
+    }
 
 
 # â”€â”€â”€ Segments longtext (MX-029) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

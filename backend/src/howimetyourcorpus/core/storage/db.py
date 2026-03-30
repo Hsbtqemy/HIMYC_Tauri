@@ -731,14 +731,17 @@ class CorpusDB:
         episode_id: str,
         run_id: str,
         status_filter: str | None = None,
-    ) -> list[dict]:
+        limit: int = 2000,
+        q: str | None = None,
+    ) -> tuple[list[dict], bool]:
         """
         Construit les lignes du concordancier parallèle : segment (transcript) + cue EN + cues FR/IT
         à partir des liens d'alignement.
+        Retourne ``(rows, has_more)``.
         """
         conn = self._conn()
         try:
-            return db_align.get_parallel_concordance(conn, episode_id, run_id, status_filter)
+            return db_align.get_parallel_concordance(conn, episode_id, run_id, status_filter, limit=limit, q=q)
         finally:
             conn.close()
 
