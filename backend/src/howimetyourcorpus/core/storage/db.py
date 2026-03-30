@@ -141,6 +141,21 @@ class CorpusDB:
         finally:
             conn.close()
 
+    def rebuild_segments_fts(self) -> dict[str, int]:
+        """Reconstruit l'index FTS5 `segments_fts` depuis la table `segments` (commande FTS5 rebuild).
+
+        À utiliser après une incohérence entre la table segments et son index full-text,
+        par exemple après un import manuel ou une migration hors flux normal.
+
+        Retourne ``{"segments_rows": N, "segments_fts_rows": M}``.
+        """
+        with self.transaction() as conn:
+            conn.execute("INSERT INTO segments_fts(segments_fts) VALUES('rebuild')")
+        with self.connection() as conn:
+            seg_rows  = conn.execute("SELECT count(*) FROM segments").fetchone()[0]
+            fts_rows  = conn.execute("SELECT count(*) FROM segments_fts").fetchone()[0]
+        return {"segments_rows": int(seg_rows), "segments_fts_rows": int(fts_rows)}
+
     def ensure_migrated(self) -> None:
         """Exécute les migrations en attente (à appeler à l'ouverture d'un projet existant).
         Si des tables Phase 3+ sont manquantes (schema_version incohérent), exécute les scripts concernés.

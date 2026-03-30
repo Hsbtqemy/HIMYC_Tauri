@@ -206,8 +206,38 @@ def load_character_assignments(store: Any, *, logger_obj: logging.Logger) -> lis
     return data.get("assignments", [])
 
 
+_save_assignments_logger = logging.getLogger(__name__)
+
+
 def save_character_assignments(store: Any, assignments: list[dict[str, Any]]) -> None:
-    """Sauvegarde les assignations personnage."""
+    """Sauvegarde les assignations personnage.
+
+    Valide que les ``character_id`` référencés existent dans le catalogue courant.
+    Si le catalogue est absent ou vide, un avertissement est émis mais l'écriture
+    est acceptée (catalogue non encore défini).
+    """
+    # Validation optionnelle contre le catalogue : avertissement uniquement (pas de rejet)
+    # pour ne pas bloquer les flux où le catalogue est construit après les assignations.
+    try:
+        catalogue = load_character_names(store, logger_obj=_save_assignments_logger)
+        valid_ids = {(c.get("id") or "").strip() for c in catalogue if (c.get("id") or "").strip()}
+        if valid_ids:
+            orphan_ids = sorted(
+                {
+                    (a.get("character_id") or "").strip()
+                    for a in assignments
+                    if (a.get("character_id") or "").strip()
+                    and (a.get("character_id") or "").strip().lower() not in {v.lower() for v in valid_ids}
+                }
+            )
+            if orphan_ids:
+                _save_assignments_logger.warning(
+                    "save_character_assignments: character_id inconnus référencés (absent du catalogue): %s",
+                    ", ".join(orphan_ids[:10]),
+                )
+    except Exception as exc:  # noqa: BLE001
+        _save_assignments_logger.debug("save_character_assignments: validation catalogue ignorée: %s", exc)
+
     path = Path(store.root_dir) / store.CHARACTER_ASSIGNMENTS_JSON
     path.write_text(
         json.dumps({"assignments": assignments}, ensure_ascii=False, indent=2),

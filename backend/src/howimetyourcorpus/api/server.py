@@ -174,6 +174,26 @@ def init_corpus_db(
 # â”€â”€â”€ /health â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
+# ─── /project/rebuild_segments_fts ──────────────────────────────────────────
+
+
+@app.post(
+    "/project/rebuild_segments_fts",
+    summary="Reconstruit l'index FTS5 segments_fts depuis la table segments",
+)
+def rebuild_segments_fts(
+    db: CorpusDB = Depends(_get_db),
+) -> dict[str, Any]:
+    """
+    Exécute la commande FTS5 rebuild pour resynchroniser l'index full-text
+    des segments avec la table segments. Utile en cas d'incohérence détectée
+    via le bouton Réindexer FTS du concordancier.
+    """
+    result = db.rebuild_segments_fts()
+    return {"ok": True, **result}
+
+
+
 @app.get("/health", summary="Healthcheck â€” verifie que le backend est en ligne")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": VERSION}
@@ -1955,7 +1975,7 @@ def web_tvmaze_discover(body: _TvmazeDiscoverBody) -> dict[str, Any]:
         index = adapter.discover_series(name)
     except Exception as exc:
         raise HTTPException(
-            status_code=422,
+            status_code=502,
             detail={"error": "TVMAZE_ERROR", "message": str(exc)},
         ) from exc
     return {
@@ -1980,7 +2000,7 @@ def web_subslikescript_discover(body: _SubslikeDiscoverBody) -> dict[str, Any]:
         index = adapter.discover_series(url)
     except Exception as exc:
         raise HTTPException(
-            status_code=422,
+            status_code=502,
             detail={"error": "SUBSLIKE_ERROR", "message": str(exc)},
         ) from exc
     return {
@@ -2014,7 +2034,7 @@ def web_subslikescript_fetch_transcript(
         raw_text, _meta = adapter.parse_episode(html, episode_url)
     except Exception as exc:
         raise HTTPException(
-            status_code=422,
+            status_code=502,
             detail={"error": "FETCH_ERROR", "message": str(exc)},
         ) from exc
     ep_dir = store._episode_dir(episode_id)
@@ -2051,6 +2071,7 @@ def run_export(
         export_corpus_txt, export_corpus_csv, export_corpus_json, export_corpus_docx,
         export_corpus_utterances_jsonl,
         export_segments_txt, export_segments_csv, export_segments_tsv, export_segments_docx,
+        _csv_safe,
     )
     from howimetyourcorpus.core.models import EpisodeRef
 
@@ -2087,7 +2108,11 @@ def run_export(
                 for c in characters:
                     names = c.get("names_by_lang") or {}
                     aliases = ";".join(c.get("aliases") or [])
-                    w.writerow([c.get("id", ""), c.get("canonical", "")] + [names.get(lg, "") for lg in all_langs] + [aliases])
+                    w.writerow(
+                        [_csv_safe(c.get("id", "")), _csv_safe(c.get("canonical", ""))]
+                        + [_csv_safe(names.get(lg, "")) for lg in all_langs]
+                        + [_csv_safe(aliases)]
+                    )
         return {"scope": scope, "fmt": fmt, "characters": len(characters), "path": str(out_path)}
 
     # â”€â”€ assignments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2107,11 +2132,11 @@ def run_export(
                     seg_id = a.get("segment_id") or (a.get("source_id") if a.get("source_type") == "segment" else "")
                     cue_id = a.get("cue_id") or (a.get("source_id") if a.get("source_type") == "cue" else "")
                     w.writerow([
-                        a.get("character_id", ""),
-                        a.get("speaker_label", ""),
-                        a.get("episode_id", ""),
-                        seg_id or "",
-                        cue_id or "",
+                        _csv_safe(a.get("character_id", "")),
+                        _csv_safe(a.get("speaker_label", "")),
+                        _csv_safe(a.get("episode_id", "")),
+                        _csv_safe(seg_id or ""),
+                        _csv_safe(cue_id or ""),
                     ])
         return {"scope": scope, "fmt": fmt, "assignments": len(assignments), "path": str(out_path)}
 
@@ -2235,8 +2260,8 @@ def export_qa_report(
     if db is not None:
         try:
             tracks_by_episode = db.get_tracks_for_episodes([ep.episode_id for ep in episodes])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("export/qa: impossible de charger les pistes SRT depuis la DB: %s", exc)
 
     for ep in episodes:
         eid = ep.episode_id
@@ -2496,6 +2521,7 @@ def export_alignments(
     writer = _csv.DictWriter(buf, fieldnames=fieldnames, delimiter=sep, extrasaction="ignore",
                               lineterminator="\n")
     writer.writeheader()
+    from howimetyourcorpus.core.export_utils import _csv_safe as _align_csv_safe
     for row in rows:
         # Stringify confidence values (all possible lang columns)
         r = dict(row)
@@ -2504,6 +2530,10 @@ def export_alignments(
                 r[k] = f"{r[k]:.4f}"
             else:
                 r[k] = ""
+        # Protection injection CSV sur les champs texte
+        for k in ("segment_id", "speaker", "text_segment", "text_en", "text_fr", "text_it"):
+            if k in r:
+                r[k] = _align_csv_safe(r[k])
         writer.writerow(r)
 
     out_path.write_text(buf.getvalue(), encoding="utf-8")

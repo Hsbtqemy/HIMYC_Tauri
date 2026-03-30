@@ -2669,7 +2669,16 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       if (dlA) dlA.innerHTML = opts;
       if (dlB) dlB.innerHTML = opts;
       _statsEpsLoaded = true;
-    } catch { /* ignore */ }
+    } catch (e) {
+      // Datalists non critiques : on loggue et on laisse vides (pas de blocage)
+      const dlA = container.querySelector<HTMLDataListElement>("#kwic-stats-datalist-a");
+      if (dlA) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.label = `(chargement épisodes impossible : ${e instanceof Error ? e.message : String(e)})`;
+        dlA.appendChild(opt);
+      }
+    }
   }
 
   statsBtn.addEventListener("click", () => {

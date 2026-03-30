@@ -650,14 +650,17 @@ function renderAlignmentsTab(body: HTMLElement) {
     row.querySelectorAll<HTMLButtonElement>(".align-export-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const fmt = btn.dataset.fmt as "csv" | "tsv";
+        const myMountId = _mountId; // capturé au clic pour détecter une navigation
         btn.disabled = true;
         result.textContent = "Export…";
         result.className = "exp-result visible";
         try {
           const res = await exportAlignments(epId, runId, fmt);
+          if (_mountId !== myMountId) { btn.disabled = false; return; }
           result.textContent = `✓ ${res.rows} lignes → ${res.path}`;
           result.className = "exp-result visible ok";
         } catch (e) {
+          if (_mountId !== myMountId) { btn.disabled = false; return; }
           result.textContent = formatApiError(e);
           result.className = "exp-result visible err";
         } finally {

@@ -2498,6 +2498,7 @@ let _styleInjected = false;
 let _unsubscribe: (() => void) | null = null;
 let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
+let _constituerMountId = 0; // incrémenté au dispose pour invalider les callbacks async en vol
 let _jobsExpanded = true;
 let _activeSection = "actions";
 let _activeActionsSubView: "hub" | "curation" | "distribution" | "segmentation" | "alignement" = "hub";
@@ -3423,8 +3424,10 @@ async function loadDistributionPanel(cnt: HTMLElement, opts?: { force?: boolean 
 }
 
 async function refreshJobs(container: HTMLElement) {
+  const myMountId = _constituerMountId;
   try {
     const { jobs } = await fetchJobs();
+    if (_constituerMountId !== myMountId) return; // navigation survenue pendant l'await
     renderJobsPanel(container, jobs);
     // Polling actif tant que jobs pending/running
     const hasActive = jobs.some((j) => j.status === "pending" || j.status === "running");
@@ -8086,7 +8089,13 @@ function openRetargetModal(opts: {
 
   // ── Events ─────────────────────────────────────────────────────────────
 
+  // Keyboard: Escape → close (déclaré avant close() pour que close() puisse l'utiliser)
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") close();
+  };
+
   function close() {
+    document.removeEventListener("keydown", onKey); // retiré dans tous les chemins
     overlay.remove();
   }
 
@@ -8098,10 +8107,6 @@ function openRetargetModal(opts: {
     if (e.target === overlay) close();
   });
 
-  // Keyboard: Escape → close
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
-  };
   document.addEventListener("keydown", onKey);
 
   // Search input with debounce
@@ -10282,6 +10287,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 }
 
 export function disposeConstituer() {
+  _constituerMountId++; // invalide tous les refreshJobs en vol
   // Désabonner d'abord pour éviter qu'un callback de statut ne redémarre le poll
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   if (_unsub2)      { _unsub2();      _unsub2      = null; }
