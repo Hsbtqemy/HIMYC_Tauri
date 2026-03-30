@@ -6,6 +6,24 @@ import csv
 import json
 from pathlib import Path
 
+# Caractères déclenchant des formules dans Excel/LibreOffice si en tête de cellule
+_CSV_FORMULA_CHARS = frozenset("=+-@\t\r")
+
+
+def _csv_safe(value: object) -> object:
+    """Protège une valeur CSV contre l'injection de formules (Excel / LibreOffice).
+
+    Les cellules commençant par =, +, -, @, tabulation ou retour chariot
+    sont préfixées d'une apostrophe pour être interprétées comme du texte.
+    Les valeurs non-string (int, float, None…) sont retournées telles quelles :
+    elles ne peuvent pas contenir de formule.
+    """
+    if not isinstance(value, str):
+        return value
+    if value and value[0] in _CSV_FORMULA_CHARS:
+        return f"'{value}"
+    return value
+
 from docx import Document
 
 from howimetyourcorpus.core.models import EpisodeRef
@@ -39,7 +57,13 @@ def export_corpus_csv(episodes: list[tuple[EpisodeRef, str]], path: Path) -> Non
         w = csv.writer(f)
         w.writerow(["episode_id", "season", "episode", "title", "clean_text"])
         for ref, text in episodes:
-            w.writerow([ref.episode_id, ref.season, ref.episode, ref.title or "", text])
+            w.writerow([
+                _csv_safe(ref.episode_id),
+                ref.season,
+                ref.episode,
+                _csv_safe(ref.title or ""),
+                _csv_safe(text),
+            ])
     return None
 
 
@@ -85,13 +109,13 @@ def export_segments_csv(segments: list[dict], path: Path) -> None:
         w.writerow(SEGMENT_EXPORT_COLUMNS)
         for s in segments:
             w.writerow([
-                s.get("segment_id", ""),
-                s.get("episode_id", ""),
-                s.get("kind", ""),
+                _csv_safe(s.get("segment_id", "")),
+                _csv_safe(s.get("episode_id", "")),
+                _csv_safe(s.get("kind", "")),
                 s.get("n", ""),
                 s.get("start_char", ""),
                 s.get("end_char", ""),
-                (s.get("text") or "").replace("\n", " "),
+                _csv_safe((s.get("text") or "").replace("\n", " ")),
             ])
     return None
 
@@ -103,13 +127,13 @@ def export_segments_tsv(segments: list[dict], path: Path) -> None:
         w.writerow(SEGMENT_EXPORT_COLUMNS)
         for s in segments:
             w.writerow([
-                s.get("segment_id", ""),
-                s.get("episode_id", ""),
-                s.get("kind", ""),
+                _csv_safe(s.get("segment_id", "")),
+                _csv_safe(s.get("episode_id", "")),
+                _csv_safe(s.get("kind", "")),
                 s.get("n", ""),
                 s.get("start_char", ""),
                 s.get("end_char", ""),
-                (s.get("text") or "").replace("\n", " "),
+                _csv_safe((s.get("text") or "").replace("\n", " ")),
             ])
     return None
 
@@ -165,13 +189,13 @@ def export_kwic_csv(hits: list[KwicHit], path: Path) -> None:
                 row0.append("speaker")
         w.writerow(row0)
         for h in hits:
-            r = [h.episode_id, h.title, h.left, h.match, h.right, h.position, h.score]
+            r = [_csv_safe(h.episode_id), _csv_safe(h.title), _csv_safe(h.left), _csv_safe(h.match), _csv_safe(h.right), h.position, h.score]
             if len(row0) > 7:
-                r.extend([getattr(h, "segment_id", "") or "", getattr(h, "kind", "") or ""])
+                r.extend([_csv_safe(getattr(h, "segment_id", "") or ""), _csv_safe(getattr(h, "kind", "") or "")])
             if len(row0) > 9:
-                r.extend([getattr(h, "cue_id", "") or "", getattr(h, "lang", "") or ""])
+                r.extend([_csv_safe(getattr(h, "cue_id", "") or ""), _csv_safe(getattr(h, "lang", "") or "")])
             if "speaker" in row0:
-                r.append(getattr(h, "speaker", "") or "")
+                r.append(_csv_safe(getattr(h, "speaker", "") or ""))
             w.writerow(r)
     return None
 
@@ -190,13 +214,13 @@ def export_kwic_tsv(hits: list[KwicHit], path: Path) -> None:
                 row0.append("speaker")
         w.writerow(row0)
         for h in hits:
-            r = [h.episode_id, h.title, h.left, h.match, h.right, h.position, h.score]
+            r = [_csv_safe(h.episode_id), _csv_safe(h.title), _csv_safe(h.left), _csv_safe(h.match), _csv_safe(h.right), h.position, h.score]
             if len(row0) > 7:
-                r.extend([getattr(h, "segment_id", "") or "", getattr(h, "kind", "") or ""])
+                r.extend([_csv_safe(getattr(h, "segment_id", "") or ""), _csv_safe(getattr(h, "kind", "") or "")])
             if len(row0) > 9:
-                r.extend([getattr(h, "cue_id", "") or "", getattr(h, "lang", "") or ""])
+                r.extend([_csv_safe(getattr(h, "cue_id", "") or ""), _csv_safe(getattr(h, "lang", "") or "")])
             if "speaker" in row0:
-                r.append(getattr(h, "speaker", "") or "")
+                r.append(_csv_safe(getattr(h, "speaker", "") or ""))
             w.writerow(r)
     return None
 

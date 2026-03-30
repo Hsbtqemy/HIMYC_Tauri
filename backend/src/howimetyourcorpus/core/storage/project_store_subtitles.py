@@ -3,8 +3,26 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
+
+# Langues acceptées : 2-3 lettres ISO 639, optionnellement un sous-code (ex. zh-TW, pt-BR)
+_LANG_RE = re.compile(r"^[a-zA-Z]{2,3}(?:[-_][a-zA-Z0-9]{1,8})*$")
+
+
+def _validate_lang(lang: str) -> str:
+    """Valide et normalise un code langue pour usage dans les chemins fichiers.
+
+    Lève ValueError si le code pourrait permettre une traversée de répertoire
+    (ex. `../secret`, valeur vide, caractères spéciaux).
+    """
+    if not lang or not _LANG_RE.match(lang):
+        raise ValueError(
+            f"Code langue invalide : {lang!r}. "
+            "Format attendu : 2–3 lettres ISO 639, ex. 'en', 'fr', 'pt-BR'."
+        )
+    return lang.lower()
 
 
 def subs_dir(store: Any, episode_id: str) -> Path:
@@ -21,6 +39,7 @@ def save_episode_subtitles(
     cues_audit: list[dict[str, Any]],
 ) -> None:
     """Sauvegarde le fichier sous-titre + audit cues."""
+    lang = _validate_lang(lang)
     directory = subs_dir(store, episode_id)
     directory.mkdir(parents=True, exist_ok=True)
     ext = "srt" if fmt == "srt" else "vtt"
@@ -33,12 +52,20 @@ def save_episode_subtitles(
 
 def has_episode_subs(store: Any, episode_id: str, lang: str) -> bool:
     """True si un fichier subs existe pour cet épisode et cette langue."""
+    try:
+        lang = _validate_lang(lang)
+    except ValueError:
+        return False
     directory = subs_dir(store, episode_id)
     return (directory / f"{lang}.srt").exists() or (directory / f"{lang}.vtt").exists()
 
 
 def get_episode_subtitle_path(store: Any, episode_id: str, lang: str) -> tuple[Path, str] | None:
     """Retourne (chemin du fichier, 'srt'|'vtt') si la piste existe."""
+    try:
+        lang = _validate_lang(lang)
+    except ValueError:
+        return None
     directory = subs_dir(store, episode_id)
     srt_path = directory / f"{lang}.srt"
     vtt_path = directory / f"{lang}.vtt"
@@ -51,6 +78,10 @@ def get_episode_subtitle_path(store: Any, episode_id: str, lang: str) -> tuple[P
 
 def remove_episode_subtitle(store: Any, episode_id: str, lang: str) -> None:
     """Supprime les fichiers sous-titres pour cet épisode/langue."""
+    try:
+        lang = _validate_lang(lang)
+    except ValueError:
+        return
     directory = subs_dir(store, episode_id)
     for name in [f"{lang}.srt", f"{lang}.vtt", f"{lang}_cues.jsonl"]:
         path = directory / name
@@ -60,6 +91,10 @@ def remove_episode_subtitle(store: Any, episode_id: str, lang: str) -> None:
 
 def load_episode_subtitle_content(store: Any, episode_id: str, lang: str) -> tuple[str, str] | None:
     """Charge le contenu brut SRT/VTT. Retourne (contenu, format) ou None."""
+    try:
+        lang = _validate_lang(lang)
+    except ValueError:
+        return None
     result = get_episode_subtitle_path(store, episode_id, lang)
     if not result:
         return None
@@ -75,6 +110,7 @@ def save_episode_subtitle_content(
     fmt: str,
 ) -> Path:
     """Sauvegarde le contenu brut SRT/VTT (écrase le fichier)."""
+    lang = _validate_lang(lang)
     directory = subs_dir(store, episode_id)
     directory.mkdir(parents=True, exist_ok=True)
     ext = "srt" if fmt == "srt" else "vtt"

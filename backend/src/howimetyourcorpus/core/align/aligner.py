@@ -225,6 +225,7 @@ def align_cues_by_time(
     Retourne une liste de AlignLink (cue_id=pivot, cue_id_target=target, role=target, confidence).
     """
     links: list[AlignLink] = []
+    used_target_ids: set[str] = set()  # évite qu'une même cue cible soit assignée à plusieurs pivots
     for cp in cues_pivot:
         pid = cp.get("cue_id")
         p_start = int(cp.get("start_ms") or 0)
@@ -232,13 +233,17 @@ def align_cues_by_time(
         best_overlap = 0
         best_target_id: str | None = None
         for ct in cues_target:
+            tid = ct.get("cue_id") or ""
+            if tid in used_target_ids:
+                continue
             t_start = int(ct.get("start_ms") or 0)
             t_end = int(ct.get("end_ms") or 0)
             overlap = max(0, min(p_end, t_end) - max(p_start, t_start))
             if overlap >= overlap_ms_threshold and overlap > best_overlap:
                 best_overlap = overlap
-                best_target_id = ct.get("cue_id")
+                best_target_id = tid or None
         if best_target_id:
+            used_target_ids.add(best_target_id)
             dur = max(1, p_end - p_start)
             confidence = min(1.0, best_overlap / dur)
             links.append(

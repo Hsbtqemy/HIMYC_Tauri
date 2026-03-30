@@ -229,9 +229,11 @@ let _qaData: QaReport | null = null;
 let _alignRuns: AlignmentRunFlat[] | null = null;
 let _alignTabLoaded = false;
 let _srtTabLoaded = false;
+let _mountId = 0; // incrémenté à chaque mount, capturé dans les closures async pour détecter une navigation
 
 export function mountExporter(container: HTMLElement, ctx: ShellContext) {
   injectGlobalCss();
+  const myMountId = ++_mountId; // capturé dans chaque async pour détecter navigation
   _qaPolicy = "lenient";
 
   if (!_styleInjected) {
@@ -401,13 +403,15 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
   // ── Project info + KPIs ─────────────────────────────────────────────────
   if (ctx.getBackendStatus().online) {
     fetchConfig().then((cfg) => {
+      if (_mountId !== myMountId) return;
       const el = container.querySelector<HTMLElement>("#exp-project-badge");
       if (el) el.innerHTML = `📁 ${escapeHtml(cfg.project_name)}`;
     }).catch((err) => {
+      if (_mountId !== myMountId) return;
       const el = container.querySelector<HTMLElement>("#exp-project-badge");
-      if (el) el.textContent = err instanceof ApiError ? err.errorCode : "Erreur config";
+      if (el) el.textContent = formatApiError(err);
     });
-    loadQaData(container);
+    loadQaData(container, myMountId);
   }
 
   // ── Stage tabs ──────────────────────────────────────────────────────────
@@ -420,7 +424,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
       // Lazy-load alignements tab
       if (tab.dataset.stage === "alignements" && !_alignTabLoaded) {
         _alignTabLoaded = true;
-        loadAlignmentsTab(container);
+        loadAlignmentsTab(container, _mountId);
       }
       // Lazy-load SRT enrichi tab
       if (tab.dataset.stage === "srt" && !_srtTabLoaded) {
@@ -436,12 +440,12 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
       container.querySelectorAll(".exp-policy-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       _qaPolicy = btn.dataset.policy as "lenient" | "strict";
-      loadQaData(container);
+      loadQaData(container, _mountId);
     });
   });
 
   container.querySelector<HTMLButtonElement>("#qa-refresh")?.addEventListener("click", () => {
-    loadQaData(container);
+    loadQaData(container, _mountId);
   });
 
   // ── QA JSON export ──────────────────────────────────────────────────────
@@ -478,7 +482,7 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
   });
 
   _unsubscribe = ctx.onStatusChange((status) => {
-    if (status.online && !_qaData) loadQaData(container);
+    if (status.online && !_qaData) loadQaData(container, _mountId);
   });
 }
 
@@ -513,7 +517,7 @@ async function handleExport(container: HTMLElement, btn: HTMLButtonElement) {
   }
 }
 
-async function loadQaData(container: HTMLElement) {
+async function loadQaData(container: HTMLElement, mountId: number) {
   const banner   = container.querySelector<HTMLElement>("#exp-gate-banner");
   const gateText = container.querySelector<HTMLElement>("#exp-gate-text");
   const issueList = container.querySelector<HTMLElement>("#exp-issue-list");
@@ -526,6 +530,7 @@ async function loadQaData(container: HTMLElement) {
 
   try {
     const qa = await fetchQaReport(_qaPolicy);
+    if (_mountId !== mountId) return;
     _qaData = qa;
 
     // Update KPIs
@@ -556,12 +561,14 @@ async function loadQaData(container: HTMLElement) {
       ).join("");
     }
   } catch (e) {
+    if (_mountId !== mountId) return;
     banner.className = "exp-gate-banner blocking";
     gateText.textContent = formatApiError(e);
   }
 }
 
 export function disposeExporter() {
+  ++_mountId; // invalide toutes les promesses en vol (fetchConfig, loadQaData, etc.)
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
   _qaData = null;
   _alignRuns = null;
@@ -571,15 +578,17 @@ export function disposeExporter() {
 
 // ── Alignements tab ──────────────────────────────────────────────────────────
 
-async function loadAlignmentsTab(container: HTMLElement) {
+async function loadAlignmentsTab(container: HTMLElement, mountId: number) {
   const body = container.querySelector<HTMLElement>("#exp-align-body");
   if (!body) return;
   body.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;padding:8px 0">Chargement des runs…</div>`;
   try {
     const { runs } = await fetchAllAlignmentRuns();
+    if (_mountId !== mountId) return;
     _alignRuns = runs;
     renderAlignmentsTab(body);
   } catch (e) {
+    if (_mountId !== mountId) return;
     body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${formatApiError(e)}</div>`;
   }
 }
@@ -772,6 +781,7 @@ function _renderSrtDownloadBtns(row: HTMLTableRowElement, epId: string, langs: s
         URL.revokeObjectURL(url);
       } catch (e) {
         dlBtn.textContent = `✗ SRT ${lang.toUpperCase()}`;
+        dlBtn.title = formatApiError(e);
       } finally {
         dlBtn.disabled = false;
       }

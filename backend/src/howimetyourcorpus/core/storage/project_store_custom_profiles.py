@@ -57,9 +57,21 @@ def load_custom_profiles(store: Any) -> dict[str, NormalizationProfile]:
 
 
 def save_custom_profiles(store: Any, profiles: list[dict[str, Any]]) -> None:
-    """Sauvegarde les profils personnalisés du projet (profiles.json)."""
+    """Sauvegarde les profils personnalisés du projet (profiles.json).
+
+    Valide le schéma avant d'écrire pour garantir que le fichier reste
+    lisible par `load_custom_profiles` (qui valide au chargement).
+    """
+    from howimetyourcorpus.core.normalize.profiles import ProfileValidationError, validate_profiles_json
+
+    data = {"profiles": profiles}
+    try:
+        validate_profiles_json(data)
+    except ProfileValidationError as exc:
+        raise ValueError(f"Profils invalides, écriture annulée : {exc}") from exc
+
     path = Path(store.root_dir) / store.PROFILES_JSON
     path.write_text(
-        json.dumps({"profiles": profiles}, ensure_ascii=False, indent=2),
+        json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )

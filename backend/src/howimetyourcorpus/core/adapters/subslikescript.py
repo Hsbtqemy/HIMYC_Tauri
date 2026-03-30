@@ -15,6 +15,34 @@ from howimetyourcorpus.core.models import EpisodeRef, SeriesIndex
 logger = logging.getLogger(__name__)
 
 
+_ALLOWED_HOSTS = frozenset({
+    "www.subslikescript.com",
+    "subslikescript.com",
+})
+
+
+def _validate_subslikescript_url(url: str) -> None:
+    """Vérifie que l'URL cible bien subslikescript.com via HTTPS.
+
+    Protège contre les attaques SSRF : une URL controlée par l'utilisateur
+    ne doit pouvoir viser que l'hôte autorisé.
+
+    Raises ValueError si le schéma ou l'hôte est inacceptable.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https", "http"):
+        raise ValueError(
+            f"Schéma URL non autorisé pour subslikescript : {parsed.scheme!r}. "
+            "Seul https:// est accepté."
+        )
+    host = (parsed.hostname or "").lower()
+    if host not in _ALLOWED_HOSTS:
+        raise ValueError(
+            f"Hôte URL non autorisé : {host!r}. "
+            f"Hôtes acceptés : {sorted(_ALLOWED_HOSTS)}"
+        )
+
+
 def _make_soup(html: str):
     try:
         return BeautifulSoup(html, "lxml")
@@ -72,6 +100,7 @@ class SubslikescriptAdapter:
         cache_dir: Path | None = None,
     ) -> SeriesIndex:
         """Récupère la page série puis parse pour produire SeriesIndex."""
+        _validate_subslikescript_url(series_url)
         from howimetyourcorpus.core.utils.http import BROWSER_HEADERS, get_html
         html = get_html(
             series_url,
@@ -156,6 +185,7 @@ class SubslikescriptAdapter:
         cache_dir: Path | None = None,
     ) -> str:
         """Récupère le HTML ; rate_limit_s et cache_dir passés à get_html."""
+        _validate_subslikescript_url(episode_url)
         from howimetyourcorpus.core.utils.http import BROWSER_HEADERS, get_html
         return get_html(
             episode_url,

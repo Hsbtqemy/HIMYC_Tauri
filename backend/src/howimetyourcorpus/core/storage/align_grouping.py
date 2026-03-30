@@ -49,14 +49,22 @@ def generate_align_grouping(
     assign_segment: dict[str, str] = {}
     assign_cue: dict[str, str] = {}
     for a in assignments:
+        character_id = (a.get("character_id") or "").strip()
+        if not character_id:
+            continue
+        # Nouveau format (B-002) : segment_id / cue_id directs
+        seg_id_new = (a.get("segment_id") or "").strip()
+        cue_id_new = (a.get("cue_id") or "").strip()
+        # Ancien format : source_type / source_id (rétrocompat)
         source_type = (a.get("source_type") or "").strip().lower()
         source_id = (a.get("source_id") or "").strip()
-        character_id = (a.get("character_id") or "").strip()
-        if not source_id or not character_id:
-            continue
-        if source_type == "segment":
+        if seg_id_new:
+            assign_segment[seg_id_new] = character_id
+        elif cue_id_new:
+            assign_cue[cue_id_new] = character_id
+        elif source_type == "segment" and source_id:
             assign_segment[source_id] = character_id
-        elif source_type == "cue":
+        elif source_id:
             assign_cue[source_id] = character_id
 
     characters = store.load_character_names()

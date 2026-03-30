@@ -46,6 +46,8 @@ export function makeCopyBtn(text: string, label = "📋 Copier"): HTMLButtonElem
         btn.textContent = label;
         btn.classList.remove("copied");
       }, 1500);
+    }).catch(() => {
+      // Permission refusée ou API non disponible — on ne signale pas l'erreur à l'utilisateur
     });
   });
   return btn;
@@ -63,6 +65,8 @@ export function makeGroupCopyBtn(text: string, lang: string): HTMLButtonElement 
     void navigator.clipboard?.writeText(text).then(() => {
       btn.textContent = "✓";
       setTimeout(() => { btn.textContent = "📋"; }, 1200);
+    }).catch(() => {
+      // Permission refusée ou API non disponible
     });
   });
   return btn;
@@ -126,6 +130,8 @@ export function makeCitationBtn(
       btn.textContent = "✓ Copie";
       btn.classList.add("copied");
       setTimeout(() => { btn.textContent = "📄 Citation"; btn.classList.remove("copied"); }, 1500);
+    }).catch(() => {
+      // Permission refusée ou API non disponible
     });
   });
   return btn;

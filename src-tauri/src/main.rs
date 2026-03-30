@@ -309,16 +309,16 @@ fn set_project_path(
     kill_backend(&state);
     write_project_path(&app, &path)?;
     let log = log_path_for(&app);
-    *state.log_path.lock().unwrap() = log.clone();
+    *state.log_path.lock().unwrap_or_else(|p| p.into_inner()) = log.clone();
     let child = spawn_uvicorn(&app, &path, log.as_ref())?;
-    *state.process.lock().unwrap() = Some(child);
+    *state.process.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
     Ok(())
 }
 
 /// Retourne le contenu du log stderr backend pour diagnostic.
 #[tauri::command]
 fn get_backend_log(state: State<BackendState>) -> String {
-    let guard = state.log_path.lock().unwrap();
+    let guard = state.log_path.lock().unwrap_or_else(|p| p.into_inner());
     match guard.as_ref() {
         None    => "(log non disponible)".into(),
         Some(p) => std::fs::read_to_string(p)
@@ -398,9 +398,9 @@ fn main() {
             if let Some(path) = read_project_path(app.handle()) {
                 let log = log_path_for(app.handle());
                 let state = app.state::<BackendState>();
-                *state.log_path.lock().unwrap() = log.clone();
+                *state.log_path.lock().unwrap_or_else(|p| p.into_inner()) = log.clone();
                 match spawn_uvicorn(app.handle(), &path, log.as_ref()) {
-                    Ok(child) => { *state.process.lock().unwrap() = Some(child); }
+                    Ok(child) => { *state.process.lock().unwrap_or_else(|p| p.into_inner()) = Some(child); }
                     Err(e)    => { eprintln!("HIMYC: {}", e); }
                 }
             }

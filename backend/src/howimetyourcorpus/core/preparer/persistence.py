@@ -101,31 +101,29 @@ def apply_utterance_db_state(db: Any, episode_id: str, state: dict[str, Any]) ->
         run_id = run.get("align_run_id") or ""
         if not run_id:
             continue
-        db.create_align_run(
+        links_payload: list[dict[str, Any]] = [
+            {
+                "link_id": link.get("link_id"),
+                "segment_id": link.get("segment_id"),
+                "cue_id": link.get("cue_id"),
+                "cue_id_target": link.get("cue_id_target"),
+                "lang": link.get("lang"),
+                "role": link.get("role"),
+                "confidence": link.get("confidence"),
+                "status": link.get("status"),
+                "meta": link.get("meta") or {},
+            }
+            for link in links_by_run.get(run_id, [])
+        ]
+        db.create_align_run_and_links(
             run_id,
             episode_id,
             run.get("pivot_lang") or "en",
-            params_json=run.get("params_json"),
-            created_at=run.get("created_at"),
-            summary_json=run.get("summary_json"),
+            run.get("params_json"),
+            run.get("created_at"),
+            run.get("summary_json"),
+            links_payload,
         )
-        links_payload: list[dict[str, Any]] = []
-        for link in links_by_run.get(run_id, []):
-            links_payload.append(
-                {
-                    "link_id": link.get("link_id"),
-                    "segment_id": link.get("segment_id"),
-                    "cue_id": link.get("cue_id"),
-                    "cue_id_target": link.get("cue_id_target"),
-                    "lang": link.get("lang"),
-                    "role": link.get("role"),
-                    "confidence": link.get("confidence"),
-                    "status": link.get("status"),
-                    "meta": link.get("meta") or {},
-                }
-            )
-        if links_payload:
-            db.upsert_align_links(run_id, episode_id, links_payload)
 
 
 def capture_cue_storage_state(db: Any, store: Any | None, episode_id: str, lang: str) -> dict[str, Any]:

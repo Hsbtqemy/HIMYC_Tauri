@@ -62,11 +62,20 @@ def segmenter_sentences(text: str, lang_hint: str = "en") -> list[Segment]:
         p = part.strip()
         if not p:
             continue
-        start = text.find(p, pos)
-        if start == -1:
-            start = pos
-        end = start + len(p)
-        pos = end
+        # Chercher en priorité le part non-strippé pour éviter qu'une sous-chaîne
+        # identique apparaissant à l'intérieur d'un mot n'accroche une mauvaise position.
+        raw_start = text.find(part, pos)
+        if raw_start != -1:
+            leading = len(part) - len(part.lstrip())
+            start = raw_start + leading
+            end = start + len(p)
+            pos = raw_start + len(part)  # avancer après le part complet (whitespace inclus)
+        else:
+            start = text.find(p, pos)
+            if start == -1:
+                start = pos
+            end = start + len(p)
+            pos = end
         segments.append(
             Segment(
                 kind="sentence",
