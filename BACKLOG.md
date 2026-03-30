@@ -78,3 +78,127 @@ La détection automatique reste limitée aux transcripts avec marqueurs `NOM:` b
 ---
 
 *Ajouté le 2026-03-30 — suite à la discussion sur la dualité speaker_explicit / character_id*
+
+---
+
+## [Curation] Repérage et gestion des sauts de ligne (`\n`)
+
+**Priorité** : Moyenne
+**Effort estimé** : 1 session
+
+### Contexte
+
+Les transcripts peuvent contenir des `\n` littéraux ou des sauts de ligne réels dans les blocs de dialogue. Actuellement la curation ne les signale pas et l'utilisateur n'a pas de contrôle sur leur traitement.
+
+### Proposition
+
+- Détecter les `\n` dans les segments en curation et les mettre en évidence
+- Proposer des options par segment ou globalement :
+  - Conserver le saut de ligne tel quel
+  - Supprimer
+  - Remplacer par un espace
+
+---
+
+## [Pipeline] Vérifier le périmètre de "Normaliser tout"
+
+**Priorité** : Haute — risque de comportement inattendu
+**Effort estimé** : 0.5 session (investigation + fix si besoin)
+
+### Questions à trancher
+
+- "Normaliser tout" s'applique-t-il uniquement aux transcripts (`raw.txt`) ?
+- Ou aussi aux pistes SRT (`srt_<lang>`) ?
+- Toutes les couches (utterances, sentences) sont-elles concernées ?
+- Le comportement est-il cohérent entre le lancement épisode par épisode et le batch ?
+
+---
+
+## [Pipeline] Import d'un transcript dans une langue non-EN (ex. FR parent)
+
+**Priorité** : Moyenne
+**Effort estimé** : 1–2 sessions
+
+### Contexte
+
+Actuellement le transcript principal est implicitement EN (langue pivot). Un utilisateur avec un corpus francophone voudrait importer un transcript FR comme source principale, sans qu'il soit traité comme une traduction d'un pivot EN.
+
+### Questions à trancher
+
+- Permettre un transcript FR comme source `transcript` (sans pivot EN) ?
+- Ou introduire une notion de "transcript enfant" d'un transcript FR ?
+- Impact sur l'alignement (qui suppose un pivot EN pour les cues) et le concordancier
+
+---
+
+## [Export] Nouveaux formats et export de segmentation
+
+**Priorité** : Moyenne
+**Effort estimé** : 2–3 sessions
+
+### Formats à ajouter
+
+- **TXT** — texte brut (segments concaténés, un par ligne ou avec séparateurs)
+- **SRT** — export des segments comme piste de sous-titres (si timecodes disponibles)
+- **DOCX** — document Word (déjà partiellement supporté — vérifier la couverture)
+- **ODT** — document OpenDocument
+
+### À vérifier
+
+- Export de la **segmentation** (liste des segments avec speaker, timecodes, texte) en tant qu'export dédié, distinct de l'export corpus
+
+---
+
+## [Concordancier] Vérification robustesse — NO_DB et corpus introuvable
+
+**Priorité** : Haute — potentiel bug utilisateur silencieux
+**Effort estimé** : 0.5–1 session (investigation)
+
+### Scénarios à tester
+
+- Lancer une recherche KWIC sans `corpus.db` → comportement attendu vs observé
+- Lancer une recherche avec un corpus vide (indexé mais sans segments)
+- Vérifier que `withNoDbRecovery` est bien déclenché dans tous les chemins du concordancier
+- Vérifier les messages d'erreur affichés dans chaque cas
+
+---
+
+## [Concordancier] Clarifier ce que réindexe la réindexation FTS
+
+**Priorité** : Moyenne
+**Effort estimé** : 0.5 session (investigation + documentation)
+
+### Questions à trancher
+
+- `POST /project/rebuild_segments_fts` : réindexe-t-il uniquement les segments normalisés (`clean`) ?
+- Ou aussi les segments associés à des pistes alignées ?
+- Que se passe-t-il si certains épisodes sont segmentés et d'autres non ?
+- Documenter clairement dans l'UI quel contenu est indexé (et lequel ne l'est pas)
+
+---
+
+## [Fonctionnalité] Module "Convention" — système de notation et transcription
+
+**Priorité** : Basse — fonctionnalité avancée post-stabilisation
+**Effort estimé** : 3–5 sessions
+
+### Contexte
+
+Chaque projet de corpus peut avoir ses propres conventions de transcription : notation de l'hésitation, des chevauchements, des pauses, des éléments prosodiques, symboles spéciaux, abréviations, etc. (ex. protocole CHAT, Jefferson, conventions maison).
+
+### Proposition
+
+Un module ou panneau "Convention" permettant de :
+- Définir un glossaire de symboles/notations propres au projet (ex. `(.)` = pause courte, `[...]` = chevauchement)
+- Associer une description à chaque notation
+- Potentiellement : utiliser ces conventions dans la normalisation (remplacement, signalement en curation)
+- Exporter les conventions avec le corpus (pour la reproductibilité scientifique)
+
+### Prérequis
+
+- Retour utilisateur sur les conventions effectivement utilisées dans les projets réels
+- Décision sur le périmètre : documentation seule, ou intégration dans le pipeline ?
+
+---
+
+*Items ajoutés le 2026-03-30*
