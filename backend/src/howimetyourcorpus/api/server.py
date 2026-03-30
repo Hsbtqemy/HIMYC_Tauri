@@ -13,9 +13,12 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,6 +48,7 @@ from howimetyourcorpus.core.constants import (
 )
 from howimetyourcorpus.core.storage.db import CorpusDB
 from howimetyourcorpus.core.storage.project_store import ProjectStore
+from howimetyourcorpus.core.storage.db_align import _escape_like
 from howimetyourcorpus.api.jobs import JOB_TYPES, get_job_store
 from howimetyourcorpus.core.adapters.tvmaze import TvmazeAdapter
 from howimetyourcorpus.core.adapters.subslikescript import SubslikescriptAdapter
@@ -971,8 +975,11 @@ def import_source(
             db.add_track(track_id, episode_id, lang, fmt, imported_at=imported_at)
             db.upsert_cues(track_id, episode_id, lang, cues)
             nb_cues = len(cues)
-        except Exception:
-            pass  # DB facultative â€” l'import fichier reste valide mÃªme sans indexation
+        except Exception as exc:
+            logger.warning(
+                "import_source: indexation DB échouée pour %s/%s. Cause : %s",
+                episode_id, source_key, exc,
+            )
 
     return {
         "episode_id": episode_id,
@@ -1252,8 +1259,6 @@ def patch_subtitle_cue(
     db: CorpusDB = Depends(_get_db),
 ) -> dict[str, Any]:
     """Met Ã  jour manuellement le champ text_clean d'une cue SRT."""
-    if not db:
-        raise HTTPException(status_code=503, detail={"error": "DB_NOT_READY", "message": "corpus.db non disponible."})
     text = body.text_clean.strip()
     db.update_cue_text_clean(cue_id, text)
     return {"cue_id": cue_id, "text_clean": text}
@@ -1353,11 +1358,11 @@ def get_episode_segments(
                 else:
                     segments = []
             except Exception:
-                # FTS fallback: LIKE
+                # FTS fallback: LIKE (avec ESCAPE pour les métacaractères % et _)
                 conn.row_factory = __import__("sqlite3").Row
-                like = f"%{q}%"
+                like = f"%{_escape_like(q)}%"
                 segs = conn.execute(
-                    "SELECT segment_id, n, kind, text, speaker_explicit FROM segments WHERE episode_id=? AND kind=? AND text LIKE ? ORDER BY n LIMIT 500",
+                    "SELECT segment_id, n, kind, text, speaker_explicit FROM segments WHERE episode_id=? AND kind=? AND text LIKE ? ESCAPE '\\' ORDER BY n LIMIT 500",
                     [episode_id, kind, like],
                 ).fetchall()
                 segments = [dict(s) for s in segs]
@@ -1665,8 +1670,8 @@ def _stats_fetch_texts(conn, slot: _StatsSlot) -> list[str]:
         sql += " AND kind = ?"
         params.append(slot.kind)
     if slot.speaker:
-        sql += " AND LOWER(COALESCE(speaker_explicit,'')) LIKE ?"
-        params.append(f"%{slot.speaker.lower()}%")
+        sql += " AND LOWER(COALESCE(speaker_explicit,'')) LIKE ? ESCAPE '\\'"
+        params.append(f"%{_escape_like(slot.speaker.lower())}%")
     return [row[0] for row in conn.execute(sql, params).fetchall()]
 
 
@@ -1681,8 +1686,8 @@ def _stats_count_episodes(conn, slot: _StatsSlot) -> int:
         sql += " AND kind = ?"
         params.append(slot.kind)
     if slot.speaker:
-        sql += " AND LOWER(COALESCE(speaker_explicit,'')) LIKE ?"
-        params.append(f"%{slot.speaker.lower()}%")
+        sql += " AND LOWER(COALESCE(speaker_explicit,'')) LIKE ? ESCAPE '\\'"
+        params.append(f"%{_escape_like(slot.speaker.lower())}%")
     return conn.execute(sql, params).fetchone()[0]
 
 

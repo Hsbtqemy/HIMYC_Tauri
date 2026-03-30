@@ -523,6 +523,29 @@ class CorpusDB:
         finally:
             conn.close()
 
+    def create_align_run_and_links(
+        self,
+        align_run_id: str,
+        episode_id: str,
+        pivot_lang: str,
+        params_json: str | None,
+        created_at: str | None,
+        summary_json: str | None,
+        links: list[dict],
+    ) -> None:
+        """Crée un run et insère ses liens en une unique transaction atomique.
+
+        Garantit qu'il ne peut pas y avoir de run sans liens ni de liens sans run
+        en base, même en cas de coupure entre les deux écritures.
+        """
+        conn = self._conn()
+        try:
+            with conn:  # commit global ou rollback global
+                db_align.create_align_run(conn, align_run_id, episode_id, pivot_lang, params_json, created_at, summary_json)
+                db_align._insert_align_links_inner(conn, align_run_id, episode_id, links)
+        finally:
+            conn.close()
+
     def set_align_status(self, link_id: str, status: str) -> None:
         """Met à jour le statut d'un lien (accepted / rejected / ignored)."""
         conn = self._conn()

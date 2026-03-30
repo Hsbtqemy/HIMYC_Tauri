@@ -534,7 +534,11 @@ class RebuildSegmentsIndexStep(Step):
                 if d.is_dir() and (d / CLEAN_TEXT_FILENAME).exists():
                     to_segment.append(d.name)
         n = len(to_segment)
-        lang_hint = getattr(context.get("config"), "normalize_profile", DEFAULT_NORMALIZE_PROFILE).split("_")[0].replace("default", "en") or "en"
+        # Extraire la langue depuis le profil (ex. "default_fr_v1" → "fr", "default_en_v1" → "en")
+        # Le format est default_{lang}_v{n} — on cherche la première partie non "default" et non versionée.
+        _profile = getattr(context.get("config"), "normalize_profile", DEFAULT_NORMALIZE_PROFILE) or DEFAULT_NORMALIZE_PROFILE
+        _tokens = _profile.split("_")
+        lang_hint = next((t for t in _tokens if t not in ("default",) and not t.startswith("v") and len(t) == 2), "en")
         is_cancelled = context.get("is_cancelled")
         failed: list[str] = []
         for i, eid in enumerate(to_segment):
@@ -1039,9 +1043,16 @@ class AlignEpisodeStep(Step):
             "cues_pivot_count": len(cues_en),
             "segment_kind": self.segment_kind,
         }
-        db.create_align_run(run_id, self.episode_id, effective_pivot_lang, json.dumps(params), created_at, json.dumps(summary))
         links_dicts = [link.to_dict(link_id=f"{run_id}:{i}") for i, link in enumerate(all_links)]
-        db.upsert_align_links(run_id, self.episode_id, links_dicts)
+        db.create_align_run_and_links(
+            run_id,
+            self.episode_id,
+            effective_pivot_lang,
+            json.dumps(params),
+            created_at,
+            json.dumps(summary),
+            links_dicts,
+        )
         links_audit = [{"link_id": d.get("link_id"), "segment_id": d.get("segment_id"), "cue_id": d.get("cue_id"), "cue_id_target": d.get("cue_id_target"), "lang": d.get("lang"), "role": d.get("role"), "confidence": d.get("confidence"), "status": d.get("status")} for d in links_dicts]
         store.save_align_audit(self.episode_id, run_id, links_audit, {"run_id": run_id, "summary": summary, "params": params})
         if on_progress:

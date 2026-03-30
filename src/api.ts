@@ -97,8 +97,13 @@ async function _loopbackFetch(
 }
 
 function _parseBody<T>(body: string): T {
-  if (!body || !body.trim()) return undefined as unknown as T;
-  return JSON.parse(body) as T;
+  const trimmed = body ? body.trim() : "";
+  if (!trimmed || trimmed === "null") return undefined as unknown as T;
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    throw new ApiError(0, "INVALID_JSON", `Corps de réponse non JSON : ${trimmed.slice(0, 120)}`);
+  }
 }
 
 export async function apiGet<T>(path: string): Promise<T> {

@@ -403,7 +403,10 @@ export function mountExporter(container: HTMLElement, ctx: ShellContext) {
     fetchConfig().then((cfg) => {
       const el = container.querySelector<HTMLElement>("#exp-project-badge");
       if (el) el.innerHTML = `📁 ${escapeHtml(cfg.project_name)}`;
-    }).catch(() => {});
+    }).catch((err) => {
+      const el = container.querySelector<HTMLElement>("#exp-project-badge");
+      if (el) el.textContent = err instanceof ApiError ? err.errorCode : "Erreur config";
+    });
     loadQaData(container);
   }
 

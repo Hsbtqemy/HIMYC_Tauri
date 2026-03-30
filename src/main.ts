@@ -88,8 +88,10 @@ async function startupTauri() {
       initShell().catch((e) => {
         document.body.innerHTML = `<div style="position:fixed;inset:0;background:#0f172a;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#fff;font-family:system-ui">
           <div style="font-size:1.4rem;font-weight:700">HIMYC</div>
-          <div style="color:#f87171;font-size:0.85rem;max-width:480px;text-align:center">Erreur au lancement de l'interface :<br>${String(e)}</div>
+          <div id="init-error-msg" style="color:#f87171;font-size:0.85rem;max-width:480px;text-align:center">Erreur au lancement de l'interface.</div>
         </div>`;
+        const errEl = document.getElementById("init-error-msg");
+        if (errEl) errEl.textContent = `Erreur au lancement de l'interface : ${String(e)}`;
       });
     } else {
       // Lire le log pour afficher l'erreur réelle

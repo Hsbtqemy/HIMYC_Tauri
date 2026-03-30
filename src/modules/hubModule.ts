@@ -505,7 +505,7 @@ export function mountHub(container: HTMLElement, ctx: ShellContext) {
       if (!_mounted) return;
       const nameEl = container.querySelector<HTMLElement>("#hub-project-name");
       if (nameEl) {
-        nameEl.textContent = escapeHtml(cfg.project_name);
+        nameEl.textContent = cfg.project_name;
         nameEl.classList.toggle("none", !cfg.project_name);
       }
 

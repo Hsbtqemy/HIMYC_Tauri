@@ -228,6 +228,7 @@ let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _loaded = false;       // guard : évite de recharger si déjà peuplé
 let _runsToken = 0;        // token anti-race pour loadRuns
 let _epSelChangeHandler: (() => void) | null = null; // handler unique pour le <select> épisode
+let _epSel: HTMLSelectElement | null = null;          // référence pour removeEventListener dans dispose
 
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -273,7 +274,16 @@ async function loadRuns(container: HTMLElement, episodeId: string) {
           </div>`;
       })
       .join("");
-  } catch { /* silencieux */ }
+  } catch (e) {
+    if (_runsToken !== myToken) return;
+    if (runsEl) {
+      const errSpan = document.createElement("div");
+      errSpan.style.cssText = "font-size:0.78rem;color:var(--danger,#dc2626);padding:6px 0";
+      errSpan.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+      runsEl.innerHTML = "";
+      runsEl.appendChild(errSpan);
+    }
+  }
 }
 
 // ── Poll job ────────────────────────────────────────────────────────────────
@@ -525,9 +535,10 @@ async function loadModule(
     // Garantir un seul listener actif sur le <select> : retirer l'éventuel précédent
     // avant d'en enregistrer un nouveau (loadModule peut être appelé plusieurs fois
     // sur le même container : rechargement, retour en ligne après offline, etc.).
-    if (_epSelChangeHandler) {
-      epSel.removeEventListener("change", _epSelChangeHandler);
+    if (_epSelChangeHandler && _epSel) {
+      _epSel.removeEventListener("change", _epSelChangeHandler);
     }
+    _epSel = epSel;
     _epSelChangeHandler = () => {
       stopPoll();
       const ep = episodes.find((e) => e.episode_id === epSel.value);
@@ -603,6 +614,10 @@ export function mountAligner(container: HTMLElement, ctx: ShellContext) {
 export function disposeAligner() {
   stopPoll();
   if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
+  if (_epSelChangeHandler && _epSel) {
+    _epSel.removeEventListener("change", _epSelChangeHandler);
+  }
+  _epSel = null;
   _epSelChangeHandler = null;
   _loaded = false;
   _runsToken++;

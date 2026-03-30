@@ -5440,7 +5440,11 @@ async function loadImporterConfig(pane: HTMLElement) {
     }
     renderConfigForm(body, cfg, pane, seriesIndex);
   } catch (e) {
-    body.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">${e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e)}</div>`;
+    const errDiv = document.createElement("div");
+    errDiv.style.cssText = "color:var(--danger);font-size:0.82rem";
+    errDiv.textContent = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+    body.innerHTML = "";
+    body.appendChild(errDiv);
   }
 }
 
@@ -5542,7 +5546,12 @@ function renderConfigForm(
     fetchEpisodes().then((data) => {
       _cachedEpisodes = data;
       populateEpSelect(epSel, data.episodes);
-    }).catch(() => {});
+    }).catch((err) => {
+      const opt = document.createElement("option");
+      opt.textContent = err instanceof ApiError ? err.errorCode : "Erreur chargement";
+      epSel.innerHTML = "";
+      epSel.appendChild(opt);
+    });
   }
 }
 
@@ -6722,7 +6731,11 @@ async function loadLongtextView(
     }
     renderLongtextSegments(container, epTitle, data.segments);
   } catch (e) {
-    container.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
+    const errNode = document.createElement("div");
+    errNode.className = "cons-loading";
+    errNode.textContent = e instanceof ApiError ? e.message : String(e);
+    container.innerHTML = "";
+    container.appendChild(errNode);
   }
 }
 
@@ -7593,7 +7606,11 @@ async function loadAuditStats(panel: HTMLElement, epId: string, runId: string) {
       qualRow.style.display = "flex";
     }
   } catch (e) {
-    kpiStrip.innerHTML = `<span style="font-size:0.76rem;color:var(--danger)">${e instanceof ApiError ? e.message : String(e)}</span>`;
+    const kpiErr = document.createElement("span");
+    kpiErr.style.cssText = "font-size:0.76rem;color:var(--danger)";
+    kpiErr.textContent = e instanceof ApiError ? e.message : String(e);
+    kpiStrip.innerHTML = "";
+    kpiStrip.appendChild(kpiErr);
   }
 }
 
@@ -8447,7 +8464,13 @@ async function loadAndRenderAlignement(container: HTMLElement) {
     const alignWrap = container.querySelector<HTMLElement>(".align-ep-wrap");
     if (alignWrap) autoSelectSharedEp(alignWrap, "tr[data-ep-id]", "active-row");
   } catch (e) {
-    if (wrap) wrap.innerHTML = `<div class="cons-loading">${e instanceof ApiError ? e.message : String(e)}</div>`;
+    if (wrap) {
+      const alignErr = document.createElement("div");
+      alignErr.className = "cons-loading";
+      alignErr.textContent = e instanceof ApiError ? e.message : String(e);
+      wrap.innerHTML = "";
+      wrap.appendChild(alignErr);
+    }
   }
 }
 
@@ -10141,6 +10164,9 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       if (toAlign.length === 0) return;
       const btn = container.querySelector<HTMLButtonElement>("#cons-batch-align")!;
       btn.disabled = true; btn.textContent = "…";
+      // Réinitialiser le feedback du run précédent
+      const fbElInit = container.querySelector<HTMLElement>("#cons-batch-align-fb");
+      if (fbElInit) { fbElInit.textContent = ""; fbElInit.style.color = ""; }
       const batchErrors: string[] = [];
       for (const ep of toAlign) {
         const targetLangs = ep.sources
