@@ -1403,11 +1403,15 @@ async function runStats(container: HTMLElement) {
       const speakerB = (container.querySelector<HTMLInputElement>("#kwic-stats-speaker-b")?.value ?? "").trim();
       const slotB    = { episode_ids: epB ? [epB] : null, kind: kindB || null, speaker: speakerB || null, top_n: topN, min_length: 2 };
       const labelB   = epB || kindB || speakerB || "Corpus complet";
-      _statsCompareResults = await apiPost<StatsCompareResult>("/stats/compare", {
-        a: slotA, b: slotB, label_a: labelA, label_b: labelB,
-      });
+      _statsCompareResults = await withNoDbRecovery(() =>
+        apiPost<StatsCompareResult>("/stats/compare", {
+          a: slotA, b: slotB, label_a: labelA, label_b: labelB,
+        }),
+      );
     } else {
-      _statsResults = await apiPost<StatsResult>("/stats/lexical", { slot: slotA, label: labelA });
+      _statsResults = await withNoDbRecovery(() =>
+        apiPost<StatsResult>("/stats/lexical", { slot: slotA, label: labelA }),
+      );
     }
     if (_statsToken !== myToken) return;
     renderStatsResults(container);
@@ -2154,7 +2158,15 @@ export function mountConcordancier(container: HTMLElement, ctx: ShellContext) {
       })
       .catch((e) => {
         if (_concordancierMountId !== myMountId) return;
-        const msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+        let msg = e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e);
+        if (
+          e instanceof ApiError &&
+          e.status === 404 &&
+          e.errorCode === "UNKNOWN" &&
+          /not found/i.test(e.message)
+        ) {
+          msg = "Endpoint de réindexation introuvable sur ce backend. Mettez à jour le backend/sidecar (ou relancez en mode dev) puis réessayez.";
+        }
         feedbackEl.textContent = msg;
         feedbackEl.className = "kwic-feedback visible err";
       })

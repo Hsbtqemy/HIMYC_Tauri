@@ -508,3 +508,83 @@ def test_init_corpus_db_creates_then_idempotent(tmp_path):
         assert r2.json()["created"] is False
     finally:
         del os.environ["HIMYC_PROJECT_PATH"]
+
+
+def test_query_requires_db_returns_no_db(tmp_path):
+    """POST /query sans corpus.db → 503 NO_DB (géré côté frontend par withNoDbRecovery)."""
+    os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
+    try:
+        r = client.post("/query", json={"term": "hello", "scope": "segments"})
+        assert r.status_code == 503
+        detail = r.json()["detail"]
+        assert detail["error"] == "NO_DB"
+    finally:
+        del os.environ["HIMYC_PROJECT_PATH"]
+
+
+def test_query_and_facets_empty_corpus_return_zero_hits(tmp_path):
+    """Avec corpus.db initialisé mais aucun segment, /query et /query/facets renvoient 0 résultat."""
+    os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
+    try:
+        init_r = client.post("/project/init_corpus_db")
+        assert init_r.status_code == 200
+
+        rq = client.post("/query", json={"term": "hello", "scope": "segments"})
+        assert rq.status_code == 200
+        data = rq.json()
+        assert data["total"] == 0
+        assert data["has_more"] is False
+        assert data["hits"] == []
+
+        rf = client.post("/query/facets", json={"term": "hello", "scope": "segments"})
+        assert rf.status_code == 200
+        facets = rf.json()
+        assert facets["total_hits"] == 0
+        assert facets["distinct_episodes"] == 0
+        assert facets["distinct_langs"] == 0
+        assert facets["top_episodes"] == []
+    finally:
+        del os.environ["HIMYC_PROJECT_PATH"]
+
+
+def test_query_empty_term_returns_422(tmp_path):
+    """Terme vide → 422 EMPTY_TERM (quand la DB existe)."""
+    os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
+    try:
+        assert client.post("/project/init_corpus_db").status_code == 200
+        r = client.post("/query", json={"term": "   ", "scope": "segments"})
+        assert r.status_code == 422
+        detail = r.json()["detail"]
+        assert detail["error"] == "EMPTY_TERM"
+    finally:
+        del os.environ["HIMYC_PROJECT_PATH"]
+
+
+def test_query_invalid_scope_and_kind_return_400(tmp_path):
+    """Scope/kind invalides → 400 avec codes explicites."""
+    os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
+    try:
+        assert client.post("/project/init_corpus_db").status_code == 200
+
+        r_scope = client.post("/query", json={"term": "hello", "scope": "bad-scope"})
+        assert r_scope.status_code == 400
+        assert r_scope.json()["detail"]["error"] == "INVALID_SCOPE"
+
+        r_kind = client.post("/query", json={"term": "hello", "scope": "segments", "kind": "bad-kind"})
+        assert r_kind.status_code == 400
+        assert r_kind.json()["detail"]["error"] == "INVALID_KIND"
+    finally:
+        del os.environ["HIMYC_PROJECT_PATH"]
+
+
+def test_query_facets_empty_term_returns_422(tmp_path):
+    """Facettes avec terme vide → 422 EMPTY_TERM."""
+    os.environ["HIMYC_PROJECT_PATH"] = str(tmp_path)
+    try:
+        assert client.post("/project/init_corpus_db").status_code == 200
+        r = client.post("/query/facets", json={"term": "", "scope": "segments"})
+        assert r.status_code == 422
+        detail = r.json()["detail"]
+        assert detail["error"] == "EMPTY_TERM"
+    finally:
+        del os.environ["HIMYC_PROJECT_PATH"]

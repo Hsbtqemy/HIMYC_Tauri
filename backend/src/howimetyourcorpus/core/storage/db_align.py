@@ -205,7 +205,7 @@ def search_subtitle_cues(
     - Sans aucun filtre : retourne les cues dans l'ordre (n ASC) avec pagination.
 
     Retourne ``(rows, total)`` où ``rows`` est une liste de dicts avec :
-    ``cue_id, episode_id, lang, n, start_ms, end_ms, text_clean``.
+    ``cue_id, episode_id, lang, n, start_ms, end_ms, text_raw, text_clean``.
     """
     conn.row_factory = sqlite3.Row
 
@@ -225,7 +225,7 @@ def search_subtitle_cues(
 
         rows = conn.execute(
             """SELECT sc.cue_id, sc.episode_id, sc.lang, sc.n,
-                      sc.start_ms, sc.end_ms, sc.text_clean
+                      sc.start_ms, sc.end_ms, sc.text_raw, sc.text_clean
                FROM cues_fts cf
                JOIN subtitle_cues sc ON cf.cue_id = sc.cue_id
                WHERE cf.cues_fts MATCH ? AND cf.episode_id = ? AND cf.lang = ?
@@ -255,7 +255,7 @@ def search_subtitle_cues(
         total = (count_row["cnt"] if count_row else 0)
 
         rows = conn.execute(
-            """SELECT cue_id, episode_id, lang, n, start_ms, end_ms, text_clean
+            """SELECT cue_id, episode_id, lang, n, start_ms, end_ms, text_raw, text_clean
                FROM subtitle_cues
                WHERE episode_id = ? AND lang = ? AND n BETWEEN ? AND ?
                ORDER BY n
@@ -272,7 +272,7 @@ def search_subtitle_cues(
     total = (count_row["cnt"] if count_row else 0)
 
     rows = conn.execute(
-        """SELECT cue_id, episode_id, lang, n, start_ms, end_ms, text_clean
+        """SELECT cue_id, episode_id, lang, n, start_ms, end_ms, text_raw, text_clean
            FROM subtitle_cues
            WHERE episode_id = ? AND lang = ?
            ORDER BY n

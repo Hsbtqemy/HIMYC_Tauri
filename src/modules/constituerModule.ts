@@ -1339,6 +1339,16 @@ const CSS = `
   flex-shrink:0;
 }
 .cur-edit-status { flex:1; font-size:0.74rem; color:var(--text-muted); font-style:italic; }
+.cur-edit-nl-count {
+  font-size:0.72rem;
+  color:var(--text-muted);
+  margin-right:4px;
+}
+.cur-edit-linebreak-count {
+  font-size:0.72rem;
+  color:var(--text-muted);
+  margin-right:4px;
+}
 .cur-pane-textarea {
   flex:1; resize:none; border:none; outline:none; padding:1rem 1.25rem;
   font-family:ui-monospace,monospace; font-size:0.74rem; line-height:1.8;
@@ -4044,12 +4054,13 @@ function renderCurationEpList(container: HTMLElement, episodes: Episode[]) {
       const srcAvail = _curPreviewEpSources.find((s) => s.source_key === _curPreviewSourceKey && s.available);
       if (!srcAvail) _curPreviewSourceKey = "transcript";
       _curPreviewData = null;
+      _curSrtPreviewCues = null;
+      _curSrtPreviewHideTimecodes = false;
       _curSearchRegex = null;
       _clientPreviewClean = null;
       if (_clientPreviewTimer) { clearTimeout(_clientPreviewTimer); _clientPreviewTimer = null; }
       if (_curEditMode) exitEditMode(container);
       if (srcBar) renderCurSourceBar(srcBar, _curPreviewEpSources, container);
-      updateCurationModeTabsForSource(container, _curPreviewSourceKey);
 
       await loadCurationPreview(previewPanes, epId, epTitle, activeMode(), container);
       // Bouton normaliser : activer + libellé selon état
@@ -4119,6 +4130,12 @@ let _curPreviewEpId: string | null = null;
 let _constituerSharedEpId: string | null = null;
 let _curPreviewData: { raw: string; clean: string } | null = null;
 let _curPreviewSourceKey: string = "transcript";
+/** True si l’aperçu SRT est alimenté par les cues DB (text_raw / text_clean) — permet diff & côte à côte. */
+let _curSrtCueParity = false;
+/** Cues chargées pour l’aperçu SRT (recalcul brut/clean sans re-fetch si l’utilisateur masque les TC). */
+let _curSrtPreviewCues: SubtitleCue[] | null = null;
+/** Si true, l’aperçu SRT joint seulement les textes (sans lignes de timecodes). */
+let _curSrtPreviewHideTimecodes = false;
 let _curPreviewEpSources: EpisodeSource[] = [];
 let _curEditMode = false;
 let _curSearchRegex: RegExp | null = null; // Regex active pour le surlignage Rechercher
@@ -4225,11 +4242,18 @@ function enterEditMode(container: HTMLElement) {
   textarea.className = "cur-pane-textarea";
   textarea.value = _curPreviewData.clean;
   textarea.id = "cur-edit-textarea";
+  textarea.addEventListener("input", () => {
+    setCurationLiteralNlCount(container, countLiteralNewlineTokens(textarea.value));
+    setCurationRealLineBreakCount(container, countRealLineBreaks(textarea.value));
+  });
 
   panes.innerHTML = "";
   panes.appendChild(textarea);
   textarea.focus();
+  setCurationLiteralNlCount(container, countLiteralNewlineTokens(textarea.value));
+  setCurationRealLineBreakCount(container, countRealLineBreaks(textarea.value));
 
+  status.style.color = "var(--text-muted)";
   status.textContent = "Édition du texte normalisé — les modifications invalideront les segments existants.";
 
   // C-5 : charger les personnages pour l'annotation locuteurs
@@ -4250,7 +4274,10 @@ function exitEditMode(container: HTMLElement) {
   editBtn.style.display = _curPreviewSourceKey === "transcript" ? "" : "none";
   previewBar.style.opacity = "";
   previewBar.style.pointerEvents = "";
+  status.style.color = "var(--text-muted)";
   status.textContent = "";
+  setCurationLiteralNlCount(container, 0);
+  setCurationRealLineBreakCount(container, 0);
 
   // C-5 : masquer le strip locuteurs
   const strip = container.querySelector<HTMLElement>("#cur-speaker-strip");
@@ -4261,7 +4288,14 @@ function exitEditMode(container: HTMLElement) {
   const activeMode = (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
   if (_curPreviewData && _curPreviewEpId) {
     const epTitle = container.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
-    renderCurationPreviewMode(panes, _curPreviewData, activeMode, epTitle, _curSearchRegex, mergeSubtitleBreaksEnabled(container));
+    renderCurationPreviewMode(
+      panes,
+      _curPreviewData,
+      effectiveCurationPreviewMode(activeMode, _curPreviewSourceKey),
+      epTitle,
+      _curSearchRegex,
+      mergeSubtitleBreaksEnabled(container),
+    );
   } else {
     panes.innerHTML = `<div class="acts-text-empty" style="width:100%">← Sélectionnez un épisode</div>`;
   }
@@ -4291,6 +4325,39 @@ function insertSpeakerPrefix(textarea: HTMLTextAreaElement, name: string) {
   const newCursorPos = start + name.length + 2; // "NOM: " = name + ": "
   textarea.setSelectionRange(newCursorPos, newCursorPos);
   textarea.focus();
+}
+
+/** Compte les sauts de ligne littéraux `\n` dans un texte. */
+function countLiteralNewlineTokens(text: string): number {
+  const matches = text.match(/\\n/g);
+  return matches ? matches.length : 0;
+}
+
+function setCurationLiteralNlCount(container: HTMLElement, count: number): void {
+  const el = container.querySelector<HTMLElement>("#cur-edit-nl-count");
+  if (!el) return;
+  if (count <= 0) {
+    el.textContent = "";
+    return;
+  }
+  el.textContent = `\\n détectés : ${count}`;
+}
+
+function countRealLineBreaks(text: string): number {
+  if (!text) return 0;
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (normalized.length === 0) return 0;
+  return normalized.split("\n").length - 1;
+}
+
+function setCurationRealLineBreakCount(container: HTMLElement, count: number): void {
+  const el = container.querySelector<HTMLElement>("#cur-edit-linebreak-count");
+  if (!el) return;
+  if (count <= 0) {
+    el.textContent = "";
+    return;
+  }
+  el.textContent = `retours ligne : ${count}`;
 }
 
 /**
@@ -4385,6 +4452,8 @@ function renderCurSourceBar(bar: HTMLElement, sources: EpisodeSource[], containe
       if (btn.dataset.srcKey === _curPreviewSourceKey) return;
       _curPreviewSourceKey = btn.dataset.srcKey!;
       _curPreviewData = null; // invalide le cache
+      _curSrtPreviewCues = null;
+      _curSrtPreviewHideTimecodes = false;
       // Quitter le mode édition si actif
       if (_curEditMode) exitEditMode(container);
       const panes = container.querySelector<HTMLElement>("#cur-preview-panes")!;
@@ -4394,7 +4463,6 @@ function renderCurSourceBar(bar: HTMLElement, sources: EpisodeSource[], containe
       const mode = (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
       renderCurSourceBar(bar, _curPreviewEpSources, container);
       await loadCurationPreview(panes, epId, epTitle, mode, container);
-      updateCurationModeTabsForSource(container, _curPreviewSourceKey);
     });
   });
 }
@@ -4447,14 +4515,6 @@ async function renderSrtCues(container: HTMLElement, epId: string, lang: string,
     return;
   }
 
-  const _ms = (ms: number) => {
-    const h = Math.floor(ms / 3600000);
-    const m = Math.floor((ms % 3600000) / 60000);
-    const s = Math.floor((ms % 60000) / 1000);
-    const f = ms % 1000;
-    return (h ? `${h}:` : "") + `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")},${String(f).padStart(3,"0")}`;
-  };
-
   for (const cue of data.cues) {
     const row = document.createElement("div");
     row.className = "cur-srt-cue-row";
@@ -4464,7 +4524,7 @@ async function renderSrtCues(container: HTMLElement, epId: string, lang: string,
     row.innerHTML = `
       <div class="cur-srt-cue-meta">
         <span class="cur-srt-cue-n">#${cue.n}</span>
-        <span class="cur-srt-cue-tc">${_ms(cue.start_ms)} → ${_ms(cue.end_ms)}</span>
+        <span class="cur-srt-cue-tc">${formatMsSrt(cue.start_ms)} → ${formatMsSrt(cue.end_ms)}</span>
         <button class="btn btn-ghost btn-sm cur-srt-cue-edit-btn" style="margin-left:auto;padding:1px 6px;font-size:0.7rem">✏</button>
       </div>
       <div class="cur-srt-cue-raw" style="color:var(--text-muted);font-size:0.72rem;padding:0 10px 2px">${showRaw}</div>
@@ -4526,14 +4586,97 @@ async function renderSrtCues(container: HTMLElement, epId: string, lang: string,
   }
 }
 
+/** Timecode affichage type SRT (HH:MM:SS,mmm) — panneau cues + aperçu curation. */
+function formatMsSrt(ms: number): string {
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  const s = Math.floor((ms % 60000) / 1000);
+  const f = ms % 1000;
+  return (h ? `${h}:` : "") + `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")},${String(f).padStart(3, "0")}`;
+}
+
+/**
+ * Texte d’aperçu SRT : avec timecodes, une ligne `début --> fin` puis le texte par cue ;
+ * sans timecodes, une ligne par cue (texte seul), comme pour le diff transcript.
+ */
+function joinCueTextsForPreview(
+  cues: SubtitleCue[],
+  field: "text_raw" | "text_clean",
+  includeTimecodes: boolean,
+): string {
+  return cues
+    .map((c) => {
+      const body =
+        field === "text_clean"
+          ? (c.text_clean || c.text_raw || "")
+          : (c.text_raw ?? c.text_clean ?? "");
+      if (!includeTimecodes) return body;
+      const tcLine = `${formatMsSrt(c.start_ms)} --> ${formatMsSrt(c.end_ms)}`;
+      return `${tcLine}\n${body}`;
+    })
+    .join("\n");
+}
+
+function buildSrtPreviewFromCues(cues: SubtitleCue[], hideTimecodes: boolean): { raw: string; clean: string } {
+  const includeTc = !hideTimecodes;
+  return {
+    raw: joinCueTextsForPreview(cues, "text_raw", includeTc),
+    clean: joinCueTextsForPreview(cues, "text_clean", includeTc),
+  };
+}
+
+function updateSrtTimecodeToggleButton(container: HTMLElement) {
+  const btn = container.querySelector<HTMLButtonElement>("#cur-srt-toggle-tc");
+  if (!btn) return;
+  const show = _curSrtCueParity && _curPreviewSourceKey.startsWith("srt_");
+  btn.style.display = show ? "" : "none";
+  if (!show) return;
+  btn.textContent = _curSrtPreviewHideTimecodes ? "Afficher les timecodes" : "Masquer les timecodes";
+  btn.setAttribute("aria-pressed", _curSrtPreviewHideTimecodes ? "true" : "false");
+  btn.title = _curSrtPreviewHideTimecodes
+    ? "Réafficher les lignes de timecodes dans l’aperçu"
+    : "Masquer les lignes de timecodes (texte des répliques seul)";
+}
+
+/** Recalcule l’aperçu à partir des cues en mémoire (bascule affichage des TC). */
+function refreshSrtPreviewAfterTimecodeToggle(container: HTMLElement) {
+  if (!_curSrtPreviewCues?.length) return;
+  _curPreviewData = buildSrtPreviewFromCues(_curSrtPreviewCues, _curSrtPreviewHideTimecodes);
+  const panes = container.querySelector<HTMLElement>("#cur-preview-panes");
+  if (!panes || !_curPreviewEpId) return;
+  const mode =
+    (container.querySelector<HTMLElement>(".cur-preview-tab.active") as HTMLElement | null)?.dataset.mode ?? "side";
+  if (mode === "srt") return;
+  const epTitle =
+    container.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
+  const displayData =
+    _clientPreviewClean !== null
+      ? { raw: _curPreviewData.raw, clean: _clientPreviewClean }
+      : _curPreviewData;
+  renderCurationPreviewMode(
+    panes,
+    displayData,
+    effectiveCurationPreviewMode(mode, _curPreviewSourceKey),
+    epTitle,
+    _curSearchRegex,
+    mergeSubtitleBreaksEnabled(container),
+  );
+}
+
+/** Mode d’affichage effectif : sans parité raw/clean SRT (fichier seul), seul « Brut seul » est pertinent. */
+function effectiveCurationPreviewMode(mode: string, sourceKey: string): string {
+  if (sourceKey === "transcript") return mode;
+  if (sourceKey.startsWith("srt_") && !_curSrtCueParity) return "raw";
+  return mode;
+}
+
 function updateCurationModeTabsForSource(container: HTMLElement, sourceKey: string) {
   const isTranscript = sourceKey === "transcript";
+  const showDiffSide = isTranscript || (sourceKey.startsWith("srt_") && _curSrtCueParity);
   container.querySelectorAll<HTMLButtonElement>(".cur-preview-tab").forEach((t) => {
     const mode = t.dataset.mode!;
-    // Diff et côte-à-côte n'ont de sens que pour transcript (raw+clean)
-    const hide = !isTranscript && (mode === "diff" || mode === "side");
+    const hide = !showDiffSide && (mode === "diff" || mode === "side");
     t.style.display = hide ? "none" : "";
-    // Si le mode actif est masqué, passer à "raw"
     if (hide && t.classList.contains("active")) {
       t.classList.remove("active");
       const rawTab = container.querySelector<HTMLButtonElement>('.cur-preview-tab[data-mode="raw"]');
@@ -4559,25 +4702,41 @@ async function loadCurationPreview(
       if (sourceKey === "transcript") {
         const t = src as TranscriptSourceContent;
         _curPreviewData = { raw: t.raw ?? "", clean: t.clean ?? t.raw ?? "" };
+        _curSrtCueParity = false;
+        _curSrtPreviewCues = null;
       } else {
-        // SRT : pas de raw/clean, on met le content dans les deux
         const s = src as SrtSourceContent;
-        _curPreviewData = { raw: s.content ?? "", clean: "" };
+        const lang = sourceKey.replace(/^srt_/, "");
+        let cues: SubtitleCue[] = [];
+        try {
+          cues = await fetchAllSubtitleCues(epId, lang);
+        } catch {
+          cues = [];
+        }
+        _curSrtCueParity = cues.length > 0;
+        if (_curSrtCueParity) {
+          _curSrtPreviewCues = cues;
+          _curPreviewData = buildSrtPreviewFromCues(cues, _curSrtPreviewHideTimecodes);
+        } else {
+          _curSrtPreviewCues = null;
+          _curPreviewData = { raw: s.content ?? "", clean: "" };
+        }
       }
-      // Réinitialiser l'aperçu client lors d'un rechargement depuis le serveur
       _clientPreviewClean = null;
     } catch (e) {
+      _curSrtCueParity = false;
+      _curSrtPreviewCues = null;
       panes.innerHTML = `<div class="acts-text-empty" style="width:100%">${escapeHtml(e instanceof ApiError ? `${e.errorCode} — ${e.message}` : String(e))}</div>`;
+      updateCurationModeTabsForSource(container, sourceKey);
+      updateSrtTimecodeToggleButton(container);
       return;
     }
   }
 
-  // Pour SRT, forcer mode "raw" (pas de diff/clean)
-  const effectiveMode = sourceKey !== "transcript" ? "raw" : mode;
-  // Si aperçu client actif, l'utiliser comme texte "clean"
   const displayData = _clientPreviewClean !== null
-    ? { raw: _curPreviewData.raw, clean: _clientPreviewClean }
-    : _curPreviewData;
+    ? { raw: _curPreviewData!.raw, clean: _clientPreviewClean }
+    : _curPreviewData!;
+  const effectiveMode = effectiveCurationPreviewMode(mode, sourceKey);
   renderCurationPreviewMode(
     panes,
     displayData,
@@ -4586,6 +4745,8 @@ async function loadCurationPreview(
     _curSearchRegex,
     mergeSubtitleBreaksEnabled(container),
   );
+  updateCurationModeTabsForSource(container, sourceKey);
+  updateSrtTimecodeToggleButton(container);
 }
 
 // ── Word-level diff (LCS sur tokens) ────────────────────────────────────────
@@ -9468,10 +9629,18 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
                   <button class="cur-preview-tab" data-mode="diff">Diff mot</button>
                   <button class="cur-preview-tab" data-mode="srt">SRT</button>
                   <span class="cur-preview-badge" id="cur-preview-badge"></span>
+                  <button type="button" class="btn btn-ghost btn-sm" id="cur-srt-toggle-tc" style="display:none;font-size:0.72rem;margin-left:4px" title="Masquer les lignes de timecodes dans l’aperçu SRT">Masquer les timecodes</button>
                   <button class="btn btn-ghost btn-sm" id="cur-edit-btn" style="margin-left:auto;font-size:0.72rem" title="Éditer le texte normalisé">✏ Éditer</button>
                 </div>
                 <div class="cur-edit-bar" id="cur-edit-bar" style="display:none">
                   <span class="cur-edit-status" id="cur-edit-status">Édition du texte normalisé</span>
+                  <span class="cur-edit-nl-count" id="cur-edit-nl-count"></span>
+                  <span class="cur-edit-linebreak-count" id="cur-edit-linebreak-count"></span>
+                  <button class="btn btn-ghost btn-sm" id="cur-nl-detect-btn" title="Détecter les occurrences littérales \n">⎵ \\n</button>
+                  <button class="btn btn-ghost btn-sm" id="cur-nl-space-btn" title="Remplacer tous les \n littéraux par un espace">\\n → espace</button>
+                  <button class="btn btn-ghost btn-sm" id="cur-nl-remove-btn" title="Supprimer tous les \n littéraux">\\n → ∅</button>
+                  <button class="btn btn-ghost btn-sm" id="cur-lb-space-btn" title="Remplacer tous les retours à la ligne réels par un espace">↵ → espace</button>
+                  <button class="btn btn-ghost btn-sm" id="cur-lb-remove-btn" title="Supprimer tous les retours à la ligne réels">↵ → ∅</button>
                   <button class="btn btn-primary btn-sm" id="cur-save-btn">💾 Sauvegarder</button>
                   <button class="btn btn-ghost btn-sm" id="cur-cancel-btn">✕ Annuler</button>
                 </div>
@@ -9866,7 +10035,95 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
 
     // Wire C-3: édition manuelle (edit / save / cancel)
     cnt.querySelector<HTMLButtonElement>("#cur-edit-btn")?.addEventListener("click", () => enterEditMode(cnt));
+    cnt.querySelector<HTMLButtonElement>("#cur-srt-toggle-tc")?.addEventListener("click", () => {
+      _curSrtPreviewHideTimecodes = !_curSrtPreviewHideTimecodes;
+      updateSrtTimecodeToggleButton(cnt);
+      refreshSrtPreviewAfterTimecodeToggle(cnt);
+    });
     cnt.querySelector<HTMLButtonElement>("#cur-cancel-btn")?.addEventListener("click", () => exitEditMode(cnt));
+    cnt.querySelector<HTMLButtonElement>("#cur-nl-detect-btn")?.addEventListener("click", () => {
+      const textarea = cnt.querySelector<HTMLTextAreaElement>("#cur-edit-textarea");
+      const status = cnt.querySelector<HTMLElement>("#cur-edit-status");
+      if (!textarea || !status) return;
+      const count = countLiteralNewlineTokens(textarea.value);
+      const lbCount = countRealLineBreaks(textarea.value);
+      setCurationLiteralNlCount(cnt, count);
+      setCurationRealLineBreakCount(cnt, lbCount);
+      status.style.color = count > 0 ? "var(--warning,#f59e0b)" : "var(--text-muted)";
+      status.textContent = count > 0
+        ? `⚠ ${count} occurrence${count > 1 ? "s" : ""} de \\n détectée${count > 1 ? "s" : ""}.`
+        : "Aucun \\n littéral détecté.";
+    });
+    cnt.querySelector<HTMLButtonElement>("#cur-nl-space-btn")?.addEventListener("click", () => {
+      const textarea = cnt.querySelector<HTMLTextAreaElement>("#cur-edit-textarea");
+      const status = cnt.querySelector<HTMLElement>("#cur-edit-status");
+      if (!textarea || !status) return;
+      const count = countLiteralNewlineTokens(textarea.value);
+      if (count <= 0) {
+        status.style.color = "var(--text-muted)";
+        status.textContent = "Aucun \\n à remplacer.";
+        return;
+      }
+      textarea.value = textarea.value.replace(/\\n/g, " ");
+      const remaining = countLiteralNewlineTokens(textarea.value);
+      setCurationLiteralNlCount(cnt, remaining);
+      setCurationRealLineBreakCount(cnt, countRealLineBreaks(textarea.value));
+      status.style.color = "var(--success,#16a34a)";
+      status.textContent = `✓ ${count} occurrence${count > 1 ? "s" : ""} remplacée${count > 1 ? "s" : ""} par des espaces.`;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    cnt.querySelector<HTMLButtonElement>("#cur-nl-remove-btn")?.addEventListener("click", () => {
+      const textarea = cnt.querySelector<HTMLTextAreaElement>("#cur-edit-textarea");
+      const status = cnt.querySelector<HTMLElement>("#cur-edit-status");
+      if (!textarea || !status) return;
+      const count = countLiteralNewlineTokens(textarea.value);
+      if (count <= 0) {
+        status.style.color = "var(--text-muted)";
+        status.textContent = "Aucun \\n à supprimer.";
+        return;
+      }
+      textarea.value = textarea.value.replace(/\\n/g, "");
+      const remaining = countLiteralNewlineTokens(textarea.value);
+      setCurationLiteralNlCount(cnt, remaining);
+      setCurationRealLineBreakCount(cnt, countRealLineBreaks(textarea.value));
+      status.style.color = "var(--success,#16a34a)";
+      status.textContent = `✓ ${count} occurrence${count > 1 ? "s" : ""} supprimée${count > 1 ? "s" : ""}.`;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    cnt.querySelector<HTMLButtonElement>("#cur-lb-space-btn")?.addEventListener("click", () => {
+      const textarea = cnt.querySelector<HTMLTextAreaElement>("#cur-edit-textarea");
+      const status = cnt.querySelector<HTMLElement>("#cur-edit-status");
+      if (!textarea || !status) return;
+      const count = countRealLineBreaks(textarea.value);
+      if (count <= 0) {
+        status.style.color = "var(--text-muted)";
+        status.textContent = "Aucun retour ligne à remplacer.";
+        return;
+      }
+      textarea.value = textarea.value.replace(/\r?\n/g, " ");
+      setCurationLiteralNlCount(cnt, countLiteralNewlineTokens(textarea.value));
+      setCurationRealLineBreakCount(cnt, countRealLineBreaks(textarea.value));
+      status.style.color = "var(--success,#16a34a)";
+      status.textContent = `✓ ${count} retour${count > 1 ? "s" : ""} ligne remplacé${count > 1 ? "s" : ""} par des espaces.`;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    cnt.querySelector<HTMLButtonElement>("#cur-lb-remove-btn")?.addEventListener("click", () => {
+      const textarea = cnt.querySelector<HTMLTextAreaElement>("#cur-edit-textarea");
+      const status = cnt.querySelector<HTMLElement>("#cur-edit-status");
+      if (!textarea || !status) return;
+      const count = countRealLineBreaks(textarea.value);
+      if (count <= 0) {
+        status.style.color = "var(--text-muted)";
+        status.textContent = "Aucun retour ligne à supprimer.";
+        return;
+      }
+      textarea.value = textarea.value.replace(/\r?\n/g, "");
+      setCurationLiteralNlCount(cnt, countLiteralNewlineTokens(textarea.value));
+      setCurationRealLineBreakCount(cnt, countRealLineBreaks(textarea.value));
+      status.style.color = "var(--success,#16a34a)";
+      status.textContent = `✓ ${count} retour${count > 1 ? "s" : ""} ligne supprimé${count > 1 ? "s" : ""}.`;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
     cnt.querySelector<HTMLButtonElement>("#cur-save-btn")?.addEventListener("click", async () => {
       const textarea = cnt.querySelector<HTMLTextAreaElement>("#cur-edit-textarea");
       if (!textarea || !_curPreviewEpId) return;
@@ -9921,7 +10178,14 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
           const mode = cnt.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
           const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
           const dd0 = _clientPreviewClean !== null ? { raw: _curPreviewData.raw, clean: _clientPreviewClean } : _curPreviewData;
-          renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, dd0, mode, epTitle, null, mergeSubtitleBreaksEnabled(cnt));
+          renderCurationPreviewMode(
+            cnt.querySelector<HTMLElement>("#cur-preview-panes")!,
+            dd0,
+            effectiveCurationPreviewMode(mode, _curPreviewSourceKey),
+            epTitle,
+            null,
+            mergeSubtitleBreaksEnabled(cnt),
+          );
         }
         return;
       }
@@ -9950,7 +10214,14 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
       }
       const mode = cnt.querySelector<HTMLElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
       const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
-      renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, displayData, mode, epTitle, _curSearchRegex, mergeSubtitleBreaksEnabled(cnt));
+      renderCurationPreviewMode(
+        cnt.querySelector<HTMLElement>("#cur-preview-panes")!,
+        displayData,
+        effectiveCurationPreviewMode(mode, _curPreviewSourceKey),
+        epTitle,
+        _curSearchRegex,
+        mergeSubtitleBreaksEnabled(cnt),
+      );
     });
 
     // ── Bouton Remplacer et sauvegarder ────────────────────────────────────────
@@ -9982,7 +10253,14 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
         _curSearchRegex = null; // effacer le surlignage recherche après remplacement
         const activeMode = cnt.querySelector<HTMLButtonElement>(".cur-preview-tab.active")?.dataset.mode ?? "side";
         const epTitle = cnt.querySelector<HTMLElement>(".cur-ep-item.active")?.dataset.epTitle ?? _curPreviewEpId;
-        renderCurationPreviewMode(cnt.querySelector<HTMLElement>("#cur-preview-panes")!, _curPreviewData, activeMode, epTitle, null, mergeSubtitleBreaksEnabled(cnt));
+        renderCurationPreviewMode(
+          cnt.querySelector<HTMLElement>("#cur-preview-panes")!,
+          _curPreviewData,
+          effectiveCurationPreviewMode(activeMode, _curPreviewSourceKey),
+          epTitle,
+          null,
+          mergeSubtitleBreaksEnabled(cnt),
+        );
         setTimeout(() => { countEl.textContent = ""; }, 4000);
       } catch (err) {
         countEl.style.color = "var(--danger,#dc2626)";
@@ -10023,7 +10301,7 @@ export function mountConstituer(container: HTMLElement, ctx: ShellContext) {
             renderCurationPreviewMode(
               previewEl,
               tabDisplayData,
-              mode,
+              effectiveCurationPreviewMode(mode, _curPreviewSourceKey),
               epTitle,
               _curSearchRegex,
               mergeSubtitleBreaksEnabled(cnt),
@@ -10374,6 +10652,9 @@ export function disposeConstituer() {
   _curPreviewEpId         = null;
   _curPreviewData         = null;
   _curPreviewSourceKey    = "transcript";
+  _curSrtCueParity        = false;
+  _curSrtPreviewCues      = null;
+  _curSrtPreviewHideTimecodes = false;
   _curPreviewEpSources    = [];
   _curEditMode            = false;
   _curSearchRegex         = null;
